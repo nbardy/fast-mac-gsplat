@@ -129,3 +129,31 @@ Latest local comparison:
 See `docs/chief_scientist_field_report.md` for field notes on the v2 fixes,
 backward bottleneck, and v3 status. See `docs/v3_saved_order_ablation.md` for
 the saved-order backward ablation.
+
+## Direct Torch Reference
+
+`benchmarks/compare_v2_v3.py --include-torch-reference` can also time a direct
+Torch reference renderer. This reference is intentionally simple: it loops over
+depth-sorted splats and uses Torch tensor ops over the image for each splat. It
+is useful as a correctness and small-scene speed baseline, but it is not a
+viable 4K / 65,536-splat renderer.
+
+The benchmark skips the Torch reference when `height * width * gaussians`
+exceeds `--torch-max-work-items`. A 4096x4096 / 65,536-splat scene is about
+`1.1e12` pixel-splat evaluations, so comparing that directly to Torch is not a
+meaningful use of the baseline.
+
+Local 128x128 / 512-splat comparison, `--warmup 1 --iters 3`:
+
+| Case | v2 forward | v3 forward | Torch forward |
+| --- | ---: | ---: | ---: |
+| sigma 1-5 px | `4.654 ms` | `7.443 ms` | `163.244 ms` |
+| sigma 3-8 px | `4.666 ms` | `6.114 ms` | `162.016 ms` |
+
+| Case | v2 forward+backward | v3 forward+backward | Torch forward+backward |
+| --- | ---: | ---: | ---: |
+| sigma 1-5 px | `7.972 ms` | `8.940 ms` | `828.056 ms` |
+| sigma 3-8 px | `10.850 ms` | `11.928 ms` | `866.864 ms` |
+
+At this tiny scale v2 beats v3 because v3 pays extra staging/reduction overhead.
+At 4K / 65,536 splats, v3 is the faster training path.

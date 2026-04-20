@@ -20,6 +20,9 @@ from torch_gsplat_bridge_v3 import rasterize_projected_gaussians as rasterize_v3
 from torch_gsplat_bridge_v3.rasterize import _make_meta as make_meta_v3
 
 
+DEFAULT_BG = (1.0, 1.0, 1.0)
+
+
 @dataclass(frozen=True)
 class Case:
     name: str
@@ -61,6 +64,44 @@ def clear_grads(tensors) -> None:
     for tensor in tensors:
         if tensor.grad is not None:
             tensor.grad.zero_()
+
+
+def dense_torch_reference(
+    means2d: torch.Tensor,
+    conics: torch.Tensor,
+    colors: torch.Tensor,
+    opacities: torch.Tensor,
+    depths: torch.Tensor,
+    cfg: RasterConfigV3,
+) -> torch.Tensor:
+    perm = torch.argsort(depths.detach(), dim=0, stable=True)
+    means = means2d.index_select(0, perm)
+    conics_s = conics.index_select(0, perm)
+    colors_s = colors.index_select(0, perm)
+    opacities_s = opacities.index_select(0, perm)
+    ys = torch.arange(cfg.height, dtype=means2d.dtype, device=means2d.device) + 0.5
+    xs = torch.arange(cfg.width, dtype=means2d.dtype, device=means2d.device) + 0.5
+    yy, xx = torch.meshgrid(ys, xs, indexing="ij")
+    out = torch.zeros((cfg.height, cfg.width, 3), dtype=means2d.dtype, device=means2d.device)
+    transmittance = torch.ones((cfg.height, cfg.width), dtype=means2d.dtype, device=means2d.device)
+    bg = torch.tensor(cfg.background, dtype=means2d.dtype, device=means2d.device)
+
+    for i in range(means.shape[0]):
+        dx = xx - means[i, 0]
+        dy = yy - means[i, 1]
+        q = conics_s[i]
+        power = -0.5 * (q[0] * dx * dx + 2.0 * q[1] * dx * dy + q[2] * dy * dy)
+        raw_alpha = opacities_s[i] * torch.exp(power)
+        alpha = torch.clamp(raw_alpha, max=0.99)
+        alpha = torch.where(
+            (power <= 0.0) & (alpha >= cfg.alpha_threshold),
+            alpha,
+            torch.zeros_like(alpha),
+        )
+        weight = transmittance * alpha
+        out = out + weight[..., None] * colors_s[i]
+        transmittance = transmittance * (1.0 - alpha)
+    return out + transmittance[..., None] * bg
 
 
 def time_renderer(name: str, fn, cfg, inputs, *, warmup: int, iters: int, backward: bool) -> dict[str, float | str]:
@@ -130,6 +171,13 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=11)
     parser.add_argument("--backward", action="store_true")
     parser.add_argument("--tile-stats", action="store_true", help="Print v3 tile occupancy stats for each case.")
+    parser.add_argument("--include-torch-reference", action="store_true", help="Also time a direct Torch reference renderer.")
+    parser.add_argument(
+        "--torch-max-work-items",
+        type=int,
+        default=64_000_000,
+        help="Skip direct Torch reference when height * width * gaussians exceeds this value.",
+    )
     args = parser.parse_args()
 
     if not torch.backends.mps.is_available():
@@ -139,8 +187,8 @@ def main() -> None:
         Case("sparse_sigma_1_5", 1.0, 5.0),
         Case("medium_sigma_3_8", 3.0, 8.0),
     ]
-    cfg_v2 = RasterConfigV2(height=args.height, width=args.width, background=(1.0, 1.0, 1.0))
-    cfg_v3 = RasterConfigV3(height=args.height, width=args.width, background=(1.0, 1.0, 1.0))
+    cfg_v2 = RasterConfigV2(height=args.height, width=args.width, background=DEFAULT_BG)
+    cfg_v3 = RasterConfigV3(height=args.height, width=args.width, background=DEFAULT_BG)
 
     print(
         f"height={args.height} width={args.width} gaussians={args.gaussians} "
@@ -155,6 +203,25 @@ def main() -> None:
             time_renderer("v2_fastpath", rasterize_v2, cfg_v2, inputs, warmup=args.warmup, iters=args.iters, backward=args.backward),
             time_renderer("v3_candidate", rasterize_v3, cfg_v3, inputs, warmup=args.warmup, iters=args.iters, backward=args.backward),
         ]
+        if args.include_torch_reference:
+            work_items = args.height * args.width * args.gaussians
+            if work_items <= args.torch_max_work_items:
+                rows.append(
+                    time_renderer(
+                        "torch_direct",
+                        dense_torch_reference,
+                        cfg_v3,
+                        inputs,
+                        warmup=args.warmup,
+                        iters=args.iters,
+                        backward=args.backward,
+                    )
+                )
+            else:
+                print(
+                    "torch_direct skipped "
+                    f"work_items={work_items} exceeds torch_max_work_items={args.torch_max_work_items}"
+                )
         base = float(rows[0]["mean_ms"])
         for row in rows:
             ratio = float(row["mean_ms"]) / base if base > 0 else float("nan")
