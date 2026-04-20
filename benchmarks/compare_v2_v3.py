@@ -17,6 +17,7 @@ from torch_gsplat_bridge_fast import RasterConfig as RasterConfigV2
 from torch_gsplat_bridge_fast import rasterize_projected_gaussians as rasterize_v2
 from torch_gsplat_bridge_v3 import RasterConfig as RasterConfigV3
 from torch_gsplat_bridge_v3 import rasterize_projected_gaussians as rasterize_v3
+from torch_gsplat_bridge_v3.rasterize import _make_meta as make_meta_v3
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,32 @@ def time_renderer(name: str, fn, cfg, inputs, *, warmup: int, iters: int, backwa
     }
 
 
+def print_v3_tile_stats(inputs, cfg: RasterConfigV3) -> None:
+    means, conics, colors, opacities, depths = inputs
+    meta_i32, meta_f32 = make_meta_v3(cfg, means.device)
+    meta_i32 = meta_i32.clone()
+    meta_i32[5] = means.shape[0]
+    perm = torch.argsort(depths.detach(), dim=0, stable=True)
+    means_s = means.index_select(0, perm).contiguous()
+    conics_s = conics.index_select(0, perm).contiguous()
+    colors_s = colors.index_select(0, perm).contiguous()
+    opacities_s = opacities.index_select(0, perm).contiguous()
+    tile_counts, _tile_offsets, binned_ids = torch.ops.gsplat_metal_v3.bin(
+        means_s, conics_s, colors_s, opacities_s, meta_i32, meta_f32
+    )
+    sync()
+    counts_f = tile_counts.float()
+    overflow_tiles = (tile_counts > cfg.max_fast_pairs).sum()
+    print(
+        "v3_tile_stats "
+        f"total_pairs={int(binned_ids.numel())} "
+        f"max_tile_count={int(tile_counts.max().item())} "
+        f"mean_tile_count={float(counts_f.mean().item()):.3f} "
+        f"nonzero_tiles={int((tile_counts > 0).sum().item())} "
+        f"overflow_tiles={int(overflow_tiles.item())}"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare validated v2 fastpath against v3 candidate.")
     parser.add_argument("--height", type=int, default=4096)
@@ -102,6 +129,7 @@ def main() -> None:
     parser.add_argument("--iters", type=int, default=5)
     parser.add_argument("--seed", type=int, default=11)
     parser.add_argument("--backward", action="store_true")
+    parser.add_argument("--tile-stats", action="store_true", help="Print v3 tile occupancy stats for each case.")
     args = parser.parse_args()
 
     if not torch.backends.mps.is_available():
@@ -119,12 +147,14 @@ def main() -> None:
         f"warmup={args.warmup} iters={args.iters} backward={args.backward}"
     )
     for case in cases:
+        print(f"\ncase={case.name} sigma=[{case.sigma_min}, {case.sigma_max}]")
         inputs = make_inputs(args.height, args.width, args.gaussians, case.sigma_min, case.sigma_max, args.seed)
+        if args.tile_stats:
+            print_v3_tile_stats(inputs, cfg_v3)
         rows = [
             time_renderer("v2_fastpath", rasterize_v2, cfg_v2, inputs, warmup=args.warmup, iters=args.iters, backward=args.backward),
             time_renderer("v3_candidate", rasterize_v3, cfg_v3, inputs, warmup=args.warmup, iters=args.iters, backward=args.backward),
         ]
-        print(f"\ncase={case.name} sigma=[{case.sigma_min}, {case.sigma_max}]")
         base = float(rows[0]["mean_ms"])
         for row in rows:
             ratio = float(row["mean_ms"]) / base if base > 0 else float("nan")

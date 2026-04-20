@@ -308,7 +308,7 @@ kernel void emit_binned_ids(
 kernel void tile_fast_forward(
     const device uint* tile_counts [[buffer(0)]],
     const device int* tile_offsets [[buffer(1)]],
-    const device uint* binned_ids [[buffer(2)]],
+    device uint* binned_ids [[buffer(2)]],
     const device float2* means2d [[buffer(3)]],
     const device float* conics [[buffer(4)]],
     const device float* colors [[buffer(5)]],
@@ -350,6 +350,9 @@ kernel void tile_fast_forward(
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
   bitonic_sort_ids(shared_ids, count, tid);
+  for (uint i = tid; i < count; i += GSP_THREADS) {
+    binned_ids[start + i] = shared_ids[i];
+  }
 
   float3 accum = float3(0.0f);
   float T = 1.0f;
@@ -424,7 +427,6 @@ kernel void tile_fast_backward(
     shared_ids[i] = binned_ids[start + i];
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
-  bitonic_sort_ids(shared_ids, count, tid);
 
   uint x, y;
   tile_pixel_from_tid(tg_id, tid, mi, x, y);

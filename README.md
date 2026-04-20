@@ -110,21 +110,22 @@ uv run python tests/reference_check.py
 Compare v2 and v3 from the repository root:
 
 ```bash
-uv run python benchmarks/compare_v2_v3.py --height 4096 --width 4096 --gaussians 65536 --warmup 1 --iters 3
-uv run python benchmarks/compare_v2_v3.py --height 4096 --width 4096 --gaussians 65536 --warmup 1 --iters 3 --backward
+uv run python benchmarks/compare_v2_v3.py --height 4096 --width 4096 --gaussians 65536 --warmup 2 --iters 5
+uv run python benchmarks/compare_v2_v3.py --height 4096 --width 4096 --gaussians 65536 --warmup 2 --iters 5 --backward
 ```
 
 Latest local comparison:
 
 | Case | v2 forward | v3 forward | v3 / v2 |
 | --- | ---: | ---: | ---: |
-| 4096x4096, 65,536 splats, sigma 1-5 px | `13.563 ms` | `8.805 ms` | `0.649x` |
-| 4096x4096, 65,536 splats, sigma 3-8 px | `19.964 ms` | `13.876 ms` | `0.695x` |
+| 4096x4096, 65,536 splats, sigma 1-5 px | `15.506 ms` | `12.410 ms` | `0.800x` |
+| 4096x4096, 65,536 splats, sigma 3-8 px | `24.935 ms` | `13.702 ms` | `0.550x` |
 
 | Case | v2 forward+backward | v3 forward+backward | v3 / v2 |
 | --- | ---: | ---: | ---: |
-| 4096x4096, 65,536 splats, sigma 1-5 px | `74.045 ms` | `57.253 ms` | `0.773x` |
-| 4096x4096, 65,536 splats, sigma 3-8 px | `137.559 ms` | `68.198 ms` | `0.496x` |
+| 4096x4096, 65,536 splats, sigma 1-5 px | `70.654 ms` | `47.872 ms` | `0.678x` |
+| 4096x4096, 65,536 splats, sigma 3-8 px | `134.162 ms` | `60.738 ms` | `0.453x` |
 
 See `docs/chief_scientist_field_report.md` for field notes on the v2 fixes,
-backward bottleneck, and v3 status.
+backward bottleneck, and v3 status. See `docs/v3_saved_order_ablation.md` for
+the saved-order backward ablation.

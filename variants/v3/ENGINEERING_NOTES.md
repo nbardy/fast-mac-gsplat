@@ -67,31 +67,38 @@ Small v2/v3 parity check at 128x128 / 512 splats produced max image diff `0.0`.
 Run from the repository root:
 
 ```bash
-uv run python benchmarks/compare_v2_v3.py --height 4096 --width 4096 --gaussians 65536 --warmup 1 --iters 3
-uv run python benchmarks/compare_v2_v3.py --height 4096 --width 4096 --gaussians 65536 --warmup 1 --iters 3 --backward
+uv run python benchmarks/compare_v2_v3.py --height 4096 --width 4096 --gaussians 65536 --warmup 2 --iters 5
+uv run python benchmarks/compare_v2_v3.py --height 4096 --width 4096 --gaussians 65536 --warmup 2 --iters 5 --backward
 ```
 
 Forward only:
 
 | Case | v2 fastpath | v3 candidate | v3 / v2 |
 | --- | ---: | ---: | ---: |
-| sparse sigma 1-5 px | `13.563 ms` | `8.805 ms` | `0.649x` |
-| medium sigma 3-8 px | `19.964 ms` | `13.876 ms` | `0.695x` |
+| sparse sigma 1-5 px | `15.506 ms` | `12.410 ms` | `0.800x` |
+| medium sigma 3-8 px | `24.935 ms` | `13.702 ms` | `0.550x` |
 
 Forward + backward:
 
 | Case | v2 fastpath | v3 candidate | v3 / v2 |
 | --- | ---: | ---: | ---: |
-| sparse sigma 1-5 px | `74.045 ms` | `57.253 ms` | `0.773x` |
-| medium sigma 3-8 px | `137.559 ms` | `68.198 ms` | `0.496x` |
+| sparse sigma 1-5 px | `70.654 ms` | `47.872 ms` | `0.678x` |
+| medium sigma 3-8 px | `134.162 ms` | `60.738 ms` | `0.453x` |
 
 These are projected-2D synthetic raster hot-path tests, not full scene-training
 benchmarks. They are still useful because both versions render the same inputs
 through the Torch wrapper and synchronize MPS at timing boundaries.
 
-## Immediate follow-up
+## Saved-order ablation
 
-v3 fast backward currently sorts tile-local IDs again. The validated v2 path
-already proved that writing the forward sorted order back into `binned_ids` lets
-backward skip that duplicate sort. Port that optimization into v3 before judging
-the remaining backward cost.
+Fast forward now writes the sorted tile-local ID order back into `binned_ids`.
+Fast backward reuses that order and skips its duplicate local bitonic sort.
+
+The ablation at `../../docs/v3_saved_order_ablation.md` measured:
+
+- no unconditional `grad_out` clone: small/noisy, `+0.8%` sparse and `-2.8%`
+  medium forward+backward
+- saved sorted IDs on top: `-9.5%` sparse and `-4.9%` medium
+  forward+backward versus clone-only
+- both changes together: `-8.7%` sparse and `-7.5%` medium
+  forward+backward versus the v3 baseline measured in the same session

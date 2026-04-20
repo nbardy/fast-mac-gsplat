@@ -262,8 +262,10 @@ class _RasterizeProjectedGaussiansV3(torch.autograd.Function):
             overflow_sorted_ids,
         ) = ctx.saved_tensors
 
-        grad_fast = grad_out.contiguous().clone()
+        grad_out_c = grad_out.contiguous()
+        grad_fast = grad_out_c
         if ctx.enable_overflow_fallback and overflow_tile_ids.numel() > 0:
+            grad_fast = grad_out_c.clone()
             _zero_tile_images_(grad_fast, overflow_tile_ids, ctx.tiles_x, ctx.tile_size)
 
         g_means2d_s, g_conics_s, g_colors_s, g_opacities_s = torch.ops.gsplat_metal_v3.render_fast_backward(
@@ -280,7 +282,7 @@ class _RasterizeProjectedGaussiansV3(torch.autograd.Function):
         )
 
         if ctx.enable_overflow_fallback and overflow_tile_ids.numel() > 0:
-            grad_tiles = _gather_tile_images(grad_out.contiguous(), overflow_tile_ids, ctx.tiles_x, ctx.tile_size)
+            grad_tiles = _gather_tile_images(grad_out_c, overflow_tile_ids, ctx.tiles_x, ctx.tile_size)
             go_means, go_conics, go_colors, go_opacities = torch.ops.gsplat_metal_v3.render_overflow_backward(
                 grad_tiles,
                 means2d_s,

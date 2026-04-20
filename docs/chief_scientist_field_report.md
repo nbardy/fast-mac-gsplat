@@ -152,20 +152,37 @@ Remaining caveats:
 - v3 is still a projected-2D rasterizer, not a full 3D camera projection stack
 - overflow fallback exists but was not stress-tested with deliberately
   pathological tile overflows
-- v3 fast backward still sorts tile IDs again; saving forward sorted order is a
-  clear next patch
 - all speed numbers above are synthetic raster hot-path numbers, not training
   throughput numbers
 
+## Postscript: saved-order patch
+
+We ported the v2 saved-sorted-order trick into v3 after the first field report:
+fast forward now writes the tile-local sorted ID order back into `binned_ids`,
+and fast backward skips its duplicate local bitonic sort.
+
+In the same 4096x4096 / 65,536-splat synthetic cases, with `--warmup 2 --iters
+5`, v3 forward+backward moved:
+
+| Case | v3 before | no grad clone only | no clone + saved IDs |
+| --- | ---: | ---: | ---: |
+| sigma 1-5 px | `52.460 ms` | `52.904 ms` | `47.872 ms` |
+| sigma 3-8 px | `65.687 ms` | `63.878 ms` | `60.738 ms` |
+
+The no-clone change is small/noisy. The saved-ID change is the real win:
+`-9.5%` sparse and `-4.9%` medium versus clone-only, or `-8.7%` sparse and
+`-7.5%` medium versus the v3 baseline from the same session.
+
+Correctness stayed intact: the v3 reference check still matches around `1e-9`
+to `1e-8`, and a small v2/v3 MPS image parity check stayed at max diff `0.0`.
+
 ## Recommended next kernel pass
 
-1. Port the v2 saved-sorted-order trick into v3 so fast backward skips its local
-   bitonic sort.
-2. Add counters to report max tile count, mean tile count, total tile pairs, and
+1. Add counters to report max tile count, mean tile count, total tile pairs, and
    overflow tile count per benchmark case.
-3. Stress-test overflow fallback with a dense center-cluster scene.
-4. Run 8x8 / 16x16 / 32x32 compiled variants only after the counters show that
+2. Stress-test overflow fallback with a dense center-cluster scene.
+3. Run 8x8 / 16x16 / 32x32 compiled variants only after the counters show that
    tile occupancy, not atomics, is the next dominant issue.
-5. Keep the low-memory recompute backward unless training memory says otherwise;
+4. Keep the low-memory recompute backward unless training memory says otherwise;
    saving dense per-pixel activations would likely trade the current bottleneck
    for an immediate memory wall.

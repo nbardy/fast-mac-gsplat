@@ -52,10 +52,11 @@ passes `tests/reference_check.py` on MPS. In the repository-level
 `benchmarks/compare_v2_v3.py` script, it beat the validated v2 fastpath on
 4096x4096 / 65,536 projected synthetic splats:
 
-- forward: `8.805 ms` vs `13.563 ms` on sparse sigma 1-5 px
-- forward: `13.876 ms` vs `19.964 ms` on medium sigma 3-8 px
-- forward+backward: `57.253 ms` vs `74.045 ms` on sparse sigma 1-5 px
-- forward+backward: `68.198 ms` vs `137.559 ms` on medium sigma 3-8 px
+- forward: `12.410 ms` vs `15.506 ms` on sparse sigma 1-5 px
+- forward: `13.702 ms` vs `24.935 ms` on medium sigma 3-8 px
+- forward+backward: `47.872 ms` vs `70.654 ms` on sparse sigma 1-5 px
+- forward+backward: `60.738 ms` vs `134.162 ms` on medium sigma 3-8 px
 
-The main remaining easy optimization is to save the fast forward tile-local
-sorted order so fast backward can skip its current local bitonic sort.
+The fast forward path now writes its tile-local sorted order back into
+`binned_ids`, so fast backward can skip its duplicate local bitonic sort. See
+`../../docs/v3_saved_order_ablation.md` for the measured ablation.
