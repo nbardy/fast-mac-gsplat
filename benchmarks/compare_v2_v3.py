@@ -5,19 +5,28 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import median
 
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 V3_ROOT = ROOT / "variants" / "v3"
+V5_ROOT = ROOT / "variants" / "v5"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 if str(V3_ROOT) not in sys.path:
     sys.path.insert(0, str(V3_ROOT))
+if str(V5_ROOT) not in sys.path:
+    sys.path.insert(0, str(V5_ROOT))
 
 from torch_gsplat_bridge_fast import RasterConfig as RasterConfigV2
 from torch_gsplat_bridge_fast import rasterize_projected_gaussians as rasterize_v2
 from torch_gsplat_bridge_v3 import RasterConfig as RasterConfigV3
 from torch_gsplat_bridge_v3 import rasterize_projected_gaussians as rasterize_v3
 from torch_gsplat_bridge_v3.rasterize import _make_meta as make_meta_v3
+from torch_gsplat_bridge_v5 import RasterConfig as RasterConfigV5
+from torch_gsplat_bridge_v5 import profile_projected_gaussians as profile_v5
+from torch_gsplat_bridge_v5 import rasterize_projected_gaussians as rasterize_v5
 
 
 DEFAULT_BG = (1.0, 1.0, 1.0)
@@ -130,6 +139,7 @@ def time_renderer(name: str, fn, cfg, inputs, *, warmup: int, iters: int, backwa
         "renderer": name,
         "mode": "forward_backward" if backward else "forward",
         "mean_ms": mean_ms,
+        "median_ms": float(median(elapsed)),
         "min_ms": min(elapsed),
         "max_ms": max(elapsed),
     }
@@ -161,8 +171,33 @@ def print_v3_tile_stats(inputs, cfg: RasterConfigV3) -> None:
     )
 
 
+def print_v5_tile_stats(inputs, cfg: RasterConfigV5) -> None:
+    means, conics, colors, opacities, depths = inputs
+    stats = profile_v5(
+        means,
+        conics,
+        colors,
+        opacities,
+        depths,
+        cfg,
+        run_forward=True,
+        return_image=False,
+    )
+    print(
+        "v5_tile_stats "
+        f"total_pairs={stats['total_pairs']} "
+        f"max_tile_count={stats['max_pairs_per_tile']} "
+        f"mean_tile_count={stats['mean_pairs_per_tile']:.3f} "
+        f"p95_tile_count={stats['p95_pairs_per_tile']:.3f} "
+        f"overflow_tiles={stats['overflow_tile_count']} "
+        f"mean_stop_count={stats.get('mean_stop_count', 0.0):.3f} "
+        f"p95_stop_ratio={stats.get('p95_stop_ratio', 0.0):.3f} "
+        f"batch_chunk={stats['chosen_batch_chunk']}"
+    )
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Compare validated v2 fastpath against v3 candidate.")
+    parser = argparse.ArgumentParser(description="Compare validated v2/v3 fastpaths against v5.")
     parser.add_argument("--height", type=int, default=4096)
     parser.add_argument("--width", type=int, default=4096)
     parser.add_argument("--gaussians", type=int, default=65536)
@@ -170,7 +205,7 @@ def main() -> None:
     parser.add_argument("--iters", type=int, default=5)
     parser.add_argument("--seed", type=int, default=11)
     parser.add_argument("--backward", action="store_true")
-    parser.add_argument("--tile-stats", action="store_true", help="Print v3 tile occupancy stats for each case.")
+    parser.add_argument("--tile-stats", action="store_true", help="Print v3/v5 tile occupancy stats for each case.")
     parser.add_argument("--include-torch-reference", action="store_true", help="Also time a direct Torch reference renderer.")
     parser.add_argument(
         "--torch-max-work-items",
@@ -189,6 +224,7 @@ def main() -> None:
     ]
     cfg_v2 = RasterConfigV2(height=args.height, width=args.width, background=DEFAULT_BG)
     cfg_v3 = RasterConfigV3(height=args.height, width=args.width, background=DEFAULT_BG)
+    cfg_v5 = RasterConfigV5(height=args.height, width=args.width, background=DEFAULT_BG)
 
     print(
         f"height={args.height} width={args.width} gaussians={args.gaussians} "
@@ -199,9 +235,11 @@ def main() -> None:
         inputs = make_inputs(args.height, args.width, args.gaussians, case.sigma_min, case.sigma_max, args.seed)
         if args.tile_stats:
             print_v3_tile_stats(inputs, cfg_v3)
+            print_v5_tile_stats(inputs, cfg_v5)
         rows = [
             time_renderer("v2_fastpath", rasterize_v2, cfg_v2, inputs, warmup=args.warmup, iters=args.iters, backward=args.backward),
             time_renderer("v3_candidate", rasterize_v3, cfg_v3, inputs, warmup=args.warmup, iters=args.iters, backward=args.backward),
+            time_renderer("v5_batched", rasterize_v5, cfg_v5, inputs, warmup=args.warmup, iters=args.iters, backward=args.backward),
         ]
         if args.include_torch_reference:
             work_items = args.height * args.width * args.gaussians
@@ -228,6 +266,7 @@ def main() -> None:
             print(
                 f"{row['renderer']:<14} {row['mode']:<16} "
                 f"mean_ms={float(row['mean_ms']):>9.3f} "
+                f"median_ms={float(row['median_ms']):>9.3f} "
                 f"min_ms={float(row['min_ms']):>9.3f} "
                 f"max_ms={float(row['max_ms']):>9.3f} "
                 f"vs_v2={ratio:>6.3f}x"

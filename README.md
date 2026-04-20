@@ -100,6 +100,12 @@ After sorted tile IDs were saved for backward, synchronized direct-op smoke test
 side with the validated v2 fastpath so we can benchmark and audit the algorithm
 changes without losing the known-good baseline.
 
+`variants/v5/` contains the batched Torch+Metal v5 handoff. It keeps the
+saved-sort backward idea and adds `[B,G,...]` inputs, eval-vs-train forward
+behavior, and `batch_strategy=auto|flatten|serial`. The current result is
+important but narrow: v5 is the right branch for batched training-loop
+integration, while v3 remains faster for measured B=1 forward+backward.
+
 v3 changes the tile kernel shape to 256 threads, stages Gaussian parameters in
 threadgroup memory, adds an overflow-tile fallback, and reduces backward global
 atomics with tile-local SIMD/threadgroup reductions.
@@ -112,7 +118,16 @@ uv run python setup.py build_ext --inplace
 uv run python tests/reference_check.py
 ```
 
-Compare v2 and v3 from the repository root:
+Build and validate v5 directly:
+
+```bash
+cd variants/v5
+uv run python setup.py build_ext --inplace
+uv run python tests/reference_check.py
+uv run python benchmarks/benchmark_mps.py --height 4096 --width 4096 --gaussians 65536 --batch-size 4 --case medium_sigma_3_8 --backward --profile
+```
+
+Compare v2, v3, and v5 from the repository root:
 
 ```bash
 uv run python benchmarks/compare_v2_v3.py --height 4096 --width 4096 --gaussians 65536 --warmup 2 --iters 5
@@ -133,7 +148,33 @@ Latest local comparison:
 
 See `docs/chief_scientist_field_report.md` for field notes on the v2 fixes,
 backward bottleneck, and v3 status. See `docs/v3_saved_order_ablation.md` for
-the saved-order backward ablation.
+the saved-order backward ablation. See `docs/v5_field_report.md` for the v5
+build validation, benchmark notes, and batch findings.
+
+Latest v5 local comparison, B=1, 4096x4096, 65,536 splats:
+
+| Case | v2 forward | v3 forward | v5 forward | Winner |
+| --- | ---: | ---: | ---: | --- |
+| sigma 1-5 px | `15.643 ms` | `13.675 ms` | `20.110 ms` | v3 |
+| sigma 3-8 px | `23.758 ms` | `13.350 ms` | `11.322 ms` | v5 |
+
+| Case | v2 forward+backward | v3 forward+backward | v5 forward+backward | Winner |
+| --- | ---: | ---: | ---: | --- |
+| sigma 1-5 px | `72.585 ms` | `48.684 ms` | `61.780 ms` | v3 |
+| sigma 3-8 px | `135.596 ms` | `60.360 ms` | `73.231 ms` | v3 |
+
+Native v5 batch probe, medium sigma 3-8:
+
+| Case | B=1 | B=4 | Per-frame result |
+| --- | ---: | ---: | --- |
+| 4096x4096 forward | `16.691 ms` | `32.576 ms` total | B=4 is `8.144 ms/frame`, about `2.05x` better per frame |
+| 4096x4096 forward+backward | `64.997 ms` | `274.373 ms` total | B=4 is noisy and not yet a backward speed win |
+| 1024x1024 forward | `13.461 ms` | `21.740 ms` total | B=4 is `5.435 ms/frame`, about `2.48x` better per frame |
+| 1024x1024 forward+backward | `28.111 ms` | `99.180 ms` total | B=4 is `24.795 ms/frame`, about `13%` better per frame |
+
+The v5 tile/chunk ablation still favors the 16x16 default. At 1024x1024 /
+65,536 splats / medium sigma / B=1 forward+backward, tile 16 measured
+`28.259 ms`, tile 8 measured `31.853 ms`, and tile 32 measured `52.407 ms`.
 
 ## Direct Torch vs Taichi vs fast-mac
 
@@ -145,13 +186,16 @@ The table below compares three Mac paths:
   [`taichi-gsplat-differentiable-render-mac`](https://github.com/nbardy/taichi-gsplat-differentiable-render-mac),
   useful when the surrounding renderer stack needs Taichi compatibility.
 - **fast-mac**: this repo's pure Metal/Torch path. v2 is lower overhead on tiny
-  scenes; v3 is the stronger large-scene/backward path.
+  scenes; v3 is the stronger large-scene/backward path; v5 is the native batch
+  branch.
 
 These are local Apple Silicon synthetic projected-2D Gaussian timings from the
 Dynaworld stack benchmark. `% faster` uses
 `(baseline_ms / renderer_ms - 1) * 100`. `Best fast-mac` means the faster of v2
-and v3 for that row. Taichi uses native batch for `B > 1`; v2/v3 are currently
-single-image APIs looped over the batch.
+and v3 for that row because this table predates v5. Taichi uses native batch
+for `B > 1`; v2/v3 are single-image APIs looped over the batch. Use v5 when the
+integration needs native `[B,G,...]` fast-mac inputs, especially for batched
+forward/eval paths.
 
 Small and bootstrap-scale comparisons:
 
@@ -183,7 +227,9 @@ Taichi did not beat the fastest fast-mac variant in these measurements. It did
 beat v3 alone in a few small batched cases, but v2 was faster in those same
 rows. The practical split is: use v2 for low-res bootstrap and smoke tests, use
 v3 for larger scenes and backward-heavy training, and use Taichi when Taichi
-compatibility matters more than maximum raster throughput.
+compatibility matters more than maximum raster throughput. Use v5 for native
+fast-mac batch integration and keep benchmarking it against v3 for B=1
+training.
 
 Direct Torch is skipped at large sizes because the direct reference performs
 work proportional to `height * width * gaussians`. Dense vectorization would
