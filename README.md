@@ -2,6 +2,11 @@
 
 Torch-first, Metal-backed Gaussian rasterizer fast path for Apple Silicon.
 
+This is the recommended high-performance Mac path when you do not need Taichi.
+It is a pure Metal/Torch extension built for speed. If you need a
+Taichi-compatible renderer instead, use
+[`taichi-gsplat-differentiable-render-mac`](https://github.com/nbardy/taichi-gsplat-differentiable-render-mac).
+
 ## Design goals
 
 - Keep the Python training loop in **PyTorch**.
