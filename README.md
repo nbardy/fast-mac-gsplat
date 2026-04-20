@@ -88,3 +88,43 @@ After sorted tile IDs were saved for backward, synchronized direct-op smoke test
 - 4096x4096 / 65,536 splats / sigma 1-5 px: forward `9.9 ms`, backward `31.4 ms`
 - 4096x4096 / 65,536 splats / sigma 3-8 px: forward `15.5 ms`, backward `93.4 ms`
 - 1024x1024 / 65,536 splats / sigma 1-5 px: forward `6.36 ms`, backward `30.0 ms`
+
+## Variants
+
+`variants/v3/` contains the newer Torch+Metal v3 handoff. It is kept side by
+side with the validated v2 fastpath so we can benchmark and audit the algorithm
+changes without losing the known-good baseline.
+
+v3 changes the tile kernel shape to 256 threads, stages Gaussian parameters in
+threadgroup memory, adds an overflow-tile fallback, and reduces backward global
+atomics with tile-local SIMD/threadgroup reductions.
+
+Build and validate v3 directly:
+
+```bash
+cd variants/v3
+uv run python setup.py build_ext --inplace
+uv run python tests/reference_check.py
+```
+
+Compare v2 and v3 from the repository root:
+
+```bash
+uv run python benchmarks/compare_v2_v3.py --height 4096 --width 4096 --gaussians 65536 --warmup 1 --iters 3
+uv run python benchmarks/compare_v2_v3.py --height 4096 --width 4096 --gaussians 65536 --warmup 1 --iters 3 --backward
+```
+
+Latest local comparison:
+
+| Case | v2 forward | v3 forward | v3 / v2 |
+| --- | ---: | ---: | ---: |
+| 4096x4096, 65,536 splats, sigma 1-5 px | `13.563 ms` | `8.805 ms` | `0.649x` |
+| 4096x4096, 65,536 splats, sigma 3-8 px | `19.964 ms` | `13.876 ms` | `0.695x` |
+
+| Case | v2 forward+backward | v3 forward+backward | v3 / v2 |
+| --- | ---: | ---: | ---: |
+| 4096x4096, 65,536 splats, sigma 1-5 px | `74.045 ms` | `57.253 ms` | `0.773x` |
+| 4096x4096, 65,536 splats, sigma 3-8 px | `137.559 ms` | `68.198 ms` | `0.496x` |
+
+See `docs/chief_scientist_field_report.md` for field notes on the v2 fixes,
+backward bottleneck, and v3 status.

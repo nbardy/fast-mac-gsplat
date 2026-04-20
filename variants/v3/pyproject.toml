@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools>=68", "wheel", "torch"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torch-metal-gsplat-v3"
+version = "0.1.0"
+description = "Torch-first Metal Gaussian splat rasterizer with fast and overflow tile paths"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.4"]
