@@ -135,6 +135,50 @@ See `docs/chief_scientist_field_report.md` for field notes on the v2 fixes,
 backward bottleneck, and v3 status. See `docs/v3_saved_order_ablation.md` for
 the saved-order backward ablation.
 
+## Direct Torch vs Taichi vs fast-mac
+
+The table below compares three Mac paths:
+
+- **Direct Torch baseline**: simple depth-sorted Torch tensor math. Useful for
+  correctness and tiny scenes, not a high-resolution renderer.
+- **Taichi Mac**:
+  [`taichi-gsplat-differentiable-render-mac`](https://github.com/nbardy/taichi-gsplat-differentiable-render-mac),
+  useful when the surrounding renderer stack needs Taichi compatibility.
+- **fast-mac v3**: this repo's recommended pure Metal/Torch fast path.
+
+These are local Apple Silicon synthetic projected-2D Gaussian timings. The
+1024x1024 rows use identical sparse sigma 1-5 px input for Taichi and fast-mac.
+The 4K rows use `benchmarks/compare_v2_v3.py --height 4096 --width 4096
+--gaussians 65536 --warmup 2 --iters 5`.
+
+Forward:
+
+| Case | Direct Torch baseline | Taichi Mac | fast-mac v3 | Notes |
+| --- | ---: | ---: | ---: | --- |
+| 128x128, 512 splats, sigma 1-5 px | `163.244 ms` | `9.812 ms` | `7.443 ms` | Torch baseline is feasible here. |
+| 1024x1024, 65,536 splats, sigma 1-5 px | skipped | `27.630 ms` | `7.519 ms` | About `6.9e10` Torch pixel-splat evals. |
+| 4096x4096, 65,536 splats, sigma 1-5 px | skipped | unsupported at 16x16 tiles | `12.410 ms` | About `1.1e12` Torch pixel-splat evals. |
+| 4096x4096, 65,536 splats, sigma 3-8 px | skipped | unsupported at 16x16 tiles | `13.702 ms` | Medium-radius stress case. |
+
+Forward + backward:
+
+| Case | Direct Torch baseline | Taichi Mac | fast-mac v3 | Notes |
+| --- | ---: | ---: | ---: | --- |
+| 128x128, 512 splats, sigma 1-5 px | `828.056 ms` | `18.400 ms` | `8.940 ms` | Torch baseline is feasible here. |
+| 1024x1024, 65,536 splats, sigma 1-5 px | skipped | `284.805 ms` | `17.704 ms` | fast-mac is about `16.1x` faster than Taichi here. |
+| 4096x4096, 65,536 splats, sigma 1-5 px | skipped | unsupported at 16x16 tiles | `47.872 ms` | Recommended training-scale path. |
+| 4096x4096, 65,536 splats, sigma 3-8 px | skipped | unsupported at 16x16 tiles | `60.738 ms` | Medium-radius stress case. |
+
+Direct Torch is skipped at large sizes because the direct reference performs
+work proportional to `height * width * gaussians`. Dense vectorization would
+materialize impractical activation volumes; the looped Torch reference avoids
+that allocation but is not a meaningful renderer at 1024x1024 or 4K.
+
+The Taichi 4K rows are marked unsupported for the current 16x16-tile path
+because 4096x4096 produces 65,536 tiles and the fork currently packs the tile ID
+into a 16-bit key range. Running 4K through Taichi would need a wider tile key
+or a different tile size, which is a separate benchmark regime.
+
 ## Direct Torch Reference
 
 `benchmarks/compare_v2_v3.py --include-torch-reference` can also time a direct
