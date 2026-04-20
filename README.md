@@ -121,15 +121,15 @@ uv run python benchmarks/compare_v2_v3.py --height 4096 --width 4096 --gaussians
 
 Latest local comparison:
 
-| Case | v2 forward | v3 forward | v3 / v2 |
-| --- | ---: | ---: | ---: |
-| 4096x4096, 65,536 splats, sigma 1-5 px | `15.506 ms` | `12.410 ms` | `0.800x` |
-| 4096x4096, 65,536 splats, sigma 3-8 px | `24.935 ms` | `13.702 ms` | `0.550x` |
+| Case | v2 forward | v3 forward | v3 / v2 | v3 faster than v2 |
+| --- | ---: | ---: | ---: | ---: |
+| 4096x4096, 65,536 splats, sigma 1-5 px | `15.506 ms` | `12.410 ms` | `0.800x` | `+25%` |
+| 4096x4096, 65,536 splats, sigma 3-8 px | `24.935 ms` | `13.702 ms` | `0.550x` | `+82%` |
 
-| Case | v2 forward+backward | v3 forward+backward | v3 / v2 |
-| --- | ---: | ---: | ---: |
-| 4096x4096, 65,536 splats, sigma 1-5 px | `70.654 ms` | `47.872 ms` | `0.678x` |
-| 4096x4096, 65,536 splats, sigma 3-8 px | `134.162 ms` | `60.738 ms` | `0.453x` |
+| Case | v2 forward+backward | v3 forward+backward | v3 / v2 | v3 faster than v2 |
+| --- | ---: | ---: | ---: | ---: |
+| 4096x4096, 65,536 splats, sigma 1-5 px | `70.654 ms` | `47.872 ms` | `0.678x` | `+48%` |
+| 4096x4096, 65,536 splats, sigma 3-8 px | `134.162 ms` | `60.738 ms` | `0.453x` | `+121%` |
 
 See `docs/chief_scientist_field_report.md` for field notes on the v2 fixes,
 backward bottleneck, and v3 status. See `docs/v3_saved_order_ablation.md` for
@@ -144,40 +144,51 @@ The table below compares three Mac paths:
 - **Taichi Mac**:
   [`taichi-gsplat-differentiable-render-mac`](https://github.com/nbardy/taichi-gsplat-differentiable-render-mac),
   useful when the surrounding renderer stack needs Taichi compatibility.
-- **fast-mac v3**: this repo's recommended pure Metal/Torch fast path.
+- **fast-mac**: this repo's pure Metal/Torch path. v2 is lower overhead on tiny
+  scenes; v3 is the stronger large-scene/backward path.
 
-These are local Apple Silicon synthetic projected-2D Gaussian timings. The
-1024x1024 rows use identical sparse sigma 1-5 px input for Taichi and fast-mac.
-The 4K rows use `benchmarks/compare_v2_v3.py --height 4096 --width 4096
---gaussians 65536 --warmup 2 --iters 5`.
+These are local Apple Silicon synthetic projected-2D Gaussian timings from the
+Dynaworld stack benchmark. `% faster` uses
+`(baseline_ms / renderer_ms - 1) * 100`. `Best fast-mac` means the faster of v2
+and v3 for that row. Taichi uses native batch for `B > 1`; v2/v3 are currently
+single-image APIs looped over the batch.
 
-Forward:
+Small and bootstrap-scale comparisons:
 
-| Case | Direct Torch baseline | Taichi Mac | fast-mac v3 | Notes |
-| --- | ---: | ---: | ---: | --- |
-| 128x128, 512 splats, sigma 1-5 px | `163.244 ms` | `9.812 ms` | `7.443 ms` | Torch baseline is feasible here. |
-| 1024x1024, 65,536 splats, sigma 1-5 px | skipped | `27.630 ms` | `7.519 ms` | About `6.9e10` Torch pixel-splat evals. |
-| 4096x4096, 65,536 splats, sigma 1-5 px | skipped | unsupported at 16x16 tiles | `12.410 ms` | About `1.1e12` Torch pixel-splat evals. |
-| 4096x4096, 65,536 splats, sigma 3-8 px | skipped | unsupported at 16x16 tiles | `13.702 ms` | Medium-radius stress case. |
+| Case | Direct Torch | Taichi | Best fast-mac | Taichi faster than Torch | Best faster than Torch | Best faster than Taichi |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 64x64, B=4, G=128, sigma 1-5, forward | `126.618 ms` | `14.759 ms` | `12.861 ms` (v2) | `+758%` | `+885%` | `+15%` |
+| 64x64, B=4, G=128, sigma 3-8, forward | `145.510 ms` | `17.993 ms` | `15.916 ms` (v2) | `+709%` | `+814%` | `+13%` |
+| 64x64, B=4, G=128, sigma 1-5, fwd+bwd | `685.026 ms` | `35.858 ms` | `21.535 ms` (v2) | `+1810%` | `+3081%` | `+67%` |
+| 64x64, B=4, G=128, sigma 3-8, fwd+bwd | `593.915 ms` | `36.881 ms` | `33.096 ms` (v2) | `+1510%` | `+1695%` | `+11%` |
+| 128x128, B=4, G=128, sigma 1-5, forward | `83.627 ms` | `11.961 ms` | `11.050 ms` (v2) | `+599%` | `+657%` | `+8%` |
+| 128x128, B=4, G=128, sigma 3-8, forward | `97.898 ms` | `16.517 ms` | `11.517 ms` (v2) | `+493%` | `+750%` | `+43%` |
+| 128x128, B=4, G=128, sigma 1-5, fwd+bwd | `702.222 ms` | `47.335 ms` | `24.254 ms` (v2) | `+1384%` | `+2795%` | `+95%` |
+| 128x128, B=4, G=128, sigma 3-8, fwd+bwd | `717.170 ms` | `66.641 ms` | `28.428 ms` (v2) | `+976%` | `+2423%` | `+134%` |
+| 128x128, B=1, G=512, sigma 1-5, forward | `107.720 ms` | `18.254 ms` | `4.007 ms` (v2) | `+490%` | `+2588%` | `+356%` |
+| 128x128, B=1, G=512, sigma 3-8, forward | `113.577 ms` | `14.365 ms` | `3.680 ms` (v2) | `+691%` | `+2986%` | `+290%` |
+| 128x128, B=1, G=512, sigma 1-5, fwd+bwd | `612.363 ms` | `44.268 ms` | `8.578 ms` (v3) | `+1283%` | `+7039%` | `+416%` |
+| 128x128, B=1, G=512, sigma 3-8, fwd+bwd | `636.652 ms` | `43.138 ms` | `6.236 ms` (v2) | `+1376%` | `+10109%` | `+592%` |
 
-Forward + backward:
+Large no-Torch stress comparison:
 
-| Case | Direct Torch baseline | Taichi Mac | fast-mac v3 | Notes |
-| --- | ---: | ---: | ---: | --- |
-| 128x128, 512 splats, sigma 1-5 px | `828.056 ms` | `18.400 ms` | `8.940 ms` | Torch baseline is feasible here. |
-| 1024x1024, 65,536 splats, sigma 1-5 px | skipped | `284.805 ms` | `17.704 ms` | fast-mac is about `16.1x` faster than Taichi here. |
-| 4096x4096, 65,536 splats, sigma 1-5 px | skipped | unsupported at 16x16 tiles | `47.872 ms` | Recommended training-scale path. |
-| 4096x4096, 65,536 splats, sigma 3-8 px | skipped | unsupported at 16x16 tiles | `60.738 ms` | Medium-radius stress case. |
+| Case | Taichi | v2 | v3 | Winner | Winner faster than Taichi |
+| --- | ---: | ---: | ---: | --- | ---: |
+| 1024x1024, B=1, G=65,536, sigma 1-5, forward | `54.323 ms` | `14.410 ms` | `9.717 ms` | v3 | `+459%` |
+| 1024x1024, B=1, G=65,536, sigma 3-8, forward | `63.798 ms` | `16.919 ms` | `18.117 ms` | v2 | `+277%` |
+| 1024x1024, B=1, G=65,536, sigma 1-5, fwd+bwd | `352.500 ms` | `41.148 ms` | `20.238 ms` | v3 | `+1642%` |
+| 1024x1024, B=1, G=65,536, sigma 3-8, fwd+bwd | `1081.152 ms` | `119.657 ms` | `39.510 ms` | v3 | `+2636%` |
+
+Taichi did not beat the fastest fast-mac variant in these measurements. It did
+beat v3 alone in a few small batched cases, but v2 was faster in those same
+rows. The practical split is: use v2 for low-res bootstrap and smoke tests, use
+v3 for larger scenes and backward-heavy training, and use Taichi when Taichi
+compatibility matters more than maximum raster throughput.
 
 Direct Torch is skipped at large sizes because the direct reference performs
 work proportional to `height * width * gaussians`. Dense vectorization would
 materialize impractical activation volumes; the looped Torch reference avoids
 that allocation but is not a meaningful renderer at 1024x1024 or 4K.
-
-The Taichi 4K rows are marked unsupported for the current 16x16-tile path
-because 4096x4096 produces 65,536 tiles and the fork currently packs the tile ID
-into a 16-bit key range. Running 4K through Taichi would need a wider tile key
-or a different tile size, which is a separate benchmark regime.
 
 ## Direct Torch Reference
 
