@@ -108,11 +108,33 @@ def check_case(B: int):
     print(f"B={B} opacities grad max error:", float((opacities_grad - opacities_r.grad.detach().cpu()).abs().max()))
 
 
+def check_eval_overflow_disabled_raises():
+    device = torch.device("mps")
+    G, H, W = 4, 16, 16
+    means2d = torch.full((G, 2), 8.0, device=device, dtype=torch.float32)
+    conics = torch.tensor([[0.05, 0.0, 0.05]], device=device, dtype=torch.float32).expand(G, 3).contiguous()
+    colors = torch.rand(G, 3, device=device, dtype=torch.float32)
+    opacities = torch.full((G,), 0.5, device=device, dtype=torch.float32)
+    depths = torch.arange(G, device=device, dtype=torch.float32)
+    cfg = RasterConfig(height=H, width=W, tile_size=16, max_fast_pairs=1, enable_overflow_fallback=False)
+
+    with torch.no_grad():
+        try:
+            rasterize_projected_gaussians(means2d, conics, colors, opacities, depths, cfg)
+        except RuntimeError as exc:
+            if "Tile overflow detected" not in str(exc):
+                raise
+        else:
+            raise AssertionError("expected eval path to raise when overflow fallback is disabled")
+    print("eval overflow disabled raises: ok")
+
+
 def main():
     if not torch.backends.mps.is_available():
         raise SystemExit("MPS is not available.")
     check_case(1)
     check_case(2)
+    check_eval_overflow_disabled_raises()
 
 
 if __name__ == "__main__":

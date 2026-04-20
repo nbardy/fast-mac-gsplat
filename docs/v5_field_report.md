@@ -72,6 +72,18 @@ Result:
 This validates both the scalar and batched API shape on small scenes against
 the CPU reference.
 
+Audit follow-up:
+
+- The eval path now raises if `enable_overflow_fallback=False` and any tile
+  exceeds `max_fast_pairs`. Before the audit patch, the training path raised
+  but the eval path could silently return the fast-cap background/partial path
+  for overflow tiles.
+- `tests/reference_check.py` now includes a regression check for that eval
+  overflow-disabled case.
+- The Python wrapper now checks that all five input tensors are same-device MPS
+  float32 tensors before sorting/gathering. This turns mixed CPU/MPS or dtype
+  mistakes into explicit API errors rather than implicit gather/backend errors.
+
 ## Benchmark Method Notes
 
 All numbers below are local Apple Silicon MPS timings with explicit
@@ -86,6 +98,15 @@ the same seed and case definitions:
 Mean and median are both recorded because the MPS stack occasionally produces
 large outliers even after warmup. Median is often the better "steady" number,
 but mean reflects real wall-clock noise.
+
+Benchmark audit caveat:
+
+On a later rerun, the machine had active competing work, including a Taichi
+training process and several high-CPU Python codec benchmarks. Those reruns
+still exercised the benchmark scripts and v5 path, but they are not fair
+headline numbers. The contaminated 4K/1024 reruns had max timings hundreds of
+milliseconds above the median, so they should be used only as evidence that
+the path runs under load and that benchmark hygiene matters.
 
 ## B=1 Comparison Against v2/v3
 

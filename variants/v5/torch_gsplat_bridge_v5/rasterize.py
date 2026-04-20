@@ -147,6 +147,21 @@ def _normalize_inputs(
 
 
 def _check_inputs(means2d: Tensor, conics: Tensor, colors: Tensor, opacities: Tensor, depths: Tensor) -> None:
+    tensors = {
+        "means2d": means2d,
+        "conics": conics,
+        "colors": colors,
+        "opacities": opacities,
+        "depths": depths,
+    }
+    devices = {tensor.device for tensor in tensors.values()}
+    if len(devices) != 1:
+        raise ValueError("means2d/conics/colors/opacities/depths must be on the same device")
+    if means2d.device.type != "mps":
+        raise ValueError("v5 Metal rasterizer inputs must be on MPS")
+    for name, tensor in tensors.items():
+        if tensor.dtype != torch.float32:
+            raise ValueError(f"{name} must be float32")
     if means2d.ndim not in (2, 3):
         raise ValueError("means2d must have shape [G,2] or [B,G,2]")
     if conics.ndim != means2d.ndim or colors.ndim != means2d.ndim:
@@ -492,6 +507,11 @@ def _rasterize_chunk_eval(
             out = out_fast.clone()
             _scatter_tile_images_(out, overflow_tile_ids, overflow_tile_imgs, int(meta_i32[10].item()), int(meta_i32[3].item()), int(meta_i32[4].item()))
             return out
+    elif bool((tile_counts > int(meta_i32[7].item())).any().item()):
+        raise RuntimeError(
+            f"Tile overflow detected with max_fast_pairs={int(meta_i32[7].item())}. "
+            "Enable overflow fallback or increase the runtime cap."
+        )
     return out_fast
 
 
