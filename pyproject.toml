@@ -1,0 +1,11 @@
+[project]
+name = "fast-mac-gsplat"
+version = "0.2.0"
+description = "Torch-first Metal Gaussian splat rasterizer for Apple Silicon"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["torch"]
+
+[build-system]
+requires = ["setuptools>=64", "wheel", "torch"]
+build-backend = "setuptools.build_meta"

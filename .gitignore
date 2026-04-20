@@ -1,0 +1,7 @@
+build/
+*.egg-info/
+*.so
+__pycache__/
+*.py[cod]
+.venv/
+uv.lock
