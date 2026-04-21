@@ -6,7 +6,7 @@ Torch-native projected 2D Gaussian rasterizer for Apple Silicon / MPS with a Met
 ## What changes in v6
 
 - **Batch-first renderer**: keeps native `[B,G,...] -> [B,H,W,3]` API.
-- **Active-tile scheduling**: compacts fast tiles across the batch and dispatches only active fast tiles.
+- **Optional active-tile scheduling**: compacts fast tiles across the batch and dispatches only active fast tiles.
 - **Count-sorted active tiles**: active fast tiles are optionally sorted by tile occupancy before render/backward.
 - **No unconditional grad clone**: backward consumes the original contiguous grad image.
 - **Adaptive stop counts**: training can save per-tile stop counts `always`, `never`, or `adaptive` (dense tiles only).
@@ -29,13 +29,14 @@ python tests/reference_check.py
 ```bash
 python benchmarks/benchmark_mps.py --height 4096 --width 4096 --gaussians 65536 --case medium_sigma_3_8 --backward --profile
 python benchmarks/benchmark_mps.py --height 4096 --width 4096 --gaussians 65536 --batch-size 4 --case medium_sigma_3_8 --backward --profile
-python benchmarks/benchmark_mps.py --height 4096 --width 4096 --gaussians 65536 --batch-size 4 --case medium_sigma_3_8 --backward --profile --no-active-tiles --no-sort-active-tiles
+python benchmarks/benchmark_mps.py --height 4096 --width 4096 --gaussians 65536 --batch-size 4 --case medium_sigma_3_8 --backward --profile --active-tiles
 python benchmarks/benchmark_matrix.py --height 4096 --width 4096 --gaussians 65536 --batch-sizes 1,2,4,8 --warmup 1 --iters 3 --backward --shuffle-order
 ```
 
 See `../../docs/v6_field_report.md` for the first Mac build, correctness, and
-benchmark report. In the current uniform synthetic workloads, v6 is correct but
-does not beat v5 overall because its forward path is substantially slower.
+benchmark report. In the current uniform synthetic workloads, v6 is fastest with
+active-tile scheduling disabled; enable active tiles for sparse-screen or
+overflow-heavy experiments where compaction may pay for itself.
 
 ## Notes
 

@@ -84,7 +84,7 @@ def main():
     p.add_argument("--batch-strategy", type=str, default="auto")
     p.add_argument("--stop-count-mode", type=str, default="adaptive")
     p.add_argument("--dense-threshold", type=int, default=64)
-    p.add_argument("--active-tiles", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--active-tiles", action=argparse.BooleanOptionalAction, default=False)
     p.add_argument("--sort-active-tiles", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--json", action="store_true")
     args = p.parse_args()

@@ -50,7 +50,7 @@ def dense_reference(means2d, conics, colors, opacities, depths, H, W, bg=(0.0, 0
     return out[0] if squeeze else out
 
 
-def check_case(B: int):
+def check_case(B: int, *, use_active_tiles: bool):
     device = torch.device("mps")
     torch.manual_seed(0)
     G, H, W = 4, 16, 16
@@ -82,7 +82,14 @@ def check_case(B: int):
         dtype=torch.float32,
     )[:B].clone()
 
-    cfg = RasterConfig(height=H, width=W, tile_size=16, max_fast_pairs=128, stop_count_mode="adaptive")
+    cfg = RasterConfig(
+        height=H,
+        width=W,
+        tile_size=16,
+        max_fast_pairs=128,
+        stop_count_mode="adaptive",
+        use_active_tiles=use_active_tiles,
+    )
     out = rasterize_projected_gaussians(means2d if B > 1 else means2d[0], conics if B > 1 else conics[0], colors if B > 1 else colors[0], opacities if B > 1 else opacities[0], depths if B > 1 else depths[0], cfg)
     loss = out.square().mean()
     loss.backward()
@@ -101,18 +108,20 @@ def check_case(B: int):
     colors_grad = colors.grad.detach().cpu() if B > 1 else colors.grad[0].detach().cpu()
     opacities_grad = opacities.grad.detach().cpu() if B > 1 else opacities.grad[0].detach().cpu()
 
-    print(f"B={B} image max error:", float((out.detach().cpu() - out_r.detach()).abs().max()))
-    print(f"B={B} means grad max error:", float((means_grad - means_r.grad.detach().cpu()).abs().max()))
-    print(f"B={B} conics grad max error:", float((conics_grad - conics_r.grad.detach().cpu()).abs().max()))
-    print(f"B={B} colors grad max error:", float((colors_grad - colors_r.grad.detach().cpu()).abs().max()))
-    print(f"B={B} opacities grad max error:", float((opacities_grad - opacities_r.grad.detach().cpu()).abs().max()))
+    mode = "active" if use_active_tiles else "direct"
+    print(f"B={B} {mode} image max error:", float((out.detach().cpu() - out_r.detach()).abs().max()))
+    print(f"B={B} {mode} means grad max error:", float((means_grad - means_r.grad.detach().cpu()).abs().max()))
+    print(f"B={B} {mode} conics grad max error:", float((conics_grad - conics_r.grad.detach().cpu()).abs().max()))
+    print(f"B={B} {mode} colors grad max error:", float((colors_grad - colors_r.grad.detach().cpu()).abs().max()))
+    print(f"B={B} {mode} opacities grad max error:", float((opacities_grad - opacities_r.grad.detach().cpu()).abs().max()))
 
 
 def main():
     if not torch.backends.mps.is_available():
         raise SystemExit("MPS is not available.")
-    check_case(1)
-    check_case(2)
+    for use_active_tiles in (False, True):
+        check_case(1, use_active_tiles=use_active_tiles)
+        check_case(2, use_active_tiles=use_active_tiles)
 
 
 if __name__ == "__main__":

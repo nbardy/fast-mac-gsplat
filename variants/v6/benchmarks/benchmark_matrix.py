@@ -23,7 +23,7 @@ def main():
     p.add_argument("--caps", type=str, default="2048")
     p.add_argument("--stop-count-modes", type=str, default="adaptive,never,always")
     p.add_argument("--dense-thresholds", type=str, default="32,64,128")
-    p.add_argument("--active-tile-modes", type=str, default="on")
+    p.add_argument("--active-tile-modes", type=str, default="off,on")
     p.add_argument("--sort-active-tile-modes", type=str, default="on")
     p.add_argument("--seeds", type=str, default="0,1,2")
     p.add_argument("--cases", type=str, default="sparse_sigma_1_5,medium_sigma_3_8,overflow_stress")

@@ -69,6 +69,41 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> metal_bin(
     const torch::Tensor& meta_i32,
     const torch::Tensor& meta_f32);
 
+torch::Tensor metal_render_fast_forward_eval(
+    const torch::Tensor& means2d,
+    const torch::Tensor& conics,
+    const torch::Tensor& colors,
+    const torch::Tensor& opacities,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_offsets,
+    const torch::Tensor& binned_ids);
+
+std::tuple<torch::Tensor, torch::Tensor> metal_render_fast_forward_state(
+    const torch::Tensor& means2d,
+    const torch::Tensor& conics,
+    const torch::Tensor& colors,
+    const torch::Tensor& opacities,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    torch::Tensor& binned_ids,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_offsets);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_render_fast_backward_saved(
+    const torch::Tensor& grad_out,
+    const torch::Tensor& means2d,
+    const torch::Tensor& conics,
+    const torch::Tensor& colors,
+    const torch::Tensor& opacities,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_offsets,
+    const torch::Tensor& binned_ids,
+    const torch::Tensor& tile_stop_counts);
+
 torch::Tensor metal_render_active_forward_eval(
     const torch::Tensor& means2d,
     const torch::Tensor& conics,

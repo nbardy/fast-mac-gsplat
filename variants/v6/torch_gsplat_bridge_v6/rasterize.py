@@ -66,7 +66,7 @@ class RasterConfig:
     batch_strategy: str = "auto"  # auto | flatten | serial
     batch_launch_limit_tiles: int = 262144
     batch_launch_limit_gaussians: int = 262144
-    use_active_tiles: bool = True
+    use_active_tiles: bool = False
     sort_active_tiles_by_count: bool = True
     stop_count_mode: str = "adaptive"  # always | never | adaptive
     stop_count_dense_threshold: int = 64
@@ -356,20 +356,37 @@ class _RasterizeProjectedGaussiansV6(torch.autograd.Function):
             means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32
         )
 
-        active_tile_ids = _make_active_tile_ids(tile_counts, int(meta_i32[7].item()), sort_by_count=bool(sort_active_tiles_by_count)) if use_active_tiles else torch.arange(int(meta_i32[6].item()), device=means2d_b.device, dtype=torch.int32)
-
-        out_fast, tile_stop_counts = torch.ops.gsplat_metal_v6.render_active_forward_state(
-            means_flat,
-            conics_flat,
-            colors_flat,
-            opacities_flat,
-            meta_i32,
-            meta_f32,
-            binned_ids,
-            active_tile_ids,
-            tile_counts,
-            tile_offsets,
-        )
+        if use_active_tiles:
+            active_tile_ids = _make_active_tile_ids(
+                tile_counts,
+                int(meta_i32[7].item()),
+                sort_by_count=bool(sort_active_tiles_by_count),
+            )
+            out_fast, tile_stop_counts = torch.ops.gsplat_metal_v6.render_active_forward_state(
+                means_flat,
+                conics_flat,
+                colors_flat,
+                opacities_flat,
+                meta_i32,
+                meta_f32,
+                binned_ids,
+                active_tile_ids,
+                tile_counts,
+                tile_offsets,
+            )
+        else:
+            active_tile_ids = torch.empty((0,), device=means2d_b.device, dtype=torch.int32)
+            out_fast, tile_stop_counts = torch.ops.gsplat_metal_v6.render_fast_forward_state(
+                means_flat,
+                conics_flat,
+                colors_flat,
+                opacities_flat,
+                meta_i32,
+                meta_f32,
+                binned_ids,
+                tile_counts,
+                tile_offsets,
+            )
 
         tile_size = int(meta_i32[4].item())
         tiles_x = int(meta_i32[3].item())
@@ -432,6 +449,7 @@ class _RasterizeProjectedGaussiansV6(torch.autograd.Function):
         ctx.tiles_x = tiles_x
         ctx.tile_size = tile_size
         ctx.enable_overflow_fallback = enable_overflow_fallback
+        ctx.use_active_tiles = bool(use_active_tiles)
         return out
 
     @staticmethod
@@ -456,20 +474,35 @@ class _RasterizeProjectedGaussiansV6(torch.autograd.Function):
         ) = ctx.saved_tensors
 
         grad_fast = grad_out.contiguous()
-        g_means_flat, g_conics_flat, g_colors_flat, g_opacities_flat = torch.ops.gsplat_metal_v6.render_active_backward_saved(
-            grad_fast,
-            means_flat,
-            conics_flat,
-            colors_flat,
-            opacities_flat,
-            meta_i32,
-            meta_f32,
-            active_tile_ids,
-            tile_counts,
-            tile_offsets,
-            binned_ids,
-            tile_stop_counts,
-        )
+        if ctx.use_active_tiles:
+            g_means_flat, g_conics_flat, g_colors_flat, g_opacities_flat = torch.ops.gsplat_metal_v6.render_active_backward_saved(
+                grad_fast,
+                means_flat,
+                conics_flat,
+                colors_flat,
+                opacities_flat,
+                meta_i32,
+                meta_f32,
+                active_tile_ids,
+                tile_counts,
+                tile_offsets,
+                binned_ids,
+                tile_stop_counts,
+            )
+        else:
+            g_means_flat, g_conics_flat, g_colors_flat, g_opacities_flat = torch.ops.gsplat_metal_v6.render_fast_backward_saved(
+                grad_fast,
+                means_flat,
+                conics_flat,
+                colors_flat,
+                opacities_flat,
+                meta_i32,
+                meta_f32,
+                tile_counts,
+                tile_offsets,
+                binned_ids,
+                tile_stop_counts,
+            )
 
         if ctx.enable_overflow_fallback and overflow_tile_ids.numel() > 0:
             grad_tiles = _gather_tile_images(grad_out.contiguous(), overflow_tile_ids, ctx.tiles_per_image, ctx.tiles_x, ctx.tile_size)
@@ -525,11 +558,19 @@ def _rasterize_chunk_eval(
         means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32
     )
 
-    active_tile_ids = _make_active_tile_ids(tile_counts, int(meta_i32[7].item()), sort_by_count=bool(config.sort_active_tiles_by_count)) if config.use_active_tiles else torch.arange(int(meta_i32[6].item()), device=means2d_b.device, dtype=torch.int32)
-
-    out_fast = torch.ops.gsplat_metal_v6.render_active_forward_eval(
-        means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32, active_tile_ids, tile_counts, tile_offsets, binned_ids
-    )
+    if config.use_active_tiles:
+        active_tile_ids = _make_active_tile_ids(
+            tile_counts,
+            int(meta_i32[7].item()),
+            sort_by_count=bool(config.sort_active_tiles_by_count),
+        )
+        out_fast = torch.ops.gsplat_metal_v6.render_active_forward_eval(
+            means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32, active_tile_ids, tile_counts, tile_offsets, binned_ids
+        )
+    else:
+        out_fast = torch.ops.gsplat_metal_v6.render_fast_forward_eval(
+            means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32, tile_counts, tile_offsets, binned_ids
+        )
 
     if config.enable_overflow_fallback:
         overflow_tile_ids, overflow_tile_offsets, overflow_sorted_ids = _gather_overflow_segments(
@@ -679,9 +720,14 @@ def profile_projected_gaussians(
             if return_image:
                 chunk_img = _rasterize_chunk_eval(m, q, c, o, d, config)
                 images.append(chunk_img)
-            _, stop_counts = torch.ops.gsplat_metal_v6.render_active_forward_state(
-                m_s, q_s, c_s, o_s, meta_i32, meta_f32, binned_ids, active_tile_ids, tile_counts, tile_offsets
-            )
+            if config.use_active_tiles:
+                _, stop_counts = torch.ops.gsplat_metal_v6.render_active_forward_state(
+                    m_s, q_s, c_s, o_s, meta_i32, meta_f32, binned_ids, active_tile_ids, tile_counts, tile_offsets
+                )
+            else:
+                _, stop_counts = torch.ops.gsplat_metal_v6.render_fast_forward_state(
+                    m_s, q_s, c_s, o_s, meta_i32, meta_f32, binned_ids, tile_counts, tile_offsets
+                )
             all_stop_counts.append(stop_counts.detach().cpu().to(torch.float32))
 
     counts_cpu = torch.cat(all_tile_counts, dim=0) if all_tile_counts else torch.zeros(0, dtype=torch.float32)
