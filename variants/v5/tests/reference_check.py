@@ -50,6 +50,67 @@ def dense_reference(means2d, conics, colors, opacities, depths, H, W, bg=(0.0, 0
     return out[0] if squeeze else out
 
 
+def saturating_reference(
+    means2d,
+    conics,
+    colors,
+    opacities,
+    depths,
+    H,
+    W,
+    bg=(1.0, 1.0, 1.0),
+    alpha_threshold=1.0 / 255.0,
+    transmittance_threshold=1.0e-4,
+):
+    if means2d.ndim == 2:
+        means2d = means2d.unsqueeze(0)
+        conics = conics.unsqueeze(0)
+        colors = colors.unsqueeze(0)
+        opacities = opacities.unsqueeze(0)
+        depths = depths.unsqueeze(0)
+        squeeze = True
+    else:
+        squeeze = False
+
+    outs = []
+    bg_t = torch.tensor(bg, dtype=means2d.dtype, device=means2d.device)
+    ys = torch.arange(H, dtype=means2d.dtype, device=means2d.device) + 0.5
+    xs = torch.arange(W, dtype=means2d.dtype, device=means2d.device) + 0.5
+    yy, xx = torch.meshgrid(ys, xs, indexing="ij")
+    for b in range(means2d.shape[0]):
+        perm = torch.argsort(depths[b].detach(), stable=True)
+        m = means2d[b][perm]
+        q = conics[b][perm]
+        c = colors[b][perm]
+        o = opacities[b][perm]
+        out = torch.zeros(H, W, 3, dtype=means2d.dtype, device=means2d.device)
+        T = torch.ones(H, W, dtype=means2d.dtype, device=means2d.device)
+        for i in range(m.shape[0]):
+            active = T > transmittance_threshold
+            dx = xx - m[i, 0]
+            dy = yy - m[i, 1]
+            power = -0.5 * (q[i, 0] * dx * dx + 2 * q[i, 1] * dx * dy + q[i, 2] * dy * dy)
+            alpha = torch.clamp(o[i] * torch.exp(power), max=0.99)
+            alpha = torch.where(
+                (power <= 0) & (alpha >= alpha_threshold) & active,
+                alpha,
+                torch.zeros_like(alpha),
+            )
+            w = T * alpha
+            out = out + w[..., None] * c[i]
+            T = T * (1.0 - alpha)
+        outs.append(out + T[..., None] * bg_t)
+    out = torch.stack(outs, dim=0)
+    return out[0] if squeeze else out
+
+
+def assert_close(name: str, got: torch.Tensor, ref: torch.Tensor, threshold: float) -> None:
+    err = float((got - ref).detach().abs().max())
+    print(f"{name} max error:", err)
+    if err > threshold:
+        raise AssertionError(f"{name} max error {err} exceeded {threshold}")
+
+
 def check_case(B: int):
     device = torch.device("mps")
     torch.manual_seed(0)
@@ -101,11 +162,56 @@ def check_case(B: int):
     colors_grad = colors.grad.detach().cpu() if B > 1 else colors.grad[0].detach().cpu()
     opacities_grad = opacities.grad.detach().cpu() if B > 1 else opacities.grad[0].detach().cpu()
 
-    print(f"B={B} image max error:", float((out.detach().cpu() - out_r.detach()).abs().max()))
-    print(f"B={B} means grad max error:", float((means_grad - means_r.grad.detach().cpu()).abs().max()))
-    print(f"B={B} conics grad max error:", float((conics_grad - conics_r.grad.detach().cpu()).abs().max()))
-    print(f"B={B} colors grad max error:", float((colors_grad - colors_r.grad.detach().cpu()).abs().max()))
-    print(f"B={B} opacities grad max error:", float((opacities_grad - opacities_r.grad.detach().cpu()).abs().max()))
+    assert_close(f"B={B} image", out.detach().cpu(), ref.detach(), 1.0e-5)
+    assert_close(f"B={B} means grad", means_grad, means_r.grad.detach().cpu(), 1.0e-5)
+    assert_close(f"B={B} conics grad", conics_grad, conics_r.grad.detach().cpu(), 1.0e-5)
+    assert_close(f"B={B} colors grad", colors_grad, colors_r.grad.detach().cpu(), 1.0e-5)
+    assert_close(f"B={B} opacities grad", opacities_grad, opacities_r.grad.detach().cpu(), 1.0e-5)
+
+
+def check_saturated_many_splats():
+    device = torch.device("mps")
+    torch.manual_seed(123)
+    B, G, H, W = 1, 64, 32, 32
+    means2d = torch.randn(B, G, 2, device=device, dtype=torch.float32)
+    means2d = means2d * torch.tensor([W * 0.2, H * 0.2], device=device) + torch.tensor([W * 0.5, H * 0.5], device=device)
+    means2d[..., 0].clamp_(0, W - 1)
+    means2d[..., 1].clamp_(0, H - 1)
+    sigmas = torch.rand(B, G, 2, device=device, dtype=torch.float32) * 8.0 + 3.0
+    conics = torch.stack(
+        [
+            1.0 / sigmas[..., 0].square(),
+            torch.zeros(B, G, device=device, dtype=torch.float32),
+            1.0 / sigmas[..., 1].square(),
+        ],
+        dim=-1,
+    ).contiguous()
+    colors = torch.rand(B, G, 3, device=device, dtype=torch.float32)
+    opacities = torch.rand(B, G, device=device, dtype=torch.float32) * 0.45 + 0.45
+    depths = (torch.arange(G, device=device, dtype=torch.float32) / float(G - 1)).view(1, G)
+
+    means2d.requires_grad_(True)
+    conics.requires_grad_(True)
+    colors.requires_grad_(True)
+    opacities.requires_grad_(True)
+
+    cfg = RasterConfig(height=H, width=W, tile_size=16, max_fast_pairs=2048, background=(1.0, 1.0, 1.0))
+    out = rasterize_projected_gaussians(means2d, conics, colors, opacities, depths, cfg)
+    out.square().mean().backward()
+
+    means_r = means2d.detach().cpu().requires_grad_(True)
+    conics_r = conics.detach().cpu().requires_grad_(True)
+    colors_r = colors.detach().cpu().requires_grad_(True)
+    opacities_r = opacities.detach().cpu().requires_grad_(True)
+    depths_r = depths.detach().cpu()
+    ref = saturating_reference(means_r, conics_r, colors_r, opacities_r, depths_r, H, W)
+    ref.square().mean().backward()
+
+    assert_close("saturated image", out.detach().cpu(), ref.detach(), 1.0e-5)
+    assert_close("saturated means grad", means2d.grad.detach().cpu(), means_r.grad, 1.0e-5)
+    assert_close("saturated conics grad", conics.grad.detach().cpu(), conics_r.grad, 1.0e-5)
+    assert_close("saturated colors grad", colors.grad.detach().cpu(), colors_r.grad, 1.0e-5)
+    assert_close("saturated opacities grad", opacities.grad.detach().cpu(), opacities_r.grad, 1.0e-5)
 
 
 def check_eval_overflow_disabled_raises():
@@ -134,6 +240,7 @@ def main():
         raise SystemExit("MPS is not available.")
     check_case(1)
     check_case(2)
+    check_saturated_many_splats()
     check_eval_overflow_disabled_raises()
 
 

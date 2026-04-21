@@ -537,7 +537,11 @@ kernel void tile_fast_backward_saved(
   }
   float T_cur = T_final;
   float gT = valid ? dot(go, float3(mf.bg_r, mf.bg_g, mf.bg_b)) : 0.0f;
-  for (int chunk_end = int(end_i); chunk_end > 0; chunk_end -= int(GSP_CHUNK)) {
+  // Keep barrier control uniform across the threadgroup. `end_i` is per pixel,
+  // so using it as the loop bound makes saturated pixels take fewer barriers
+  // than unsaturated pixels. Iterate over the tile-level stop count and mask
+  // each pixel with `global_i < end_i` inside the loop.
+  for (int chunk_end = int(stop_count); chunk_end > 0; chunk_end -= int(GSP_CHUNK)) {
     int chunk_start_i = max(0, chunk_end - int(GSP_CHUNK));
     uint chunk_start = uint(chunk_start_i);
     uint chunk_n = uint(chunk_end - chunk_start_i);
@@ -729,7 +733,11 @@ kernel void tile_overflow_backward(
   }
   float T_cur = T_final;
   float gT = valid ? dot(go, float3(mf.bg_r, mf.bg_g, mf.bg_b)) : 0.0f;
-  for (int chunk_end = int(end_i); chunk_end > 0; chunk_end -= int(GSP_CHUNK)) {
+  // Keep barrier control uniform across the threadgroup. `end_i` is per pixel,
+  // so using it as the loop bound makes saturated pixels take fewer barriers
+  // than unsaturated pixels. Iterate over the tile count and mask each pixel
+  // with `global_i < end_i` inside the loop.
+  for (int chunk_end = int(count); chunk_end > 0; chunk_end -= int(GSP_CHUNK)) {
     int chunk_start_i = max(0, chunk_end - int(GSP_CHUNK));
     uint chunk_start = uint(chunk_start_i);
     uint chunk_n = uint(chunk_end - chunk_start_i);
