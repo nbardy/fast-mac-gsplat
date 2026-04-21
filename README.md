@@ -1,6 +1,6 @@
 # fast-mac-gsplat
 
-Torch-first, Metal-backed Gaussian rasterizer fast path for Apple Silicon. 20,000% faster than torch for large work loads
+Torch-first, Metal-backed Gaussian rasterizer fast path for Apple Silicon.
 
 Bringing World Model Research to your mac
 
