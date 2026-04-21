@@ -75,6 +75,43 @@ Interpretation:
 - These numbers include subprocess and first-use effects enough that they should
   be treated as a smoke, not a headline benchmark.
 
+## 4K / 64K Large-Splat Check
+
+Command:
+
+```bash
+python benchmarks/benchmark_full_matrix.py \
+  --resolutions 4096x4096 \
+  --splats 65536 \
+  --batch-sizes 1 \
+  --distributions microbench_uniform_random,clustered_hot_tiles \
+  --renderers v6_direct,v7_hardware \
+  --modes forward,forward_backward \
+  --warmup 1 \
+  --iters 2 \
+  --timeout-sec 240 \
+  --output-md benchmarks/full_rasterizer_benchmark_v7_4k64k.md
+```
+
+Result: all 8 cells completed with `status=ok`.
+
+| Distribution | Mode | v6 direct | v7 hardware | Result |
+|---|---|---:|---:|---|
+| uniform random | forward | 31.301 ms | 149.561 ms | v7 slower by 377.8% |
+| uniform random | forward+backward | 68.039 ms | 21574.243 ms | v7 not viable |
+| clustered hot tiles | forward | 253.653 ms | 129.820 ms | v7 faster by 48.8% |
+| clustered hot tiles | forward+backward | 178.227 ms | 20054.494 ms | v7 not viable |
+
+Interpretation:
+
+- The hardware forward path can win in a clustered forward-only case.
+- It loses badly on uniform forward, where the compute path is much better.
+- The current v7 backward is not viable for training at 4K/64K. The measured
+  backward component was about `19.9-21.4 s`.
+- This reinforces the current model: v7 is a useful render-pipeline experiment,
+  but it is not the training renderer until CPU/shared-buffer round trips and
+  backward architecture are replaced.
+
 ## Benchmark Integration
 
 Added:
