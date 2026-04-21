@@ -11,9 +11,9 @@ Bringing World Model Research to your mac
   | 512 | Forward | 751.724 ms | 3.014 ms | +24,840% |
   | 512 | Forward+backward | 5109.671 ms | 7.838 ms | +65,094% |
   | 1024 | Forward | 1712.214 ms | 4.355 ms | +39,219% |
-  | 1024 | Forward+backward | OOM | 11.373 ms | ♾️ |
+  | 1024 | Forward+backward | OOM | 11.373 ms | ♾️ %|
   | 64k | Forward | 94992.427 ms | 9.644 ms | +984,907% |
-  | 64k | Forward+backward | OOM | 27.457 ms | ♾️ |
+  | 64k | Forward+backward | OOM | 27.457 ms | ♾️ % |
 
 
 ## Design goals
