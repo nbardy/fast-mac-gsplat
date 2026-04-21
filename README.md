@@ -24,7 +24,7 @@ python benchmarks/benchmark_full_matrix.py \
   --splats 512,2048,65536 \
   --batch-sizes 1,4 \
   --distributions microbench_uniform_random,sparse_screen,clustered_hot_tiles,layered_depth,overflow_adversarial \
-  --renderers torch_direct,v2_fastpath,v3_candidate,v5_batched,v6_direct,v6_auto,v7_hardware \
+  --renderers torch_direct,v2_fastpath,v3_candidate,v5_batched,v6_direct,v6_auto,v6_upgrade_direct,v6_upgrade_auto,v7_hardware \
   --modes forward,forward_backward \
   --output-md benchmarks/full_rasterizer_benchmark.md
 ```
@@ -39,7 +39,13 @@ when the dense reference would be too large.
 - `v5_batched`: native `[B,G,...]` batch API.
 - `v6_direct`: batch-focused direct compute path; current default for B>1.
 - `v6_auto`: v6 with conservative active-tile policy for clustered/overflow cases.
+- `v6_upgrade_direct`: chief-scientist v6 upgrade handoff, direct mode.
+- `v6_upgrade_auto`: chief-scientist v6 upgrade handoff, active-policy auto mode.
 - `v7_hardware`: experimental Metal render-pipeline forward path with compute backward.
+
+The current `variants/v6` branch already includes later local engineering fixes
+on top of the original v6 line. `variants/v6_upgrade` is preserved separately so
+the source handoff can be tested without overwriting the current v6 baseline.
 
 ## API
 

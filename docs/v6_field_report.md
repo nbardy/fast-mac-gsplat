@@ -242,6 +242,34 @@ should not replace the earlier field report. The relative behavior still held:
 forced active scheduling caused a large forward penalty on saturated random
 screens, while `active_policy=auto` rejected it.
 
+## Saturated Backward Barrier Fix
+
+The v5 training-parity failure exposed a Metal correctness trap that also
+existed in v6: backward kernels looped over per-pixel `end_i` while using
+`threadgroup_barrier()`. In crowded or high-opacity tiles, different pixels can
+stop at different splat indices, which means the threadgroup can execute
+divergent barrier counts and silently corrupt gradients.
+
+Patched v6 kernels:
+
+```text
+tile_fast_backward_saved
+tile_active_backward_saved
+tile_overflow_backward
+```
+
+The reverse chunk loops now use uniform tile-level bounds:
+
+```text
+fast/direct: stop_count
+active:      stop_count
+overflow:    count
+```
+
+The per-pixel early-stop behavior remains as `global_i < end_i` inside the
+loop. The v6 reference check now includes saturated 64-splat cases for both
+direct and active paths.
+
 ## Next Tests
 
 - rerun the fixed-total 64k stack benchmark with the new v6 direct default
