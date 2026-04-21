@@ -15,6 +15,32 @@ Bringing World Model Research to your mac
   | 64k | Forward | 94992.427 ms | 9.644 ms | +984,907% |
   | 64k | Forward+backward | OOM | 27.457 ms | ♾️ % |
 
+For broad sweeps across renderers, resolutions, splat counts, and projected
+splat distributions:
+
+```bash
+python benchmarks/benchmark_full_matrix.py \
+  --resolutions 512x512,1024x512,1920x1080,4096x4096 \
+  --splats 512,2048,65536 \
+  --batch-sizes 1,4 \
+  --distributions microbench_uniform_random,sparse_screen,clustered_hot_tiles,layered_depth,overflow_adversarial \
+  --renderers torch_direct,v2_fastpath,v3_candidate,v5_batched,v6_direct,v6_auto,v7_hardware \
+  --modes forward,forward_backward \
+  --output-md benchmarks/full_rasterizer_benchmark.md
+```
+
+The full benchmark writes a Markdown report and marks Torch rows as skipped
+when the dense reference would be too large.
+
+## Variants
+
+- `v2_fastpath`: low-overhead single-image compute path.
+- `v3_candidate`: strongest large-scene single-image training path so far.
+- `v5_batched`: native `[B,G,...]` batch API.
+- `v6_direct`: batch-focused direct compute path; current default for B>1.
+- `v6_auto`: v6 with conservative active-tile policy for clustered/overflow cases.
+- `v7_hardware`: experimental Metal render-pipeline forward path with compute backward.
+
 ## API
 
 Install the v5 Torch + Metal package directly from GitHub:
@@ -60,4 +86,3 @@ Inputs may be `[G, ...]` for one image or `[B, G, ...]` for batched rendering. T
 - Use **Metal kernels** for the renderer hot path.
 - Minimize memory during training by saving only compact tile bins, **not** dense `G x H x W` activations.
 - Keep backward differentiable via **recompute**, not via storing per-pixel alpha / transmittance graphs.
-

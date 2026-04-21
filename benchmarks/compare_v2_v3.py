@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 V3_ROOT = ROOT / "variants" / "v3"
 V5_ROOT = ROOT / "variants" / "v5"
 V6_ROOT = ROOT / "variants" / "v6"
+V7_ROOT = ROOT / "variants" / "v7"
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 if str(V3_ROOT) not in sys.path:
@@ -21,6 +22,8 @@ if str(V5_ROOT) not in sys.path:
     sys.path.insert(0, str(V5_ROOT))
 if str(V6_ROOT) not in sys.path:
     sys.path.insert(0, str(V6_ROOT))
+if str(V7_ROOT) not in sys.path:
+    sys.path.insert(0, str(V7_ROOT))
 
 from torch_gsplat_bridge_fast import RasterConfig as RasterConfigV2
 from torch_gsplat_bridge_fast import rasterize_projected_gaussians as rasterize_v2
@@ -33,6 +36,8 @@ from torch_gsplat_bridge_v5 import rasterize_projected_gaussians as rasterize_v5
 from torch_gsplat_bridge_v6 import RasterConfig as RasterConfigV6
 from torch_gsplat_bridge_v6 import profile_projected_gaussians as profile_v6
 from torch_gsplat_bridge_v6 import rasterize_projected_gaussians as rasterize_v6
+from torch_gsplat_bridge_v7 import RasterConfig as RasterConfigV7
+from torch_gsplat_bridge_v7 import rasterize_projected_gaussians as rasterize_v7
 
 
 DEFAULT_BG = (1.0, 1.0, 1.0)
@@ -121,6 +126,38 @@ def dense_torch_reference(
 
 def time_renderer(name: str, fn, cfg, inputs, *, warmup: int, iters: int, backward: bool) -> dict[str, float | str]:
     run_inputs = clone_inputs(inputs, backward=backward)
+    for _ in range(warmup):
+        out = fn(*run_inputs, cfg)
+        if backward:
+            loss = out.square().mean()
+            loss.backward()
+            clear_grads(run_inputs)
+    sync()
+
+    elapsed = []
+    for _ in range(iters):
+        t0 = time.perf_counter()
+        out = fn(*run_inputs, cfg)
+        if backward:
+            loss = out.square().mean()
+            loss.backward()
+            clear_grads(run_inputs)
+        sync()
+        elapsed.append((time.perf_counter() - t0) * 1000.0)
+
+    mean_ms = sum(elapsed) / len(elapsed)
+    return {
+        "renderer": name,
+        "mode": "forward_backward" if backward else "forward",
+        "mean_ms": mean_ms,
+        "median_ms": float(median(elapsed)),
+        "min_ms": min(elapsed),
+        "max_ms": max(elapsed),
+    }
+
+
+def time_renderer_batched(name: str, fn, cfg, inputs, *, warmup: int, iters: int, backward: bool) -> dict[str, float | str]:
+    run_inputs = tuple(x.unsqueeze(0) for x in clone_inputs(inputs, backward=backward))
     for _ in range(warmup):
         out = fn(*run_inputs, cfg)
         if backward:
@@ -240,6 +277,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=11)
     parser.add_argument("--backward", action="store_true")
     parser.add_argument("--tile-stats", action="store_true", help="Print v3/v5/v6 tile occupancy stats for each case.")
+    parser.add_argument("--include-v7", action="store_true", help="Also time the experimental v7 hardware renderer.")
     parser.add_argument("--include-torch-reference", action="store_true", help="Also time a direct Torch reference renderer.")
     parser.add_argument(
         "--torch-max-work-items",
@@ -260,6 +298,7 @@ def main() -> None:
     cfg_v3 = RasterConfigV3(height=args.height, width=args.width, background=DEFAULT_BG)
     cfg_v5 = RasterConfigV5(height=args.height, width=args.width, background=DEFAULT_BG)
     cfg_v6 = RasterConfigV6(height=args.height, width=args.width, background=DEFAULT_BG)
+    cfg_v7 = RasterConfigV7(height=args.height, width=args.width, background=DEFAULT_BG)
 
     print(
         f"height={args.height} width={args.width} gaussians={args.gaussians} "
@@ -276,8 +315,12 @@ def main() -> None:
             time_renderer("v2_fastpath", rasterize_v2, cfg_v2, inputs, warmup=args.warmup, iters=args.iters, backward=args.backward),
             time_renderer("v3_candidate", rasterize_v3, cfg_v3, inputs, warmup=args.warmup, iters=args.iters, backward=args.backward),
             time_renderer("v5_batched", rasterize_v5, cfg_v5, inputs, warmup=args.warmup, iters=args.iters, backward=args.backward),
-            time_renderer("v6_active", rasterize_v6, cfg_v6, inputs, warmup=args.warmup, iters=args.iters, backward=args.backward),
+            time_renderer("v6_direct", rasterize_v6, cfg_v6, inputs, warmup=args.warmup, iters=args.iters, backward=args.backward),
         ]
+        if args.include_v7:
+            rows.append(
+                time_renderer_batched("v7_hardware", rasterize_v7, cfg_v7, inputs, warmup=args.warmup, iters=args.iters, backward=args.backward)
+            )
         if args.include_torch_reference:
             work_items = args.height * args.width * args.gaussians
             if work_items <= args.torch_max_work_items:
