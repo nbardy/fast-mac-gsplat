@@ -162,7 +162,7 @@ def check_case(B: int):
     colors_grad = colors.grad.detach().cpu() if B > 1 else colors.grad[0].detach().cpu()
     opacities_grad = opacities.grad.detach().cpu() if B > 1 else opacities.grad[0].detach().cpu()
 
-    assert_close(f"B={B} image", out.detach().cpu(), ref.detach(), 1.0e-5)
+    assert_close(f"B={B} image", out.detach().cpu(), out_r.detach(), 1.0e-5)
     assert_close(f"B={B} means grad", means_grad, means_r.grad.detach().cpu(), 1.0e-5)
     assert_close(f"B={B} conics grad", conics_grad, conics_r.grad.detach().cpu(), 1.0e-5)
     assert_close(f"B={B} colors grad", colors_grad, colors_r.grad.detach().cpu(), 1.0e-5)
