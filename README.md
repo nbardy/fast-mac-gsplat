@@ -34,14 +34,16 @@ when the dense reference would be too large.
 
 ## Variants
 
-- `v2_fastpath`: low-overhead single-image compute path.
-- `v3_candidate`: strongest large-scene single-image training path so far.
-- `v5_batched`: native `[B,G,...]` batch API.
-- `v6_direct`: batch-focused direct compute path; current default for B>1.
-- `v6_auto`: v6 with conservative active-tile policy for clustered/overflow cases.
-- `v6_upgrade_direct`: chief-scientist v6 upgrade handoff, direct mode.
-- `v6_upgrade_auto`: chief-scientist v6 upgrade handoff, active-policy auto mode.
-- `v7_hardware`: experimental Metal render-pipeline forward path with compute backward.
+| Variant | Use When | Status |
+|---|---|---|
+| `v2_fastpath` | You need the older low-overhead single-image compute baseline for comparisons. | Kept as a benchmark baseline. |
+| `v3_candidate` | You want the strongest measured B=1 large-scene training path. | Good single-image training baseline. |
+| `v5_batched` | You want native `[B,G,...]` batch rendering and the simpler batched compute path. | Viable training candidate after the saturated-backward fix. |
+| `v6_direct` | You want the current default batch-focused training path for B>1. | Preferred batch training baseline. |
+| `v6_auto` | You want v6 to enable active-tile scheduling only for sparse, clustered, or overflow-heavy scenes. | Experimental policy mode; benchmark against direct. |
+| `v6_upgrade_direct` | You want to test the chief-scientist v6-upgrade handoff without replacing local v6. | Preserved source handoff and benchmark target. |
+| `v6_upgrade_auto` | You want to test the v6-upgrade active-policy path. | Preserved source handoff and benchmark target. |
+| `v7_hardware` | You want to experiment with Metal render-pipeline forward rasterization. | Not recommended for training yet; backward is too slow at 4K/64K. |
 
 The current `variants/v6` branch already includes later local engineering fixes
 on top of the original v6 line. `variants/v6_upgrade` is preserved separately so
@@ -49,10 +51,58 @@ the source handoff can be tested without overwriting the current v6 baseline.
 
 ## API
 
-Install the v5 Torch + Metal package directly from GitHub:
+The renderer variants use the same high-level API shape:
+
+```python
+from torch_gsplat_bridge_vX import RasterConfig, ProjectedGaussianRasterizer, rasterize_projected_gaussians
+
+config = RasterConfig(height=height, width=width, background=(1.0, 1.0, 1.0))
+image = rasterize_projected_gaussians(means2d, conics, colors, opacities, depths, config)
+```
+
+Inputs are projected 2D splats on MPS tensors:
+
+- `means2d`: pixel-space centers
+- `conics`: packed inverse covariance terms `[xx, xy, yy]`
+- `colors`: RGB
+- `opacities`: alpha scale
+- `depths`: used for stable sort, with zero depth-order gradients
+
+Shape support depends on the variant:
+
+| Variant | Import Package | Input Shape | Output Shape |
+|---|---|---|---|
+| root v2 | `torch_gsplat_bridge_fast` | `[G,2/3]`, `[G]` | `[H,W,3]` |
+| v3 | `torch_gsplat_bridge_v3` | `[G,2/3]`, `[G]` | `[H,W,3]` |
+| v5 | `torch_gsplat_bridge_v5` | `[G,2/3]` or `[B,G,2/3]`, `[G]` or `[B,G]` | `[H,W,3]` or `[B,H,W,3]` |
+| v6 | `torch_gsplat_bridge_v6` | `[G,2/3]` or `[B,G,2/3]`, `[G]` or `[B,G]` | `[H,W,3]` or `[B,H,W,3]` |
+| v6-upgrade | `torch_gsplat_bridge_v6` | `[G,2/3]` or `[B,G,2/3]`, `[G]` or `[B,G]` | `[H,W,3]` or `[B,H,W,3]` |
+| v7 | `torch_gsplat_bridge_v7` | `[G,2/3]` or `[B,G,2/3]`, `[G]` or `[B,G]` | `[H,W,3]` or `[B,H,W,3]` |
+
+The call pattern is intentionally stable across variants. The `RasterConfig`
+fields are not identical:
+
+- v2/v3 are single-image only. Loop outside the renderer if you need batches.
+- v5 adds native batching, eval/train split, overflow fallback, and batch chunking.
+- v6 keeps the v5 API shape and adds active-tile policy and stop-count controls.
+- v6-upgrade also imports as `torch_gsplat_bridge_v6`, so install it in a
+  separate environment from `variants/v6` if you need to compare package APIs.
+- v7 uses the same call shape, but has a smaller config and is experimental.
+
+Install the current stable batched package directly from GitHub:
 
 ```bash
 python -m pip install "git+https://github.com/nbardy/fast-mac-gsplat.git#subdirectory=variants/v5"
+```
+
+Other installable variants:
+
+```bash
+python -m pip install "git+https://github.com/nbardy/fast-mac-gsplat.git"
+python -m pip install "git+https://github.com/nbardy/fast-mac-gsplat.git#subdirectory=variants/v3"
+python -m pip install "git+https://github.com/nbardy/fast-mac-gsplat.git#subdirectory=variants/v6"
+python -m pip install "git+https://github.com/nbardy/fast-mac-gsplat.git#subdirectory=variants/v6_upgrade"
+python -m pip install "git+https://github.com/nbardy/fast-mac-gsplat.git#subdirectory=variants/v7"
 ```
 
 Use projected 2D splats on MPS tensors:
