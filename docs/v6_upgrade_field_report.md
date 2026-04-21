@@ -128,3 +128,21 @@ Keep `variants/v6` as the current v6 baseline. Use `variants/v6_upgrade` as a
 preserved source handoff and benchmark target. Do not overwrite the existing v6
 line with the upgrade handoff unless a larger benchmark shows that the upgrade
 beats the locally evolved v6 branch.
+
+## Deep Matrix Follow-Up
+
+A full v6-family matrix was run after this smoke:
+
+```text
+docs/v6_upgrade_deep_benchmark_report.md
+benchmarks/full_rasterizer_benchmark_v6_upgrade_deep.md
+benchmarks/full_rasterizer_benchmark_v6_upgrade_deep.jsonl
+```
+
+That run covered 960 cells across four resolutions, three splat counts, B=1/B=4,
+five projected-splat distributions, forward and forward+backward modes, and the
+four v6-family renderers. All cells completed with `status=ok`.
+
+The deep result keeps the same recommendation. Local `v6_direct` is still the
+best default, but `v6_upgrade_direct` is competitive in larger
+forward+backward workloads, especially at 64k splats.
