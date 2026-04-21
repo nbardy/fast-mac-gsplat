@@ -185,11 +185,70 @@ The direct v6 path is now faster than v5 on total forward+backward for the
 measured B=4 4K case because forward matches v5 and backward is about 19 ms
 faster.
 
+## v6.1 Scenario Patch
+
+The synthetic random benchmark is now explicitly treated as
+`microbench_uniform_random`: useful for catching fixed overhead regressions, but
+not representative of sparse-screen, clustered, occlusion-heavy, or trace-backed
+training scenes.
+
+v6.1 adds:
+
+- `active_policy=off|on|auto`
+- optional pair-budget training chunks via `max_pairs_per_launch`
+- `real_trace` replay support for saved `means2d/conics/colors/opacities/depths`
+- new synthetic cases:
+  - `sparse_screen`
+  - `clustered_hot_tiles`
+  - `layered_depth`
+  - `overflow_adversarial`
+- matrix benchmark sweeps for active policy and pair-budget settings
+
+Pair-budget chunking is intentionally disabled by default with
+`max_pairs_per_launch=0`. It needs a pre-binning pass to measure pair load, so it
+is a useful experiment knob but not a free default.
+
+The scientist-suggested `active_tile_fraction < 0.45` auto threshold was too
+eager in local field tests. Sparse/layered cases around 15-29% active tiles were
+mixed or slower with active scheduling, while the clearly active-friendly
+clustered overflow case had about 5% active tiles plus overflow. The v6.1 auto
+gate is therefore tighter:
+
+```text
+active when active_tile_fraction < 0.10
+or overflow_tile_count > 0
+or max_pairs_per_tile > 2 * max_fast_pairs
+but reject active when active_tile_fraction > 0.75 and overflow_tile_count == 0
+```
+
+This keeps the saturated uniform microbench on the direct path, rejects ordinary
+sparse-screen cases where the active path has not proven reliable, and still
+activates for clustered overflow stress.
+
+Noisy local policy sweep, `1024x512`, `B=4`, `G=4096`, `warmup=1`, `iters=3`,
+forward+backward. The machine had unrelated long-running Python jobs active, so
+these are pattern checks, not headline numbers.
+
+| Case | Active Fraction | Overflow Tiles | Best Observed Pattern |
+|---|---:|---:|---|
+| `microbench_uniform_random` | 1.00 | 0 | direct/off best; auto resolves direct |
+| `sparse_screen` | ~0.15 | 0 | mixed; active not reliable enough for auto |
+| `clustered_hot_tiles` | ~0.05 | ~38-40 | auto resolves active; often improves over direct |
+| `layered_depth` | ~0.28 | 0 | mixed; stop-count pruning helps but active scheduling is not clearly worth it |
+
+One 4K rerun under the same noisy machine state showed v5 also much slower than
+the previous quiet-machine baseline, so the absolute 4K numbers from that pass
+should not replace the earlier field report. The relative behavior still held:
+forced active scheduling caused a large forward penalty on saturated random
+screens, while `active_policy=auto` rejected it.
+
 ## Next Tests
 
 - rerun the fixed-total 64k stack benchmark with the new v6 direct default
-- try clustered or sparse-screen scenes where active-tile compaction actually
-  removes many tiles
+- collect real projected traces from Dynaworld training batches and replay them
+  with `--case real_trace --trace-file ...`
+- rerun clustered, sparse-screen, layered-depth, and overflow-adversarial sweeps
+  on a quiet machine
 - try overflow or high-occupancy scenes where count scheduling may reduce tail
   latency
 - if active scheduling is kept, avoid full-output background prefill when most

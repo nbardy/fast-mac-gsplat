@@ -67,9 +67,11 @@ class RasterConfig:
     batch_launch_limit_tiles: int = 262144
     batch_launch_limit_gaussians: int = 262144
     use_active_tiles: bool = False
+    active_policy: str = "off"  # off | on | auto
     sort_active_tiles_by_count: bool = True
     stop_count_mode: str = "adaptive"  # always | never | adaptive
     stop_count_dense_threshold: int = 64
+    max_pairs_per_launch: int = 0  # 0 disables pair-budget training chunks
 
 
 def _runtime_validate(config: RasterConfig) -> RuntimeShaderConfig:
@@ -86,15 +88,34 @@ def _runtime_validate(config: RasterConfig) -> RuntimeShaderConfig:
         )
     if config.batch_strategy not in ("auto", "flatten", "serial"):
         raise ValueError("batch_strategy must be one of: auto, flatten, serial")
+    if config.active_policy not in ("off", "on", "auto"):
+        raise ValueError("active_policy must be one of: off, on, auto")
     if config.stop_count_mode not in ("always", "never", "adaptive"):
         raise ValueError("stop_count_mode must be one of: always, never, adaptive")
     if config.stop_count_dense_threshold <= 0:
         raise ValueError("stop_count_dense_threshold must be positive")
+    if config.max_pairs_per_launch < 0:
+        raise ValueError("max_pairs_per_launch must be non-negative")
     return rt
 
 
 def _stop_mode_to_int(mode: str) -> int:
     return {"always": 0, "never": 1, "adaptive": 2}[mode]
+
+
+def _active_policy_to_int(policy: str) -> int:
+    return {"off": 0, "on": 1, "auto": 2}[policy]
+
+
+def _active_policy_from_int(policy: int) -> str:
+    return {0: "off", 1: "on", 2: "auto"}[int(policy)]
+
+
+def _effective_active_policy(config: RasterConfig) -> str:
+    # Preserve the pre-v6.1 API: RasterConfig(use_active_tiles=True) still means "on".
+    if config.active_policy == "off" and config.use_active_tiles:
+        return "on"
+    return config.active_policy
 
 
 def _make_meta(config: RasterConfig, device: torch.device, batch_size: int, gaussians_per_batch: int) -> tuple[Tensor, Tensor]:
@@ -298,6 +319,64 @@ def _choose_batch_chunk_size(config: RasterConfig, batch_size: int, gaussians_pe
     return max(1, min(batch_size, by_tiles, by_gaussians))
 
 
+def _contiguous_batch_slices(batch_size: int, chunk_b: int) -> list[tuple[int, int]]:
+    return [(b0, min(batch_size, b0 + chunk_b)) for b0 in range(0, batch_size, chunk_b)]
+
+
+@torch.no_grad()
+def _choose_batch_slices(
+    means2d_b: Tensor,
+    conics_b: Tensor,
+    colors_b: Tensor,
+    opacities_b: Tensor,
+    config: RasterConfig,
+    *,
+    train_mode: bool,
+    tiles_per_image: int,
+) -> list[tuple[int, int]]:
+    B, G = means2d_b.shape[:2]
+    chunk_b = _choose_batch_chunk_size(config, B, G, tiles_per_image)
+    base_slices = _contiguous_batch_slices(B, chunk_b)
+    if (
+        not train_mode
+        or config.batch_strategy != "auto"
+        or config.max_pairs_per_launch <= 0
+        or B <= 1
+    ):
+        return base_slices
+
+    budget = int(config.max_pairs_per_launch)
+    split_slices: list[tuple[int, int]] = []
+    for b0, b1 in base_slices:
+        m = means2d_b[b0:b1].detach().contiguous()
+        q = conics_b[b0:b1].detach().contiguous()
+        c = colors_b[b0:b1].detach().contiguous()
+        o = opacities_b[b0:b1].detach().contiguous()
+        meta_i32, meta_f32 = _make_meta(config, m.device, b1 - b0, G)
+        tile_counts, _, _ = torch.ops.gsplat_metal_v6.bin(
+            m.reshape(-1, 2).contiguous(),
+            q.reshape(-1, 3).contiguous(),
+            c.reshape(-1, 3).contiguous(),
+            o.reshape(-1).contiguous(),
+            meta_i32,
+            meta_f32,
+        )
+        per_image_pairs = tile_counts.view(b1 - b0, tiles_per_image).sum(dim=1).detach().cpu().tolist()
+        cur_start = b0
+        cur_pairs = 0
+        for offset, pairs_raw in enumerate(per_image_pairs):
+            pairs = int(pairs_raw)
+            image_index = b0 + offset
+            if image_index > cur_start and cur_pairs + pairs > budget:
+                split_slices.append((cur_start, image_index))
+                cur_start = image_index
+                cur_pairs = 0
+            cur_pairs += pairs
+        if cur_start < b1:
+            split_slices.append((cur_start, b1))
+    return split_slices
+
+
 def _make_active_tile_ids(tile_counts: Tensor, max_fast_pairs: int, *, sort_by_count: bool) -> Tensor:
     fast_mask = (tile_counts > 0) & (tile_counts <= int(max_fast_pairs))
     active_tile_ids = torch.nonzero(fast_mask, as_tuple=False).flatten().to(torch.int32)
@@ -308,6 +387,32 @@ def _make_active_tile_ids(tile_counts: Tensor, max_fast_pairs: int, *, sort_by_c
         perm = torch.argsort(counts, stable=True)
         active_tile_ids = active_tile_ids.index_select(0, perm)
     return active_tile_ids.contiguous()
+
+
+def _resolve_active_tile_use(
+    *,
+    policy: str,
+    tile_counts: Tensor,
+    max_fast_pairs: int,
+    total_tiles: int,
+) -> bool:
+    if policy == "off":
+        return False
+    if policy == "on":
+        return True
+
+    active_tile_count = int((tile_counts > 0).sum().item())
+    active_tile_fraction = active_tile_count / max(int(total_tiles), 1)
+    overflow_tile_count = int((tile_counts > int(max_fast_pairs)).sum().item())
+    max_pairs_per_tile = int(tile_counts.max().item()) if tile_counts.numel() else 0
+
+    if active_tile_fraction > 0.75 and overflow_tile_count == 0:
+        return False
+    return (
+        active_tile_fraction < 0.10
+        or overflow_tile_count > 0
+        or max_pairs_per_tile > 2 * int(max_fast_pairs)
+    )
 
 
 def _band_counts(tile_counts: Tensor, active_tile_ids: Tensor, dense_threshold: int) -> dict[str, int]:
@@ -335,6 +440,7 @@ class _RasterizeProjectedGaussiansV6(torch.autograd.Function):
         meta_f32: Tensor,
         enable_overflow_fallback: bool,
         use_active_tiles: bool,
+        active_policy_code: int,
         sort_active_tiles_by_count: bool,
     ) -> Tensor:
         if not hasattr(torch.ops, "gsplat_metal_v6"):
@@ -356,7 +462,17 @@ class _RasterizeProjectedGaussiansV6(torch.autograd.Function):
             means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32
         )
 
-        if use_active_tiles:
+        active_policy = _active_policy_from_int(active_policy_code)
+        if active_policy == "off" and use_active_tiles:
+            active_policy = "on"
+        resolved_use_active_tiles = _resolve_active_tile_use(
+            policy=active_policy,
+            tile_counts=tile_counts,
+            max_fast_pairs=int(meta_i32[7].item()),
+            total_tiles=int(meta_i32[6].item()),
+        )
+
+        if resolved_use_active_tiles:
             active_tile_ids = _make_active_tile_ids(
                 tile_counts,
                 int(meta_i32[7].item()),
@@ -449,7 +565,7 @@ class _RasterizeProjectedGaussiansV6(torch.autograd.Function):
         ctx.tiles_x = tiles_x
         ctx.tile_size = tile_size
         ctx.enable_overflow_fallback = enable_overflow_fallback
-        ctx.use_active_tiles = bool(use_active_tiles)
+        ctx.use_active_tiles = bool(resolved_use_active_tiles)
         return out
 
     @staticmethod
@@ -530,7 +646,7 @@ class _RasterizeProjectedGaussiansV6(torch.autograd.Function):
         g_colors_b = _unsort_batched(g_colors_flat.view(B, G, 3), perm)
         g_opacities_b = _unsort_batched(g_opacities_flat.view(B, G), perm)
         g_depths_b = torch.zeros_like(depths_b)
-        return g_means_b, g_conics_b, g_colors_b, g_opacities_b, g_depths_b, None, None, None, None, None
+        return g_means_b, g_conics_b, g_colors_b, g_opacities_b, g_depths_b, None, None, None, None, None, None
 
 
 def _rasterize_chunk_eval(
@@ -558,7 +674,14 @@ def _rasterize_chunk_eval(
         means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32
     )
 
-    if config.use_active_tiles:
+    resolved_use_active_tiles = _resolve_active_tile_use(
+        policy=_effective_active_policy(config),
+        tile_counts=tile_counts,
+        max_fast_pairs=int(meta_i32[7].item()),
+        total_tiles=int(meta_i32[6].item()),
+    )
+
+    if resolved_use_active_tiles:
         active_tile_ids = _make_active_tile_ids(
             tile_counts,
             int(meta_i32[7].item()),
@@ -611,12 +734,19 @@ def _rasterize_batched(
     B, G = means2d_b.shape[:2]
     tiles_y = (config.height + config.tile_size - 1) // config.tile_size
     tiles_x = (config.width + config.tile_size - 1) // config.tile_size
-    chunk_b = _choose_batch_chunk_size(config, B, G, tiles_y * tiles_x)
 
     outs = []
     train_mode = _should_use_training_path(means2d_b, conics_b, colors_b, opacities_b)
-    for b0 in range(0, B, chunk_b):
-        b1 = min(B, b0 + chunk_b)
+    batch_slices = _choose_batch_slices(
+        means2d_b,
+        conics_b,
+        colors_b,
+        opacities_b,
+        config,
+        train_mode=train_mode,
+        tiles_per_image=tiles_y * tiles_x,
+    )
+    for b0, b1 in batch_slices:
         m = means2d_b[b0:b1].contiguous()
         q = conics_b[b0:b1].contiguous()
         c = colors_b[b0:b1].contiguous()
@@ -636,6 +766,7 @@ def _rasterize_batched(
                     meta_f32,
                     bool(config.enable_overflow_fallback),
                     bool(config.use_active_tiles),
+                    _active_policy_to_int(config.active_policy),
                     bool(config.sort_active_tiles_by_count),
                 )
             )
@@ -684,15 +815,24 @@ def profile_projected_gaussians(
     tiles_x = (config.width + config.tile_size - 1) // config.tile_size
     tiles_per_image = tiles_y * tiles_x
     chunk_b = _choose_batch_chunk_size(config, B, G, tiles_per_image)
+    batch_slices = _choose_batch_slices(
+        means2d_b,
+        conics_b,
+        colors_b,
+        opacities_b,
+        config,
+        train_mode=True,
+        tiles_per_image=tiles_per_image,
+    )
 
     all_tile_counts = []
     all_stop_counts = []
     all_active_counts = []
     all_dense_active = []
+    resolved_active_chunks = []
     images = []
 
-    for b0 in range(0, B, chunk_b):
-        b1 = min(B, b0 + chunk_b)
+    for b0, b1 in batch_slices:
         m = means2d_b[b0:b1].contiguous()
         q = conics_b[b0:b1].contiguous()
         c = colors_b[b0:b1].contiguous()
@@ -711,7 +851,19 @@ def profile_projected_gaussians(
         )
         all_tile_counts.append(tile_counts.detach().cpu().to(torch.float32))
 
-        active_tile_ids = _make_active_tile_ids(tile_counts, int(meta_i32[7].item()), sort_by_count=bool(config.sort_active_tiles_by_count)) if config.use_active_tiles else torch.arange(int(meta_i32[6].item()), device=tile_counts.device, dtype=torch.int32)
+        active_policy = _effective_active_policy(config)
+        resolved_use_active_tiles = _resolve_active_tile_use(
+            policy=active_policy,
+            tile_counts=tile_counts,
+            max_fast_pairs=int(meta_i32[7].item()),
+            total_tiles=int(meta_i32[6].item()),
+        )
+        resolved_active_chunks.append(bool(resolved_use_active_tiles))
+        active_tile_ids = _make_active_tile_ids(
+            tile_counts,
+            int(meta_i32[7].item()),
+            sort_by_count=bool(config.sort_active_tiles_by_count),
+        )
         band_stats = _band_counts(tile_counts, active_tile_ids, config.stop_count_dense_threshold)
         all_active_counts.append(band_stats["active_tile_count"])
         all_dense_active.append(band_stats["dense_active_tile_count"])
@@ -720,7 +872,7 @@ def profile_projected_gaussians(
             if return_image:
                 chunk_img = _rasterize_chunk_eval(m, q, c, o, d, config)
                 images.append(chunk_img)
-            if config.use_active_tiles:
+            if resolved_use_active_tiles:
                 _, stop_counts = torch.ops.gsplat_metal_v6.render_active_forward_state(
                     m_s, q_s, c_s, o_s, meta_i32, meta_f32, binned_ids, active_tile_ids, tile_counts, tile_offsets
                 )
@@ -744,8 +896,14 @@ def profile_projected_gaussians(
         "max_pairs_per_tile": int(counts_cpu.max().item()) if counts_cpu.numel() else 0,
         "overflow_tile_count": int((counts_cpu > int(config.max_fast_pairs)).sum().item()) if counts_cpu.numel() else 0,
         "active_tile_count": int(sum(all_active_counts)),
+        "active_tile_fraction": float((counts_cpu > 0).sum().item() / max(counts_cpu.numel(), 1)) if counts_cpu.numel() else 0.0,
         "dense_active_tile_count": int(sum(all_dense_active)),
         "chosen_batch_chunk": int(chunk_b),
+        "chosen_batch_chunks": [int(b1 - b0) for b0, b1 in batch_slices],
+        "max_pairs_per_launch": int(config.max_pairs_per_launch),
+        "active_policy": _effective_active_policy(config),
+        "resolved_use_active_tiles": bool(any(resolved_active_chunks)),
+        "resolved_active_chunks": [bool(x) for x in resolved_active_chunks],
         "stop_count_mode": config.stop_count_mode,
     }
 
