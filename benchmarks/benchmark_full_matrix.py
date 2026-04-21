@@ -17,26 +17,19 @@ ROOT = Path(__file__).resolve().parents[1]
 V3_ROOT = ROOT / "variants" / "v3"
 V5_ROOT = ROOT / "variants" / "v5"
 V6_ROOT = ROOT / "variants" / "v6"
+V6_UPGRADE_ROOT = ROOT / "variants" / "v6_upgrade"
 V7_ROOT = ROOT / "variants" / "v7"
-for path in (ROOT, V3_ROOT, V5_ROOT, V6_ROOT, V7_ROOT):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
-
-from torch_gsplat_bridge_fast import RasterConfig as RasterConfigV2
-from torch_gsplat_bridge_fast import rasterize_projected_gaussians as rasterize_v2
-from torch_gsplat_bridge_v3 import RasterConfig as RasterConfigV3
-from torch_gsplat_bridge_v3 import rasterize_projected_gaussians as rasterize_v3
-from torch_gsplat_bridge_v5 import RasterConfig as RasterConfigV5
-from torch_gsplat_bridge_v5 import rasterize_projected_gaussians as rasterize_v5
-from torch_gsplat_bridge_v6 import RasterConfig as RasterConfigV6
-from torch_gsplat_bridge_v6 import rasterize_projected_gaussians as rasterize_v6
-from torch_gsplat_bridge_v7 import RasterConfig as RasterConfigV7
-from torch_gsplat_bridge_v7 import rasterize_projected_gaussians as rasterize_v7
 
 
 DEFAULT_BG = (0.0, 0.0, 0.0)
-DEFAULT_RENDERERS = "torch_direct,v2_fastpath,v3_candidate,v5_batched,v6_direct,v6_auto,v7_hardware"
+DEFAULT_RENDERERS = "torch_direct,v2_fastpath,v3_candidate,v5_batched,v6_direct,v6_auto,v6_upgrade_direct,v6_upgrade_auto,v7_hardware"
 DEFAULT_DISTS = "microbench_uniform_random,sparse_screen,clustered_hot_tiles,layered_depth"
+
+
+def ensure_path(path: Path) -> None:
+    raw = str(path)
+    if raw not in sys.path:
+        sys.path.insert(0, raw)
 
 
 def sync() -> None:
@@ -178,16 +171,58 @@ def run_renderer(renderer: str, inputs, height: int, width: int):
     if renderer == "torch_direct":
         return dense_torch_reference(*inputs, height, width)
     if renderer == "v2_fastpath":
+        ensure_path(ROOT)
+        from torch_gsplat_bridge_fast import RasterConfig as RasterConfigV2
+        from torch_gsplat_bridge_fast import rasterize_projected_gaussians as rasterize_v2
+
         return loop_single(rasterize_v2, inputs, RasterConfigV2(height=height, width=width, background=DEFAULT_BG))
     if renderer == "v3_candidate":
+        ensure_path(V3_ROOT)
+        from torch_gsplat_bridge_v3 import RasterConfig as RasterConfigV3
+        from torch_gsplat_bridge_v3 import rasterize_projected_gaussians as rasterize_v3
+
         return loop_single(rasterize_v3, inputs, RasterConfigV3(height=height, width=width, background=DEFAULT_BG))
     if renderer == "v5_batched":
+        ensure_path(V5_ROOT)
+        from torch_gsplat_bridge_v5 import RasterConfig as RasterConfigV5
+        from torch_gsplat_bridge_v5 import rasterize_projected_gaussians as rasterize_v5
+
         return rasterize_v5(*inputs, RasterConfigV5(height=height, width=width, background=DEFAULT_BG))
     if renderer == "v6_direct":
+        ensure_path(V6_ROOT)
+        from torch_gsplat_bridge_v6 import RasterConfig as RasterConfigV6
+        from torch_gsplat_bridge_v6 import rasterize_projected_gaussians as rasterize_v6
+
         return rasterize_v6(*inputs, RasterConfigV6(height=height, width=width, background=DEFAULT_BG, active_policy="off"))
     if renderer == "v6_auto":
+        ensure_path(V6_ROOT)
+        from torch_gsplat_bridge_v6 import RasterConfig as RasterConfigV6
+        from torch_gsplat_bridge_v6 import rasterize_projected_gaussians as rasterize_v6
+
         return rasterize_v6(*inputs, RasterConfigV6(height=height, width=width, background=DEFAULT_BG, active_policy="auto"))
+    if renderer == "v6_upgrade_direct":
+        ensure_path(V6_UPGRADE_ROOT)
+        from torch_gsplat_bridge_v6 import RasterConfig as RasterConfigV6Upgrade
+        from torch_gsplat_bridge_v6 import rasterize_projected_gaussians as rasterize_v6_upgrade
+
+        return rasterize_v6_upgrade(
+            *inputs,
+            RasterConfigV6Upgrade(height=height, width=width, background=DEFAULT_BG, active_policy="off"),
+        )
+    if renderer == "v6_upgrade_auto":
+        ensure_path(V6_UPGRADE_ROOT)
+        from torch_gsplat_bridge_v6 import RasterConfig as RasterConfigV6Upgrade
+        from torch_gsplat_bridge_v6 import rasterize_projected_gaussians as rasterize_v6_upgrade
+
+        return rasterize_v6_upgrade(
+            *inputs,
+            RasterConfigV6Upgrade(height=height, width=width, background=DEFAULT_BG, active_policy="auto"),
+        )
     if renderer == "v7_hardware":
+        ensure_path(V7_ROOT)
+        from torch_gsplat_bridge_v7 import RasterConfig as RasterConfigV7
+        from torch_gsplat_bridge_v7 import rasterize_projected_gaussians as rasterize_v7
+
         return rasterize_v7(*inputs, RasterConfigV7(height=height, width=width, background=DEFAULT_BG))
     raise ValueError(f"unknown renderer: {renderer}")
 
