@@ -1,4 +1,4 @@
-# v8_project3d engineering notes
+# v9_project3d_train engineering notes
 
 This fork starts from v5 and adds Metal pinhole projection ops. Projection
 forward runs in Metal. Training backward uses the copied v5 Metal raster VJP,

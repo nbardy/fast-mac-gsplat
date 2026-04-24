@@ -158,7 +158,7 @@ def _check_inputs(means2d: Tensor, conics: Tensor, colors: Tensor, opacities: Te
     if len(devices) != 1:
         raise ValueError("means2d/conics/colors/opacities/depths must be on the same device")
     if means2d.device.type != "mps":
-        raise ValueError("v8_project3d Metal rasterizer inputs must be on MPS")
+        raise ValueError("v9_project3d_train Metal rasterizer inputs must be on MPS")
     for name, tensor in tensors.items():
         if tensor.dtype != torch.float32:
             raise ValueError(f"{name} must be float32")
@@ -225,7 +225,7 @@ def _check_3d_inputs(means3d: Tensor, scales: Tensor, quats: Tensor, opacities: 
     if len(devices) != 1:
         raise ValueError("means3d/scales/quats/opacities must be on the same device")
     if means3d.device.type != "mps":
-        raise ValueError("v8_project3d Metal projection inputs must be on MPS")
+        raise ValueError("v9_project3d_train Metal projection inputs must be on MPS")
     for name, tensor in tensors.items():
         if tensor.dtype != torch.float32:
             raise ValueError(f"{name} must be float32")
@@ -368,7 +368,7 @@ def _zero_like_if_none(grad: Tensor | None, value: Tensor) -> Tensor:
     return torch.zeros_like(value) if grad is None else grad
 
 
-class _ProjectPinholeGaussiansV8Project3D(torch.autograd.Function):
+class _ProjectPinholeGaussiansV9Project3DTrain(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
@@ -381,7 +381,7 @@ class _ProjectPinholeGaussiansV8Project3D(torch.autograd.Function):
         meta_i32: Tensor,
         project_f32: Tensor,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        means2d_f, conics_f, opacities_f, depths_f = torch.ops.gsplat_metal_v8_project3d.project_pinhole_forward(
+        means2d_f, conics_f, opacities_f, depths_f = torch.ops.gsplat_metal_v9_project3d_train.project_pinhole_forward(
             means3d_b.reshape(-1, 3).contiguous(),
             scales_b.reshape(-1, 3).contiguous(),
             quats_b.reshape(-1, 4).contiguous(),
@@ -428,15 +428,15 @@ class _ProjectPinholeGaussiansV8Project3D(torch.autograd.Function):
         if not any(ctx.needs_input_grad[:6]):
             return None, None, None, None, None, None, None, None
 
-        if not hasattr(torch.ops.gsplat_metal_v8_project3d, "project_pinhole_backward"):
-            raise RuntimeError("gsplat_metal_v8_project3d.project_pinhole_backward custom op not found.")
+        if not hasattr(torch.ops.gsplat_metal_v9_project3d_train, "project_pinhole_backward"):
+            raise RuntimeError("gsplat_metal_v9_project3d_train.project_pinhole_backward custom op not found.")
         grad_outputs = (
             _zero_like_if_none(grad_means2d, means3d_b.new_empty((*means3d_b.shape[:2], 2))).contiguous(),
             _zero_like_if_none(grad_conics, means3d_b.new_empty((*means3d_b.shape[:2], 3))).contiguous(),
             _zero_like_if_none(grad_opacities, opacities_b).contiguous(),
             _zero_like_if_none(grad_depths, opacities_b).contiguous(),
         )
-        flat_grads = torch.ops.gsplat_metal_v8_project3d.project_pinhole_backward(
+        flat_grads = torch.ops.gsplat_metal_v9_project3d_train.project_pinhole_backward(
             grad_outputs[0].reshape(-1, 2).contiguous(),
             grad_outputs[1].reshape(-1, 3).contiguous(),
             grad_outputs[2].reshape(-1).contiguous(),
@@ -493,8 +493,8 @@ def _project_pinhole_gaussians_batched(
     camera_to_world,
     near_plane: float,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-    if not hasattr(torch.ops.gsplat_metal_v8_project3d, "project_pinhole_forward"):
-        raise RuntimeError("gsplat_metal_v8_project3d custom ops not found. Build the extension first.")
+    if not hasattr(torch.ops.gsplat_metal_v9_project3d_train, "project_pinhole_forward"):
+        raise RuntimeError("gsplat_metal_v9_project3d_train custom ops not found. Build the extension first.")
 
     batch_size, gaussians_per_batch = means3d_b.shape[:2]
     device = means3d_b.device
@@ -512,7 +512,7 @@ def _project_pinhole_gaussians_batched(
     meta_i32, project_f32 = _make_project_meta(device, batch_size, gaussians_per_batch, near_plane)
 
     if _projection_backward_requested(means3d_b, scales_b, quats_b, opacities_b, camera_to_world_b, camera_params):
-        return _ProjectPinholeGaussiansV8Project3D.apply(
+        return _ProjectPinholeGaussiansV9Project3DTrain.apply(
             means3d_b,
             scales_b,
             quats_b,
@@ -523,7 +523,7 @@ def _project_pinhole_gaussians_batched(
             project_f32,
         )
 
-    means2d_f, conics_f, opacities_f, depths_f = torch.ops.gsplat_metal_v8_project3d.project_pinhole_forward(
+    means2d_f, conics_f, opacities_f, depths_f = torch.ops.gsplat_metal_v9_project3d_train.project_pinhole_forward(
         means3d_b.reshape(-1, 3).contiguous(),
         scales_b.reshape(-1, 3).contiguous(),
         quats_b.reshape(-1, 4).contiguous(),
@@ -688,7 +688,7 @@ def _choose_batch_chunk_size(config: RasterConfig, batch_size: int, gaussians_pe
     return max(1, min(batch_size, by_tiles, by_gaussians))
 
 
-class _RasterizeProjectedGaussiansV8Project3D(torch.autograd.Function):
+class _RasterizeProjectedGaussiansV9Project3DTrain(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
@@ -701,8 +701,8 @@ class _RasterizeProjectedGaussiansV8Project3D(torch.autograd.Function):
         meta_f32: Tensor,
         enable_overflow_fallback: bool,
     ) -> Tensor:
-        if not hasattr(torch.ops, "gsplat_metal_v8_project3d"):
-            raise RuntimeError("gsplat_metal_v8_project3d custom ops not found. Build the extension first.")
+        if not hasattr(torch.ops, "gsplat_metal_v9_project3d_train"):
+            raise RuntimeError("gsplat_metal_v9_project3d_train custom ops not found. Build the extension first.")
 
         B, G = means2d_b.shape[:2]
         perm = torch.argsort(depths_b.detach(), dim=1, stable=True)
@@ -716,10 +716,10 @@ class _RasterizeProjectedGaussiansV8Project3D(torch.autograd.Function):
         colors_flat = colors_s.reshape(B * G, 3).contiguous()
         opacities_flat = opacities_s.reshape(B * G).contiguous()
 
-        tile_counts, tile_offsets, binned_ids = torch.ops.gsplat_metal_v8_project3d.bin(
+        tile_counts, tile_offsets, binned_ids = torch.ops.gsplat_metal_v9_project3d_train.bin(
             means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32
         )
-        out_fast, tile_stop_counts = torch.ops.gsplat_metal_v8_project3d.render_fast_forward_state(
+        out_fast, tile_stop_counts = torch.ops.gsplat_metal_v9_project3d_train.render_fast_forward_state(
             means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32, binned_ids, tile_counts, tile_offsets
         )
 
@@ -737,7 +737,7 @@ class _RasterizeProjectedGaussiansV8Project3D(torch.autograd.Function):
                 tile_counts, tile_offsets, binned_ids, max_fast_pairs
             )
             if overflow_tile_ids.numel() > 0:
-                overflow_tile_imgs = torch.ops.gsplat_metal_v8_project3d.render_overflow_forward(
+                overflow_tile_imgs = torch.ops.gsplat_metal_v9_project3d_train.render_overflow_forward(
                     means_flat,
                     conics_flat,
                     colors_flat,
@@ -809,7 +809,7 @@ class _RasterizeProjectedGaussiansV8Project3D(torch.autograd.Function):
         if ctx.enable_overflow_fallback and overflow_tile_ids.numel() > 0:
             _zero_tile_images_(grad_fast, overflow_tile_ids, ctx.tiles_per_image, ctx.tiles_x, ctx.tile_size)
 
-        g_means_flat, g_conics_flat, g_colors_flat, g_opacities_flat = torch.ops.gsplat_metal_v8_project3d.render_fast_backward_saved(
+        g_means_flat, g_conics_flat, g_colors_flat, g_opacities_flat = torch.ops.gsplat_metal_v9_project3d_train.render_fast_backward_saved(
             grad_fast,
             means_flat,
             conics_flat,
@@ -825,7 +825,7 @@ class _RasterizeProjectedGaussiansV8Project3D(torch.autograd.Function):
 
         if ctx.enable_overflow_fallback and overflow_tile_ids.numel() > 0:
             grad_tiles = _gather_tile_images(grad_out.contiguous(), overflow_tile_ids, ctx.tiles_per_image, ctx.tiles_x, ctx.tile_size)
-            go_means, go_conics, go_colors, go_opacities = torch.ops.gsplat_metal_v8_project3d.render_overflow_backward(
+            go_means, go_conics, go_colors, go_opacities = torch.ops.gsplat_metal_v9_project3d_train.render_overflow_backward(
                 grad_tiles,
                 means_flat,
                 conics_flat,
@@ -873,10 +873,10 @@ def _rasterize_chunk_eval(
     colors_flat = colors_s.reshape(B * G, 3).contiguous()
     opacities_flat = opacities_s.reshape(B * G).contiguous()
 
-    tile_counts, tile_offsets, binned_ids = torch.ops.gsplat_metal_v8_project3d.bin(
+    tile_counts, tile_offsets, binned_ids = torch.ops.gsplat_metal_v9_project3d_train.bin(
         means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32
     )
-    out_fast = torch.ops.gsplat_metal_v8_project3d.render_fast_forward_eval(
+    out_fast = torch.ops.gsplat_metal_v9_project3d_train.render_fast_forward_eval(
         means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32, tile_counts, tile_offsets, binned_ids
     )
 
@@ -885,7 +885,7 @@ def _rasterize_chunk_eval(
             tile_counts, tile_offsets, binned_ids, int(meta_i32[7].item())
         )
         if overflow_tile_ids.numel() > 0:
-            overflow_tile_imgs = torch.ops.gsplat_metal_v8_project3d.render_overflow_forward(
+            overflow_tile_imgs = torch.ops.gsplat_metal_v9_project3d_train.render_overflow_forward(
                 means_flat,
                 conics_flat,
                 colors_flat,
@@ -932,7 +932,7 @@ def _rasterize_batched(
 
         if train_mode:
             meta_i32, meta_f32 = _make_meta(config, m.device, b1 - b0, G)
-            outs.append(_RasterizeProjectedGaussiansV8Project3D.apply(m, q, c, o, d, meta_i32, meta_f32, bool(config.enable_overflow_fallback)))
+            outs.append(_RasterizeProjectedGaussiansV9Project3DTrain.apply(m, q, c, o, d, meta_i32, meta_f32, bool(config.enable_overflow_fallback)))
         else:
             outs.append(_rasterize_chunk_eval(m, q, c, o, d, config))
     return torch.cat(outs, dim=0) if len(outs) > 1 else outs[0]
@@ -1046,7 +1046,7 @@ def profile_projected_gaussians(
         o_s = _batched_gather_1d(o, perm).contiguous().reshape(-1)
 
         meta_i32, meta_f32 = _make_meta(config, means2d_b.device, b1 - b0, G)
-        tile_counts, tile_offsets, binned_ids = torch.ops.gsplat_metal_v8_project3d.bin(
+        tile_counts, tile_offsets, binned_ids = torch.ops.gsplat_metal_v9_project3d_train.bin(
             m_s, q_s, c_s, o_s, meta_i32, meta_f32
         )
         all_tile_counts.append(tile_counts.detach().cpu().to(torch.float32))
@@ -1055,7 +1055,7 @@ def profile_projected_gaussians(
             if return_image:
                 chunk_img = _rasterize_chunk_eval(m, q, c, o, d, config)
                 images.append(chunk_img)
-            _, stop_counts = torch.ops.gsplat_metal_v8_project3d.render_fast_forward_state(
+            _, stop_counts = torch.ops.gsplat_metal_v9_project3d_train.render_fast_forward_state(
                 m_s, q_s, c_s, o_s, meta_i32, meta_f32, binned_ids, tile_counts, tile_offsets
             )
             all_stop_counts.append(stop_counts.detach().cpu().to(torch.float32))

@@ -52,10 +52,10 @@ ShaderConfig& shader_config() {
 std::string load_shader_source() {
   auto& cfg = shader_config();
   NSString* metalPath = [[NSString stringWithUTF8String:__FILE__] stringByDeletingLastPathComponent];
-  metalPath = [metalPath stringByAppendingPathComponent:@"gsplat_v8_project3d_kernels.metal"];
+  metalPath = [metalPath stringByAppendingPathComponent:@"gsplat_v9_project3d_train_kernels.metal"];
   NSError* err = nil;
   NSString* src = [NSString stringWithContentsOfFile:metalPath encoding:NSUTF8StringEncoding error:&err];
-  TORCH_CHECK(src != nil, "Failed to read gsplat_v8_project3d_kernels.metal: ", err.localizedDescription.UTF8String);
+  TORCH_CHECK(src != nil, "Failed to read gsplat_v9_project3d_train_kernels.metal: ", err.localizedDescription.UTF8String);
 
   std::string preamble;
   preamble += "#define GSP_TILE_SIZE " + std::to_string(cfg.tile_size) + "u\n";
@@ -68,7 +68,7 @@ std::string load_shader_source() {
   return preamble + std::string([src UTF8String]);
 }
 
-struct MetalV8Project3DKernels {
+struct MetalV9Project3DTrainKernels {
   std::shared_ptr<MetalKernelFunction> project_pinhole_forward;
   std::shared_ptr<MetalKernelFunction> project_pinhole_backward;
   std::shared_ptr<MetalKernelFunction> count_tiles;
@@ -80,10 +80,10 @@ struct MetalV8Project3DKernels {
   std::shared_ptr<MetalKernelFunction> tile_overflow_backward;
 };
 
-MetalV8Project3DKernels& kernels() {
+MetalV9Project3DTrainKernels& kernels() {
   static std::once_flag once;
   static std::unique_ptr<DynamicMetalShaderLibrary> lib;
-  static MetalV8Project3DKernels out;
+  static MetalV9Project3DTrainKernels out;
   std::call_once(once, []() {
     lib = std::make_unique<DynamicMetalShaderLibrary>(load_shader_source());
     out.project_pinhole_forward = lib->getKernelFunction("project_pinhole_forward");
