@@ -1,0 +1,121 @@
+<sparse_capture_notebook version="0.7.2" mode="source_handoff">
+  <overview>
+    <goal>Repair the concrete v7.1 forward bottleneck: front-K capture must not scan all splats for every pixel.</goal>
+    <positioning>This notebook is explicit engineering reasoning, not hidden chain-of-thought.</positioning>
+    <scope>Kernel shape, saved-state layout, binning strategy, and auxiliary-memory policy.</scope>
+  </overview>
+
+  <critique_of_previous_attempt>
+    <finding>The earlier v7.1 docs correctly attacked replay-backward, but they did not explicitly reject a capture implementation that rebuilt visibility with a full pixel-by-splat scan.</finding>
+    <think topic="core_miss">A saved-state backward is not enough if the saved state itself is produced by O(pixels times splats) work.</think>
+    <think topic="why_timings_blew_up">At 4K and 64k splats, a second pass with one thread per pixel and an all-splat loop recreates the same scaling wall even if the graphics render pass is fast.</think>
+    <think topic="memory_side_effect">Returning large front-K tensors to device memory in forward and then re-uploading them in backward adds bandwidth pain on top of the arithmetic pain.</think>
+    <conclusion>The branch needed two repairs, not one: sparse capture and less aux-state bouncing.</conclusion>
+  </critique_of_previous_attempt>
+
+  <iteration id="1" name="restate_the_actual_contract">
+    <problem>What must be true for hardware-forward plus front-K to help end-to-end training?</problem>
+    <think topic="contract">Common-path work has to scale with pixels times a small local visibility budget, not pixels times global splat count.</think>
+    <think topic="implementation_translation">That means the candidate set for each pixel has to come from raster locality, binning, or an equivalent sparse visibility structure.</think>
+    <decision>Reject any design where front-K capture performs a full-scene scan for each pixel.</decision>
+  </iteration>
+
+  <iteration id="2" name="choose_a_sparse_candidate_source">
+    <problem>What is the simplest exact sparse source we can hand off in code?</problem>
+    <options>
+      <option name="depth_peel_render_targets">Closest to pure graphics visibility, but materially more complex for a draft handoff.</option>
+      <option name="gpu_tile_binner">Best long-term direction, but more machinery than this corrective pass needs.</option>
+      <option name="cpu_built_tile_bins">Not the final ideal, but exact, explicit, and enough to kill the disastrous pixel-by-splat loop.</option>
+    </options>
+    <think topic="selection_reason">Because the prior handoff already copied projected inputs to CPU for packing, CPU-built tile bins are the most direct corrective step in a source handoff.</think>
+    <decision>Use depth-sorted CPU-built tile bins now, then let capture and overflow replay consume them on GPU.</decision>
+  </iteration>
+
+  <iteration id="3" name="preserve_exactness">
+    <problem>How do we make tile bins exact rather than heuristic?</problem>
+    <think topic="bbox_rule">A Gaussian is inserted into every tile touched by its alpha-threshold support box.</think>
+    <think topic="order_rule">Inputs are already sorted by depth before packaging, so appending indices in that order preserves front-to-back ordering inside each tile list.</think>
+    <think topic="acceptance_rule">The kernel still runs the exact per-pixel visibility test before accepting a contributor, so bins only shrink the candidate set.</think>
+    <pseudocode>
+      <step>sort projected Gaussians by depth</step>
+      <step>for each Gaussian, compute the same threshold-support box used for its render quad</step>
+      <step>append the Gaussian id to every overlapped tile list</step>
+      <step>for each pixel, read only its tile list and run exact visibility tests in that order</step>
+    </pseudocode>
+    <decision>This preserves the exact common-path contributor sequence while changing the candidate enumeration cost.</decision>
+  </iteration>
+
+  <iteration id="4" name="repair_aux_state_bandwidth">
+    <problem>How do we stop forward from paying for unnecessary saved-state copies?</problem>
+    <think topic="observed_issue">The earlier handoff cloned front-K buffers into tensors on the caller device, then backward copied them back to CPU-backed Metal buffers.</think>
+    <think topic="repair">Keep the saved auxiliary tensors on CPU because they are only needed as autograd state, not as model-visible outputs.</think>
+    <pseudocode>
+      <step>read output texture into CPU memory</step>
+      <step>move only the visible image output to the caller device</step>
+      <step>keep packed Gaussians, out_cpu, front_ids, front_raw_alpha, front_meta, tile_offsets, and tile_ids on CPU for backward</step>
+    </pseudocode>
+    <decision>Saved-state movement becomes CPU-only aux storage instead of CPU to MPS to CPU round-trips.</decision>
+  </iteration>
+
+  <iteration id="5" name="trim_memory_without_math_drift">
+    <problem>Which saved tensors can be compressed exactly?</problem>
+    <think topic="front_ids">Per-batch Gaussian ids fit in uint16 for up to 65536 Gaussians.</think>
+    <think topic="count_and_overflow">front_count only needs a few bits when K is capped at 8, so count and overflow can share one uint8.</think>
+    <think topic="raw_alpha">raw alpha stays float32 in the default path because it feeds exact backward math and is not the first place to trade accuracy.</think>
+    <decision>
+      <item>front_ids becomes uint16</item>
+      <item>front_count plus overflow becomes packed uint8 front_meta</item>
+      <item>front_raw_alpha stays float32</item>
+    </decision>
+  </iteration>
+
+  <algorithm id="tile_bin_builder">
+    <intent>Create exact sparse candidate lists per screen tile.</intent>
+    <pseudocode>
+      <step>tiles_x = ceil(width / tile_size)</step>
+      <step>tiles_y = ceil(height / tile_size)</step>
+      <step>for each batch and Gaussian in depth order:</step>
+      <step>  compute alpha-threshold support bbox</step>
+      <step>  convert bbox to tile ranges</step>
+      <step>  increment per-tile counts</step>
+      <step>exclusive-scan counts into tile_offsets</step>
+      <step>second pass: append Gaussian ids into tile_ids using cursors</step>
+    </pseudocode>
+    <think topic="complexity">This costs total tile references, not pixels times all splats.</think>
+  </algorithm>
+
+  <algorithm id="capture_front_k_binned">
+    <intent>Build exact front-K state from sparse tile-local candidates.</intent>
+    <pseudocode>
+      <step>pixel determines its tile id</step>
+      <step>load start and end from tile_offsets</step>
+      <step>scan tile_ids[start:end] in front-to-back order</step>
+      <step>run exact pixel-local visibility test</step>
+      <step>save first K hits and raw alpha values</step>
+      <step>pack count plus overflow into front_meta</step>
+    </pseudocode>
+    <expected_complexity>pixels times average tile bin size</expected_complexity>
+  </algorithm>
+
+  <algorithm id="backward_overflow_replay_binned">
+    <intent>Keep exact replay only for overflowing pixels, and only over local candidates.</intent>
+    <pseudocode>
+      <step>if front_meta says no overflow, exit</step>
+      <step>determine the pixel's tile</step>
+      <step>scan only that tile's contributors in saved front-to-back order</step>
+      <step>replay exact compositing and accumulate gradients</step>
+    </pseudocode>
+    <think topic="benefit">Even the expensive path stops pretending every overflow pixel must rediscover the whole scene.</think>
+  </algorithm>
+
+  <tradeoffs>
+    <item>CPU-built bins are a corrective engineering step, not the final ideal architecture.</item>
+    <item>The remaining big future win is a GPU-resident tile bin builder or true raster-derived visibility capture.</item>
+    <item>Adversarial huge-support scenes can still generate very large tile-reference lists.</item>
+  </tradeoffs>
+
+  <final_proposal>
+    <statement>Use v7.2 as the real fix for the concrete v7.1 bottleneck: sparse exact tile bins for capture and overflow replay, plus CPU-resident aux state and exact metadata packing.</statement>
+    <statement>Judge it next on Apple hardware. If the tile-binned shape holds but CPU packaging dominates, move the bin builder onto GPU in the next pass.</statement>
+  </final_proposal>
+</sparse_capture_notebook>

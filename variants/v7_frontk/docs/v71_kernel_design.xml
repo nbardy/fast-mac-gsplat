@@ -1,0 +1,86 @@
+<design_notebook version="0.7.1">
+  <overview>
+    <goal>Replace replay-everything backward with a saved front-K visibility design.</goal>
+    <scope>This file is a structured engineering notebook, not hidden chain-of-thought.</scope>
+    <constraint>Keep the Torch autograd boundary and keep the graphics forward image path.</constraint>
+  </overview>
+
+  <iteration id="1" name="formula_audit">
+    <problem>The old replay kernel is both slow and locally wrong.</problem>
+    <kernel_idea>Audit the scalar derivatives before touching the architecture.</kernel_idea>
+    <bugs>
+      <bug id="color_factor">Old code used grad_color += grad_out * T. Correct form is grad_color += grad_out * T * alpha.</bug>
+      <bug id="mean_sign">Old code negated mean gradients. Correct signs are positive because d(power)/d(mean) = [a*dx + b*dy, b*dx + c*dy].</bug>
+    </bugs>
+    <pseudocode>
+      <step>for each hit: w = T * alpha</step>
+      <step>grad_color += grad_out * w</step>
+      <step>dL_dalpha = dot(grad_out, T * (color - behind_or_suffix))</step>
+      <step>g_power = dL_draw * raw_alpha</step>
+      <step>grad_mean_x += g_power * (a * dx + b * dy)</step>
+      <step>grad_mean_y += g_power * (b * dx + c * dy)</step>
+    </pseudocode>
+    <result>Keep replay only as an exact fallback, not as the primary backward.</result>
+  </iteration>
+
+  <iteration id="2" name="saved_visibility_state">
+    <problem>Backward should not rediscover visibility from scratch on normal pixels.</problem>
+    <kernel_idea>Capture the first K visible layers after forward sorting.</kernel_idea>
+    <state_layout>
+      <tensor name="front_ids" shape="[B,H,W,K]" dtype="int32">Sorted gaussian indices, -1 for unused slots.</tensor>
+      <tensor name="front_raw_alpha" shape="[B,H,W,K]" dtype="float32">Unclamped opacity * exp(power).</tensor>
+      <tensor name="front_count" shape="[B,H,W]" dtype="int32">Captured contributor count, capped at K.</tensor>
+      <tensor name="overflow_mask" shape="[B,H,W]" dtype="uint8">1 if a (K+1)-th visible hit exists.</tensor>
+    </state_layout>
+    <pseudocode>
+      <step>initialize ids = -1, raw = 0, count = 0, overflow = 0</step>
+      <step>scan sorted gaussians front to back</step>
+      <step>if visible and count &lt; K: store id/raw and increment count</step>
+      <step>else if visible and count == K: set overflow = 1 and break</step>
+    </pseudocode>
+    <result>Front-K backward can now run in O(pixels * K) for non-overflow pixels.</result>
+  </iteration>
+
+  <iteration id="3" name="exact_common_path_and_exact_fallback">
+    <problem>Need exact gradients while keeping the common path cheap.</problem>
+    <kernel_idea>Split backward into two kernels.</kernel_idea>
+    <kernel name="backward_front_k">
+      <precondition>overflow_mask == 0</precondition>
+      <algorithm>
+        <step>Load ids/raw for n = front_count hits.</step>
+        <step>Compute alpha_i = min(0.99, raw_i).</step>
+        <step>Build suffix colors S_i in registers with S_n = bg.</step>
+        <step>Walk layers front to back with prefix transmittance T.</step>
+        <step>Accumulate exact gradients to color, opacity, mean, and conic.</step>
+      </algorithm>
+      <register_budget>Use fixed arrays with kMaxFrontK = 8.</register_budget>
+    </kernel>
+    <kernel name="backward_overflow_replay">
+      <precondition>overflow_mask == 1</precondition>
+      <algorithm>
+        <step>Replay the full sorted list only for overflow pixels.</step>
+        <step>Use the exact forward image to recover the suffix color via behind = (out - A - w*c) / (T*(1-alpha)).</step>
+        <step>Apply the corrected local gradients from iteration 1.</step>
+      </algorithm>
+      <reason>This keeps exactness even when the pixel has more than K contributors.</reason>
+    </kernel>
+    <result>Exact gradients with a sparse expensive path instead of a universal expensive path.</result>
+  </iteration>
+
+  <iteration id="4" name="validation_and_bringup">
+    <problem>Need a way to validate the math without claiming Apple-machine benchmark proof.</problem>
+    <kernel_idea>Ship a reference Python implementation of the same algorithm.</kernel_idea>
+    <validation>
+      <check>Reference image equals dense autograd reference.</check>
+      <check>Means, conics, colors, and opacities match dense autograd gradients on small cases.</check>
+      <check>Include both random and clamp/overflow-heavy scenes.</check>
+    </validation>
+    <bringup_steps>
+      <step>Build extension on Mac.</step>
+      <step>Run CPU/reference exactness script.</step>
+      <step>Run tiny MPS parity cases.</step>
+      <step>Measure overflow ratio for K=2 and K=4 on real scenes.</step>
+      <step>Benchmark against v3 and v5 only after parity is clean.</step>
+    </bringup_steps>
+  </iteration>
+</design_notebook>

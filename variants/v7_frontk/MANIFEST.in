@@ -1,0 +1,6 @@
+recursive-include csrc *.h *.cpp *.mm *.metal
+recursive-include docs *.md *.xml
+recursive-include tests *.py
+recursive-include benchmarks *.py
+include README.md
+include ENGINEERING_NOTES.md

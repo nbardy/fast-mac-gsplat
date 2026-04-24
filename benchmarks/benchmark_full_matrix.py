@@ -18,11 +18,19 @@ V3_ROOT = ROOT / "variants" / "v3"
 V5_ROOT = ROOT / "variants" / "v5"
 V6_ROOT = ROOT / "variants" / "v6"
 V6_UPGRADE_ROOT = ROOT / "variants" / "v6_upgrade"
+V6_REFINED_ROOT = ROOT / "variants" / "v6_refined"
+V8_ROOT = ROOT / "variants" / "v8"
+V8_HW_EVAL_ROOT = ROOT / "variants" / "v8_hw_eval"
+V8_HW_TRAIN_ROOT = ROOT / "variants" / "v8_hw_train"
 V7_ROOT = ROOT / "variants" / "v7"
+V7_FINISHED_ROOT = ROOT / "variants" / "v7_finished"
+V7_FRONTK_ROOT = ROOT / "variants" / "v7_frontk"
+V72_TILED_ROOT = ROOT / "variants" / "v7_tiled_capture"
+V73_HYBRID_ROOT = ROOT / "variants" / "v7_hybrid_v5style"
 
 
 DEFAULT_BG = (0.0, 0.0, 0.0)
-DEFAULT_RENDERERS = "torch_direct,v2_fastpath,v3_candidate,v5_batched,v6_direct,v6_auto,v6_upgrade_direct,v6_upgrade_auto,v7_hardware"
+DEFAULT_RENDERERS = "torch_direct,v2_fastpath,v3_candidate,v5_batched,v6_direct,v6_auto,v6_upgrade_direct,v6_upgrade_auto,v6_refined_direct,v6_refined_auto,v8_direct,v7_hardware,v7_finished_hardware,v7_frontk_k2,v72_tiled_k2,v73_hybrid_k2"
 DEFAULT_DISTS = "microbench_uniform_random,sparse_screen,clustered_hot_tiles,layered_depth"
 
 
@@ -218,13 +226,205 @@ def run_renderer(renderer: str, inputs, height: int, width: int):
             *inputs,
             RasterConfigV6Upgrade(height=height, width=width, background=DEFAULT_BG, active_policy="auto"),
         )
+    if renderer == "v6_refined_direct":
+        ensure_path(V6_REFINED_ROOT)
+        from torch_gsplat_bridge_v6 import RasterConfig as RasterConfigV6Refined
+        from torch_gsplat_bridge_v6 import rasterize_projected_gaussians as rasterize_v6_refined
+
+        return rasterize_v6_refined(
+            *inputs,
+            RasterConfigV6Refined(height=height, width=width, background=DEFAULT_BG, active_policy="off"),
+        )
+    if renderer == "v6_refined_auto":
+        ensure_path(V6_REFINED_ROOT)
+        from torch_gsplat_bridge_v6 import RasterConfig as RasterConfigV6Refined
+        from torch_gsplat_bridge_v6 import rasterize_projected_gaussians as rasterize_v6_refined
+
+        return rasterize_v6_refined(
+            *inputs,
+            RasterConfigV6Refined(height=height, width=width, background=DEFAULT_BG, active_policy="auto"),
+        )
+    if renderer == "v8_direct":
+        ensure_path(V8_ROOT)
+        from torch_gsplat_bridge_v8 import RasterConfig as RasterConfigV8
+        from torch_gsplat_bridge_v8 import rasterize_projected_gaussians as rasterize_v8
+
+        return rasterize_v8(*inputs, RasterConfigV8(height=height, width=width, background=DEFAULT_BG, active_policy="off"))
+    if renderer.startswith("v8_hw_eval"):
+        ensure_path(V8_HW_EVAL_ROOT)
+        from torch_gsplat_bridge_v8_hw_eval import RasterConfig as RasterConfigV8HwEval
+        from torch_gsplat_bridge_v8_hw_eval import rasterize_projected_gaussians as rasterize_v8_hw_eval
+
+        policy = "fallback"
+        if renderer.endswith("_off"):
+            policy = "off"
+        elif renderer.endswith("_require"):
+            policy = "require"
+        return rasterize_v8_hw_eval(
+            *inputs,
+            RasterConfigV8HwEval(
+                height=height,
+                width=width,
+                background=DEFAULT_BG,
+                active_policy="off",
+                use_hardware_eval=(policy != "off"),
+                hardware_eval_policy=policy,
+            ),
+        )
+    if renderer.startswith("v8_hw_train"):
+        ensure_path(V8_HW_TRAIN_ROOT)
+        from torch_gsplat_bridge_v8_hw_train import RasterConfig as RasterConfigV8HwTrain
+        from torch_gsplat_bridge_v8_hw_train import rasterize_projected_gaussians as rasterize_v8_hw_train
+
+        policy = "fallback"
+        if renderer.endswith("_strict"):
+            policy = "strict"
+        state_mode = "compute"
+        if "_tile_stop" in renderer:
+            state_mode = "tile_stop"
+        elif "_final_T" in renderer:
+            state_mode = "final_T"
+        elif "_pixel_stop" in renderer:
+            state_mode = "pixel_stop"
+        return rasterize_v8_hw_train(
+            *inputs,
+            RasterConfigV8HwTrain(
+                height=height,
+                width=width,
+                background=DEFAULT_BG,
+                active_policy="off",
+                use_hardware_train=True,
+                hardware_train_policy=policy,
+                capture_stop_count=(state_mode in ("compute", "tile_stop")),
+                capture_final_T=(state_mode == "final_T"),
+                capture_pixel_stop=(state_mode == "pixel_stop"),
+                backward_state_mode=state_mode,
+            ),
+        )
     if renderer == "v7_hardware":
         ensure_path(V7_ROOT)
         from torch_gsplat_bridge_v7 import RasterConfig as RasterConfigV7
         from torch_gsplat_bridge_v7 import rasterize_projected_gaussians as rasterize_v7
 
         return rasterize_v7(*inputs, RasterConfigV7(height=height, width=width, background=DEFAULT_BG))
+    if renderer == "v7_finished_hardware":
+        ensure_path(V7_FINISHED_ROOT)
+        from torch_gsplat_bridge_v7 import RasterConfig as RasterConfigV7Finished
+        from torch_gsplat_bridge_v7 import rasterize_projected_gaussians as rasterize_v7_finished
+
+        return rasterize_v7_finished(*inputs, RasterConfigV7Finished(height=height, width=width, background=DEFAULT_BG))
+    if renderer in ("v7_frontk_hardware", "v7_frontk_k2", "v7_frontk_k4", "v7_frontk_k8"):
+        ensure_path(V7_FRONTK_ROOT)
+        from torch_gsplat_bridge_v71 import RasterConfig as RasterConfigV71
+        from torch_gsplat_bridge_v71 import rasterize_projected_gaussians as rasterize_v71
+
+        front_k = 2
+        if renderer.startswith("v7_frontk_k"):
+            front_k = int(renderer.removeprefix("v7_frontk_k"))
+        return rasterize_v71(*inputs, RasterConfigV71(height=height, width=width, front_k=front_k, background=DEFAULT_BG))
+    if renderer.startswith("v72_tiled"):
+        ensure_path(V72_TILED_ROOT)
+        from torch_gsplat_bridge_v72 import RasterConfig as RasterConfigV72
+        from torch_gsplat_bridge_v72 import rasterize_projected_gaussians as rasterize_v72
+
+        front_k = 2
+        tile_size = 16
+        for part in renderer.split("_"):
+            if part.startswith("k") and part[1:].isdigit():
+                front_k = int(part[1:])
+            elif part.startswith("t") and part[1:].isdigit():
+                tile_size = int(part[1:])
+        return rasterize_v72(
+            *inputs,
+            RasterConfigV72(height=height, width=width, front_k=front_k, tile_size=tile_size, background=DEFAULT_BG),
+        )
+    if renderer.startswith("v73_hybrid"):
+        ensure_path(V73_HYBRID_ROOT)
+        from torch_gsplat_bridge_v73 import RasterConfig as RasterConfigV73
+        from torch_gsplat_bridge_v73 import rasterize_projected_gaussians as rasterize_v73
+
+        front_k = 2
+        tile_size = 16
+        batch_strategy = "auto"
+        train_backend = "auto"
+        for part in renderer.split("_"):
+            if part.startswith("k") and part[1:].isdigit():
+                front_k = int(part[1:])
+            elif part.startswith("t") and part[1:].isdigit():
+                tile_size = int(part[1:])
+            elif part in ("serial", "flatten", "auto"):
+                batch_strategy = part
+            elif part in ("trainv5", "v5train", "compute"):
+                train_backend = "v5_compute"
+            elif part in ("trainhw", "hwtrain", "hardwaretrain"):
+                train_backend = "hardware"
+        return rasterize_v73(
+            *inputs,
+            RasterConfigV73(
+                height=height,
+                width=width,
+                front_k=front_k,
+                tile_size=tile_size,
+                batch_strategy=batch_strategy,
+                train_backend=train_backend,
+                background=DEFAULT_BG,
+            ),
+        )
     raise ValueError(f"unknown renderer: {renderer}")
+
+
+def work_items(args: argparse.Namespace) -> int:
+    return args.batch_size * args.height * args.width * args.gaussians
+
+
+def measure_accuracy(args: argparse.Namespace, base_inputs) -> dict[str, Any]:
+    if work_items(args) > args.accuracy_max_work_items:
+        return {
+            "accuracy_status": "skipped",
+            "accuracy_reason": f"work_items {work_items(args)} exceeds accuracy limit {args.accuracy_max_work_items}",
+        }
+
+    if args.renderer == "torch_direct":
+        result: dict[str, Any] = {
+            "accuracy_status": "reference",
+            "image_max_abs_error": 0.0,
+            "image_mean_abs_error": 0.0,
+        }
+        if args.mode == "forward_backward":
+            result["grad_max_abs_error"] = 0.0
+        return result
+
+    backward = args.mode == "forward_backward"
+    run_inputs = clone_inputs(base_inputs, backward=backward)
+    ref_inputs = clone_inputs(base_inputs, backward=backward)
+
+    out = run_renderer(args.renderer, run_inputs, args.height, args.width)
+    ref = dense_torch_reference(*ref_inputs, args.height, args.width)
+    sync()
+
+    image_err = (out - ref).detach().abs()
+    result = {
+        "accuracy_status": "ok",
+        "image_max_abs_error": float(image_err.max().item()),
+        "image_mean_abs_error": float(image_err.mean().item()),
+    }
+
+    if backward:
+        out.square().mean().backward()
+        ref.square().mean().backward()
+        sync()
+        grad_max_values = []
+        for name, got, expected in zip(("means2d", "conics", "colors", "opacities"), run_inputs[:4], ref_inputs[:4]):
+            if got.grad is None or expected.grad is None:
+                continue
+            grad_err = (got.grad - expected.grad).detach().abs()
+            max_err = float(grad_err.max().item())
+            result[f"grad_{name}_max_abs_error"] = max_err
+            result[f"grad_{name}_mean_abs_error"] = float(grad_err.mean().item())
+            grad_max_values.append(max_err)
+        result["grad_max_abs_error"] = max(grad_max_values) if grad_max_values else 0.0
+
+    return result
 
 
 def time_one(args: argparse.Namespace) -> dict[str, Any]:
@@ -233,9 +433,9 @@ def time_one(args: argparse.Namespace) -> dict[str, Any]:
 
     mode = args.mode
     backward = mode == "forward_backward"
-    work_items = args.batch_size * args.height * args.width * args.gaussians
-    if args.renderer == "torch_direct" and work_items > args.torch_max_work_items:
-        return {"status": "skipped", "reason": f"torch work_items {work_items} exceeds limit {args.torch_max_work_items}"}
+    total_work_items = work_items(args)
+    if args.renderer == "torch_direct" and total_work_items > args.torch_max_work_items:
+        return {"status": "skipped", "reason": f"torch work_items {total_work_items} exceeds limit {args.torch_max_work_items}"}
 
     device = torch.device("mps")
     base_inputs = make_inputs(args.distribution, args.batch_size, args.gaussians, args.height, args.width, args.seed, device)
@@ -264,7 +464,7 @@ def time_one(args: argparse.Namespace) -> dict[str, Any]:
         backward_times.append(b_ms)
         total_times.append(f_ms + b_ms)
 
-    return {
+    row = {
         "status": "ok",
         "renderer": args.renderer,
         "mode": mode,
@@ -283,6 +483,18 @@ def time_one(args: argparse.Namespace) -> dict[str, Any]:
         "forward_ms": sum(forward_times) / len(forward_times),
         "backward_ms": sum(backward_times) / len(backward_times),
     }
+    if args.accuracy:
+        try:
+            row.update(measure_accuracy(args, base_inputs))
+        except Exception as exc:
+            row.update(
+                {
+                    "accuracy_status": "error",
+                    "accuracy_error": str(exc),
+                    "accuracy_traceback": traceback.format_exc(limit=8),
+                }
+            )
+    return row
 
 
 def run_one_json(args: argparse.Namespace) -> None:
@@ -317,6 +529,12 @@ def fmt_pct(value: float | None) -> str:
     return f"{value:+.1f}%"
 
 
+def fmt_err(value: Any) -> str:
+    if not isinstance(value, (float, int)):
+        return ""
+    return f"{float(value):.3e}"
+
+
 def key_for(row: dict[str, Any]) -> tuple[Any, ...]:
     return (
         row.get("height"),
@@ -340,6 +558,7 @@ def add_relative_columns(rows: list[dict[str, Any]]) -> None:
         best = min(ok_rows, key=lambda r: float(r["mean_ms"]))
         torch_row = next((r for r in ok_rows if r.get("renderer") == "torch_direct"), None)
         v6_row = next((r for r in ok_rows if r.get("renderer") == "v6_direct"), None)
+        v6_refined_row = next((r for r in ok_rows if r.get("renderer") == "v6_refined_direct"), None)
         for row in group_rows:
             row["best_renderer"] = best.get("renderer")
             if row.get("status") != "ok":
@@ -350,6 +569,8 @@ def add_relative_columns(rows: list[dict[str, Any]]) -> None:
                 row["speedup_vs_torch_pct"] = (float(torch_row["mean_ms"]) / mean - 1.0) * 100.0
             if v6_row is not None and v6_row is not row:
                 row["time_delta_vs_v6_direct_pct"] = (mean / float(v6_row["mean_ms"]) - 1.0) * 100.0
+            if v6_refined_row is not None and v6_refined_row is not row:
+                row["time_delta_vs_v6_refined_direct_pct"] = (mean / float(v6_refined_row["mean_ms"]) - 1.0) * 100.0
 
 
 def write_markdown(rows: list[dict[str, Any]], out_path: Path, args: argparse.Namespace) -> None:
@@ -364,7 +585,7 @@ def write_markdown(rows: list[dict[str, Any]], out_path: Path, args: argparse.Na
         "",
         f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
         "",
-        "Lower milliseconds are better. `% vs torch` is speedup over direct Torch when Torch was small enough to run. `% vs v6 direct` is time delta, so negative means faster than v6 direct.",
+        "Lower milliseconds are better. `% vs torch` is speedup over direct Torch when Torch was small enough to run. `% vs v6 direct` and `% vs v6 refined direct` are time deltas, so negative means faster than that baseline.",
         "",
         "## Settings",
         "",
@@ -372,6 +593,8 @@ def write_markdown(rows: list[dict[str, Any]], out_path: Path, args: argparse.Na
         f"- iters: `{args.iters}`",
         f"- seed: `{args.seed}`",
         f"- timeout seconds per cell: `{args.timeout_sec}`",
+        f"- accuracy checks: `{bool(args.accuracy)}`",
+        f"- accuracy max work items: `{args.accuracy_max_work_items}`",
         "",
         "## Winners",
         "",
@@ -387,21 +610,24 @@ def write_markdown(rows: list[dict[str, Any]], out_path: Path, args: argparse.Na
         "",
         "## Full Results",
         "",
-        "| Resolution | B | Splats | Distribution | Mode | Renderer | Status | Mean ms | Median ms | Fwd ms | Bwd ms | Slower Than Best | % vs Torch | % vs v6 Direct | Notes |",
-        "|---|---:|---:|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|",
+        "| Resolution | B | Splats | Distribution | Mode | Renderer | Status | Mean ms | Median ms | Fwd ms | Bwd ms | Accuracy | Image Max Err | Grad Max Err | Slower Than Best | % vs Torch | % vs v6 Direct | % vs v6 Refined Direct | Notes |",
+        "|---|---:|---:|---|---|---|---|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|---|",
     ]
     for row in rows:
         status = row.get("status", "")
         h = row.get("height")
         w = row.get("width")
-        note = row.get("reason") or row.get("error") or ""
+        notes = [str(x) for x in (row.get("reason"), row.get("error"), row.get("accuracy_reason"), row.get("accuracy_error")) if x]
+        note = "; ".join(notes)
         lines.append(
             "| "
             f"{w}x{h} | {row.get('batch_size')} | {row.get('gaussians')} | {row.get('distribution')} | {row.get('mode')} | "
             f"{row.get('renderer')} | {status} | {fmt_ms(row.get('mean_ms'))} | {fmt_ms(row.get('median_ms'))} | "
             f"{fmt_ms(row.get('forward_ms'))} | {fmt_ms(row.get('backward_ms'))} | "
+            f"{row.get('accuracy_status', '')} | {fmt_err(row.get('image_max_abs_error'))} | {fmt_err(row.get('grad_max_abs_error'))} | "
             f"{fmt_pct(row.get('slower_than_best_pct'))} | {fmt_pct(row.get('speedup_vs_torch_pct'))} | "
-            f"{fmt_pct(row.get('time_delta_vs_v6_direct_pct'))} | {str(note).replace('|', '/')} |"
+            f"{fmt_pct(row.get('time_delta_vs_v6_direct_pct'))} | {fmt_pct(row.get('time_delta_vs_v6_refined_direct_pct'))} | "
+            f"{str(note).replace('|', '/')} |"
         )
     lines.append("")
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -438,7 +664,10 @@ def parent_main(args: argparse.Namespace) -> None:
             "--iters", str(args.iters),
             "--seed", str(args.seed),
             "--torch-max-work-items", str(args.torch_max_work_items),
+            "--accuracy-max-work-items", str(args.accuracy_max_work_items),
         ]
+        if args.accuracy:
+            cmd.append("--accuracy")
         label = f"[{i}/{len(jobs)}] {width}x{height} B={b} G={g} {dist} {mode} {renderer}"
         print(label, flush=True)
         try:
@@ -500,6 +729,8 @@ def main() -> None:
     p.add_argument("--iters", type=int, default=3)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--torch-max-work-items", type=int, default=64_000_000)
+    p.add_argument("--accuracy", action="store_true", help="Compare image and gradient outputs against the dense Torch reference when under the accuracy work-item limit.")
+    p.add_argument("--accuracy-max-work-items", type=int, default=16_000_000)
     p.add_argument("--resolutions", type=str, default="512x512,1024x512")
     p.add_argument("--splats", type=str, default="512,2048")
     p.add_argument("--batch-sizes", type=str, default="1,4")
