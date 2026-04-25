@@ -42,6 +42,8 @@ class V9HWTileExactCapabilities:
     tile_execution_probe_error: str
     tile_exact_overlap_probe_available: bool | None
     tile_exact_overlap_probe_error: str
+    tile_exact_gaussian_probe_available: bool | None
+    tile_exact_gaussian_probe_error: str
     tile_exact_imageblock_sample_length: int | None
     tile_exact_imageblock_memory_16x16: int | None
     tile_exact_imageblock_memory_32x32: int | None
@@ -164,6 +166,21 @@ def run_tile_exact_overlap_probe(height: int = 32, width: int = 32, tile_size: i
     return dict(_C.run_tile_exact_overlap_probe(int(height), int(width), int(tile_size)))
 
 
+def run_tile_exact_gaussian_probe(height: int = 32, width: int = 32, tile_size: int = 16) -> Dict[str, Any]:
+    """Run the exact imageblock C/T path with ordered Gaussian fragment updates."""
+    if _C is None:
+        raise RuntimeError("native extension is not imported; build variants/v9_hw_tile_exact_probe first")
+    if not torch.backends.mps.is_available():
+        raise RuntimeError("MPS is not available")
+    if height <= 0 or width <= 0:
+        raise ValueError("height and width must be positive")
+    if tile_size != 16:
+        raise ValueError(
+            "tile_size must be 16 for this exact-gaussian probe; 32x32 compiled but failed encoder creation on M4"
+        )
+    return dict(_C.run_tile_exact_gaussian_probe(int(height), int(width), int(tile_size)))
+
+
 def estimate_tile_exact_memory(
     *,
     height: int = 2160,
@@ -282,6 +299,8 @@ def probe_hw_interop(
         tile_execution_probe_error=str(native.get("tile_execution_probe_error", "")),
         tile_exact_overlap_probe_available=_optional_bool(native.get("tile_exact_overlap_probe_available")),
         tile_exact_overlap_probe_error=str(native.get("tile_exact_overlap_probe_error", "")),
+        tile_exact_gaussian_probe_available=_optional_bool(native.get("tile_exact_gaussian_probe_available")),
+        tile_exact_gaussian_probe_error=str(native.get("tile_exact_gaussian_probe_error", "")),
         tile_exact_imageblock_sample_length=_optional_int(native.get("tile_exact_imageblock_sample_length")),
         tile_exact_imageblock_memory_16x16=_optional_int(native.get("tile_exact_imageblock_memory_16x16")),
         tile_exact_imageblock_memory_32x32=_optional_int(native.get("tile_exact_imageblock_memory_32x32")),

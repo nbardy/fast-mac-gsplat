@@ -4,8 +4,9 @@ V9 tile-state starts from the working render-pass interop gate and probes the
 next question: whether Metal tile shaders/imageblocks can hold per-pixel
 Gaussian compositing state (`C`, `T`, stop metadata) in the render pass.
 
-This variant is intentionally not a Gaussian rasterizer yet. It proves and
-measures the primitives that imageblocks, ROG, and later ICB would depend on:
+This variant is intentionally still a probe, not a full Gaussian rasterizer. It
+proves and measures the primitives that imageblocks, ROG, and later ICB would
+depend on:
 
 1. allocate a Torch MPS tensor `[H,W,4] float32`;
 2. preferably render a full-screen triangle directly into a buffer-backed
@@ -17,7 +18,9 @@ measures the primitives that imageblocks, ROG, and later ICB would depend on:
    direct Torch MPS target;
 6. run the minimal exact imageblock overlap path:
    `tile clear -> ordered fragment C/T update + atomic tile stop -> tile report -> tile resolve`;
-7. return tensors without native `waitUntilCompleted`, `getBytes`, or CPU
+7. run an ordered Gaussian fragment path through the same exact imageblock
+   `C/T` state and atomic tile stop-count output;
+8. return tensors without native `waitUntilCompleted`, `getBytes`, or CPU
    staging.
 
 The Python validation reads the output back to CPU only after the op returns, so
@@ -40,7 +43,7 @@ python3 tests/full_backward_check.py
 ## Benchmark
 
 ```bash
-python3 benchmarks/benchmark_interop.py --sizes 64x64,512x512,1080x1920 --warmup 3 --iters 10 --paths blit,direct,exact
+python3 benchmarks/benchmark_interop.py --sizes 64x64,512x512,1080x1920 --warmup 3 --iters 10 --paths blit,direct,exact,gaussian
 python3 benchmarks/benchmark_full_backward.py --height 512 --width 512 --gaussians 4096 --warmup 2 --iters 5
 ```
 
@@ -58,6 +61,10 @@ python3 benchmarks/benchmark_full_backward.py --height 512 --width 512 --gaussia
   explicit imageblock `C/T` state and blending disabled. Expected output is
   `float4(0.25, 0.375, 0.0, 0.375)` and the smoke test reports
   `tile_exact_overlap_max_abs_err=0.0`.
+- Tile exact Gaussian: validates four ordered Gaussian splats using the same
+  explicit imageblock `C/T` path, direct MPS output, and GPU-written tile
+  stop-count tensor. The smoke test compares the render output against a CPU
+  Gaussian reference.
 - Backward-state gate: the exact overlap path now returns GPU-written MPS
   `tile_stop_counts` (`int32`, one value per tile) plus debug `tile_reports`.
   The 32x32 / 16x16-tile smoke reports `tile_stop_counts=[2, 2, 2, 2]`.
@@ -85,9 +92,9 @@ so tile-level stop is updated by fragment-side atomic max into an MPS buffer.
 That matches the eventual V8-shaped state tensor better than a tile-local toy
 reduction, but it still only counts visible fragments in this probe.
 
-This still does not prove Gaussian/V8 parity. Next work is replacing the fixed
-fullscreen splats with tiny projected Gaussian quads, then feeding the same path
-from GPU-resident V8 tile bins.
+This still does not prove V8 parity. Next work is replacing the fullscreen
+Gaussian diagnostic draw with clipped projected Gaussian quads, then feeding the
+same path from GPU-resident V8 tile bins.
 
 Full backward is currently done by compute replay, not hardware-raster replay.
 That is deliberate: the hardware path cannot own training gradients until it

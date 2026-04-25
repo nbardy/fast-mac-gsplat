@@ -194,13 +194,70 @@ does show that adding explicit C/T state plus one per-fragment atomic max is not
 catastrophic at these sizes. The 1080p exact path was about 1.26x the direct
 constant-render median in this run.
 
+## A1 Gaussian State Probe
+
+The variant now also exposes:
+
+```python
+run_tile_exact_gaussian_probe(height=32, width=32, tile_size=16)
+```
+
+Native path:
+
+```text
+tile clear
+  C/T/stop/flags imageblock state = zero/one/zero/zero
+
+fragment pipeline: v9_gaussian_update_fs
+  draw 4 ordered fullscreen instances
+  load per-instance mean, conic, opacity, color
+  stop_count += 1 for active pixels before alpha evaluation
+  alpha = min(0.99, opacity * exp(-0.5 * d^T conic d))
+  alpha = 0 if power > 0 or alpha < 1/255
+  C += T * alpha * color
+  T *= 1 - alpha
+  stopped flag set if T <= 1e-4
+  atomic_max(tile_stop_counts[tile], stop_count)
+
+tile report
+  reports[tile] = (tile_stop_count, sample_final_T, sample_flags, tile_index)
+
+tile resolve
+  output float4(C.rgb, T) to the direct Torch/MPS target
+```
+
+The smoke test compares output against a dense CPU scalar reference with pixel
+centers at `x + 0.5, y + 0.5`:
+
+```text
+tile_exact_gaussian_max_abs_err=1.1920928955078125e-07
+tile_exact_gaussian_tile_stop_counts=[4, 4, 4, 4]
+```
+
+Fresh timing smoke:
+
+```text
+python3 benchmarks/benchmark_interop.py --sizes 32x32,512x512,1080x1920 --warmup 3 --iters 20 --paths direct,exact,gaussian --jsonl ../../benchmarks/v9_hw_tile_exact_gaussian_state_smoke.jsonl
+```
+
+| Size | Direct RGBA32F median ms | Exact two-splat median ms | Exact Gaussian median ms |
+| --- | ---: | ---: | ---: |
+| 32x32 | 0.551 | 0.581 | 0.873 |
+| 512x512 | 0.652 | 1.212 | 1.693 |
+| 1080x1920 | 1.826 | 4.519 | 8.610 |
+
+This proves ordered Gaussian alpha math through fragment/imageblock state, not
+V8 training parity. The diagnostic still draws fullscreen splats, so its cost is
+dominated by wasted fragment evaluation. The next speed gate is clipped quads or
+tile-bin-fed draw records.
+
 ## Next Kill Gate
 
 Next A gate:
 
 ```text
-A1: replace the two fixed fullscreen splats with 2-4 projected Gaussian quads
-    in stable input order, still 16x16 tiles, still no tile bins.
+A2: replace the fullscreen Gaussian diagnostic with clipped projected Gaussian
+    quads in stable input order, still 16x16 tiles, still no tile bins.
 ```
 
 Pass condition:

@@ -15,6 +15,7 @@ from torch_gsplat_bridge_v9_hw_tile_exact import (
     probe_hw_interop,
     render_constant_rgba,
     render_constant_rgba_direct,
+    run_tile_exact_gaussian_probe,
     run_tile_exact_overlap_probe,
 )
 
@@ -48,6 +49,10 @@ def main() -> None:
             "tile_exact_imageblock_forward_with_atomic_tile_stop_counts",
             lambda height, width: run_tile_exact_overlap_probe(height, width, 16),
         ),
+        "gaussian": (
+            "tile_exact_imageblock_gaussian_forward_with_atomic_tile_stop_counts",
+            lambda height, width: run_tile_exact_gaussian_probe(height, width, 16),
+        ),
     }
     for path_name in [p.strip() for p in args.paths.split(",") if p.strip()]:
         if path_name not in path_fns:
@@ -55,7 +60,7 @@ def main() -> None:
         path_label, fn = path_fns[path_name]
         for raw_size in args.sizes.split(","):
             height, width = parse_size(raw_size.strip())
-            if path_name in {"direct", "exact"} and (width * 16) % 256 != 0:
+            if path_name in {"direct", "exact", "gaussian"} and (width * 16) % 256 != 0:
                 print(json.dumps({
                     "height": height,
                     "width": width,

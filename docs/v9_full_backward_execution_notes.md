@@ -98,10 +98,10 @@ Observed against a dense PyTorch reference:
 
 ```text
 image max error: 5.960464477539063e-08
-means grad max error: 1.964508555829525e-10
+means grad max error: 2.3283064365386963e-10
 conics grad max error: 1.862645149230957e-09
 colors grad max error: 9.313225746154785e-10
-opacities grad max error: 3.725290298461914e-09
+opacities grad max error: 1.862645149230957e-09
 ```
 
 Also verified inherited V8-hw-eval reference tests:
@@ -127,6 +127,24 @@ Apple M4, B=1, 512x512, 4,096 projected splats:
 | Forward | 3.092 | 2.953 |
 | Backward | 2.134 | 2.834 |
 | Forward + backward | 5.235 | 5.787 |
+
+Refresh command after the Gaussian hardware-state probe landed:
+
+```text
+python3 benchmarks/benchmark_full_backward.py --height 512 --width 512 --gaussians 4096 --warmup 3 --iters 20 --jsonl ../../benchmarks/v9_full_backward_compute_replay_refresh.jsonl
+```
+
+Refresh result:
+
+| Metric | Median ms | Mean ms |
+| --- | ---: | ---: |
+| Forward | 12.458 | 16.203 |
+| Backward | 9.667 | 9.911 |
+| Forward + backward | 22.077 | 26.114 |
+
+The refresh confirms the backend still runs, but the timing is much slower than
+the earlier smoke. Treat this as a benchmark stability warning until rerun in an
+isolated process/device state with direct V8-vs-V9 common tensors.
 
 ## Next Hardware-Backward Gate
 

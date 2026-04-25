@@ -140,6 +140,12 @@ struct V9ExactFragOut {
   V9ExactImageblock imageblock_data [[imageblock_data]];
 };
 
+struct V9GaussianSplat {
+  float4 mean_opacity;
+  float4 conic_pad;
+  float4 color_pad;
+};
+
 struct V9ExactVSOut {
   float4 position [[position]];
   uint splat_id;
@@ -201,6 +207,49 @@ fragment V9ExactFragOut v9_exact_update_fs(
   return out;
 }
 
+fragment V9ExactFragOut v9_gaussian_update_fs(
+    V9ExactVSOut in [[stage_in]],
+    V9ExactImageblock imageblock_data [[imageblock_data]],
+    constant V9TileExecParams& params [[buffer(0)]],
+    device atomic_uint* tile_stop_counts [[buffer(1)]],
+    constant V9GaussianSplat* splats [[buffer(2)]]) {
+  V9ExactPixelState pixel = imageblock_data.pixel;
+  if ((pixel.flags & 1u) == 0u) {
+    const V9GaussianSplat splat = splats[in.splat_id];
+    pixel.stop_count += 1u;
+
+    const float2 xy = in.position.xy;
+    const float2 mean = splat.mean_opacity.xy;
+    const float opacity = splat.mean_opacity.w;
+    const float3 conic = splat.conic_pad.xyz;
+    const float3 color = splat.color_pad.xyz;
+    const float dx = xy.x - mean.x;
+    const float dy = xy.y - mean.y;
+    const float power = -0.5f * (conic.x * dx * dx + 2.0f * conic.y * dx * dy + conic.z * dy * dy);
+    float alpha = min(0.99f, opacity * exp(power));
+    if (power > 0.0f || alpha < (1.0f / 255.0f)) {
+      alpha = 0.0f;
+    }
+
+    if (alpha > 0.0f) {
+      const float T = pixel.c_t.a;
+      pixel.c_t.rgb += T * alpha * color;
+      pixel.c_t.a = T * (1.0f - alpha);
+      if (pixel.c_t.a <= 1.0e-4f) {
+        pixel.flags |= 1u;
+      }
+    }
+  }
+
+  const uint2 pixel_xy = uint2(in.position.xy);
+  const uint tile_index = (pixel_xy.y / params.tile_size) * params.tiles_x + (pixel_xy.x / params.tile_size);
+  atomic_fetch_max_explicit(&tile_stop_counts[tile_index], pixel.stop_count, memory_order_relaxed);
+
+  V9ExactFragOut out;
+  out.imageblock_data.pixel = pixel;
+  return out;
+}
+
 fragment float4 v9_exact_resolve_tile(V9ExactImageblock imageblock_data [[imageblock_data]]) {
   return imageblock_data.pixel.c_t;
 }
@@ -240,6 +289,7 @@ struct TilePipelineResult {
 struct TileExactPipelineBundle {
   id<MTLRenderPipelineState> clear_pso;
   id<MTLRenderPipelineState> update_pso;
+  id<MTLRenderPipelineState> gaussian_update_pso;
   id<MTLRenderPipelineState> report_pso;
   id<MTLRenderPipelineState> resolve_pso;
   std::string error;
@@ -253,6 +303,12 @@ struct V9TileExecParamsHost {
   uint32_t height;
   uint32_t tiles_x;
   uint32_t tile_size;
+};
+
+struct V9GaussianSplatHost {
+  std::array<float, 4> mean_opacity;
+  std::array<float, 4> conic_pad;
+  std::array<float, 4> color_pad;
 };
 
 constexpr TileLayoutSpec kTileLayoutSpecs[] = {
@@ -371,19 +427,21 @@ TilePipelineResult build_tile_pipeline_for_function(
 }
 
 TileExactPipelineBundle build_tile_exact_pipelines(id<MTLDevice> device) {
-  TileExactPipelineBundle result{nil, nil, nil, nil, "", 0, 0, 0};
+  TileExactPipelineBundle result{nil, nil, nil, nil, nil, "", 0, 0, 0};
   id<MTLLibrary> library = compile_library(device, kTileProbeSource, result.error);
   if (library == nil) return result;
 
   id<MTLFunction> clear_fn = [library newFunctionWithName:@"v9_exact_clear_tile"];
   id<MTLFunction> vs_fn = [library newFunctionWithName:@"v9_exact_fullscreen_vs"];
   id<MTLFunction> update_fn = [library newFunctionWithName:@"v9_exact_update_fs"];
+  id<MTLFunction> gaussian_update_fn = [library newFunctionWithName:@"v9_gaussian_update_fs"];
   id<MTLFunction> report_fn = [library newFunctionWithName:@"v9_exact_report_tile"];
   id<MTLFunction> resolve_fn = [library newFunctionWithName:@"v9_exact_resolve_tile"];
-  if (clear_fn == nil || vs_fn == nil || update_fn == nil || report_fn == nil || resolve_fn == nil) {
+  if (clear_fn == nil || vs_fn == nil || update_fn == nil || gaussian_update_fn == nil || report_fn == nil ||
+      resolve_fn == nil) {
     result.error =
         "compiled tile exact library is missing v9_exact_clear_tile, v9_exact_fullscreen_vs, "
-        "v9_exact_update_fs, v9_exact_report_tile, or v9_exact_resolve_tile";
+        "v9_exact_update_fs, v9_gaussian_update_fs, v9_exact_report_tile, or v9_exact_resolve_tile";
     return result;
   }
 
@@ -416,6 +474,21 @@ TileExactPipelineBundle build_tile_exact_pipelines(id<MTLDevice> device) {
     result.update_pso = [device newRenderPipelineStateWithDescriptor:update_desc error:&err];
     if (result.update_pso == nil) {
       result.error = std::string("fragment imageblock update pipeline: ") + nserror_to_string(err);
+      return result;
+    }
+
+    MTLRenderPipelineDescriptor* gaussian_update_desc = [[MTLRenderPipelineDescriptor alloc] init];
+    gaussian_update_desc.label = @"v9_hw_tile_exact_gaussian_update_fragments";
+    gaussian_update_desc.vertexFunction = vs_fn;
+    gaussian_update_desc.fragmentFunction = gaussian_update_fn;
+    gaussian_update_desc.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA32Float;
+    gaussian_update_desc.colorAttachments[0].blendingEnabled = NO;
+    gaussian_update_desc.colorAttachments[0].writeMask = MTLColorWriteMaskNone;
+
+    err = nil;
+    result.gaussian_update_pso = [device newRenderPipelineStateWithDescriptor:gaussian_update_desc error:&err];
+    if (result.gaussian_update_pso == nil) {
+      result.error = std::string("gaussian fragment imageblock update pipeline: ") + nserror_to_string(err);
       return result;
     }
 
@@ -454,18 +527,21 @@ TileExactPipelineBundle build_tile_exact_pipelines(id<MTLDevice> device) {
     result.imageblock_sample_length = std::max({
         [result.clear_pso imageblockSampleLength],
         [result.update_pso imageblockSampleLength],
+        [result.gaussian_update_pso imageblockSampleLength],
         [result.report_pso imageblockSampleLength],
         [result.resolve_pso imageblockSampleLength],
     });
     result.imageblock_memory_16x16 = std::max({
         [result.clear_pso imageblockMemoryLengthForDimensions:MTLSizeMake(16, 16, 1)],
         [result.update_pso imageblockMemoryLengthForDimensions:MTLSizeMake(16, 16, 1)],
+        [result.gaussian_update_pso imageblockMemoryLengthForDimensions:MTLSizeMake(16, 16, 1)],
         [result.report_pso imageblockMemoryLengthForDimensions:MTLSizeMake(16, 16, 1)],
         [result.resolve_pso imageblockMemoryLengthForDimensions:MTLSizeMake(16, 16, 1)],
     });
     result.imageblock_memory_32x32 = std::max({
         [result.clear_pso imageblockMemoryLengthForDimensions:MTLSizeMake(32, 32, 1)],
         [result.update_pso imageblockMemoryLengthForDimensions:MTLSizeMake(32, 32, 1)],
+        [result.gaussian_update_pso imageblockMemoryLengthForDimensions:MTLSizeMake(32, 32, 1)],
         [result.report_pso imageblockMemoryLengthForDimensions:MTLSizeMake(32, 32, 1)],
         [result.resolve_pso imageblockMemoryLengthForDimensions:MTLSizeMake(32, 32, 1)],
     });
@@ -493,14 +569,14 @@ id<MTLRenderPipelineState> cached_tile_execution_pipeline(id<MTLDevice> device) 
 
 TileExactPipelineBundle cached_tile_exact_pipelines(id<MTLDevice> device) {
   static std::mutex mu;
-  static TileExactPipelineBundle bundle{nil, nil, nil, nil, "", 0, 0, 0};
+  static TileExactPipelineBundle bundle{nil, nil, nil, nil, nil, "", 0, 0, 0};
   std::lock_guard<std::mutex> lock(mu);
-  if (bundle.clear_pso == nil && bundle.update_pso == nil && bundle.report_pso == nil && bundle.resolve_pso == nil &&
-      bundle.error.empty()) {
+  if (bundle.clear_pso == nil && bundle.update_pso == nil && bundle.gaussian_update_pso == nil &&
+      bundle.report_pso == nil && bundle.resolve_pso == nil && bundle.error.empty()) {
     bundle = build_tile_exact_pipelines(device);
   }
-  TORCH_CHECK(bundle.clear_pso != nil && bundle.update_pso != nil && bundle.report_pso != nil &&
-                  bundle.resolve_pso != nil,
+  TORCH_CHECK(bundle.clear_pso != nil && bundle.update_pso != nil && bundle.gaussian_update_pso != nil &&
+                  bundle.report_pso != nil && bundle.resolve_pso != nil,
               "Failed to build v9 tile exact imageblock pipelines: ",
               bundle.error);
   return bundle;
@@ -533,6 +609,48 @@ torch::Tensor make_tile_stop_tensor(int64_t tile_count) {
 
 NSUInteger ceil_div_u64(NSUInteger value, NSUInteger divisor) {
   return (value + divisor - 1) / divisor;
+}
+
+std::array<V9GaussianSplatHost, 4> default_gaussian_splats() {
+  return {
+      V9GaussianSplatHost{
+          {10.5f, 10.5f, 0.0f, 0.82f},
+          {1.0f / 18.0f, 0.0f, 1.0f / 24.0f, 0.0f},
+          {1.0f, 0.1f, 0.05f, 0.0f},
+      },
+      V9GaussianSplatHost{
+          {18.0f, 12.0f, 0.0f, 0.65f},
+          {1.0f / 32.0f, 0.015f, 1.0f / 20.0f, 0.0f},
+          {0.05f, 0.8f, 0.15f, 0.0f},
+      },
+      V9GaussianSplatHost{
+          {15.0f, 20.0f, 0.0f, 0.55f},
+          {1.0f / 26.0f, -0.01f, 1.0f / 18.0f, 0.0f},
+          {0.1f, 0.2f, 0.95f, 0.0f},
+      },
+      V9GaussianSplatHost{
+          {22.0f, 22.0f, 0.0f, 0.45f},
+          {1.0f / 40.0f, 0.0f, 1.0f / 40.0f, 0.0f},
+          {0.9f, 0.85f, 0.1f, 0.0f},
+      },
+  };
+}
+
+py::list gaussian_splats_to_python(const std::array<V9GaussianSplatHost, 4>& splats) {
+  py::list out;
+  for (const auto& splat : splats) {
+    out.append(py::make_tuple(
+        splat.mean_opacity[0],
+        splat.mean_opacity[1],
+        splat.conic_pad[0],
+        splat.conic_pad[1],
+        splat.conic_pad[2],
+        splat.mean_opacity[3],
+        splat.color_pad[0],
+        splat.color_pad[1],
+        splat.color_pad[2]));
+  }
+  return out;
 }
 
 void encode_constant_render(
@@ -646,6 +764,68 @@ void encode_tile_exact_overlap_probe(
 
   @throw [NSException exceptionWithName:@"V9HWTileExact"
                                  reason:@"tile exact overlap probe requires macOS 11.0 or newer"
+                               userInfo:nil];
+}
+
+void encode_tile_exact_gaussian_probe(
+    id<MTLCommandBuffer> command_buffer,
+    const TileExactPipelineBundle& pipelines,
+    id<MTLTexture> texture,
+    id<MTLBuffer> tile_stop_buffer,
+    NSUInteger tile_stop_offset,
+    id<MTLBuffer> report_buffer,
+    NSUInteger report_offset,
+    const V9TileExecParamsHost& params,
+    const std::array<V9GaussianSplatHost, 4>& splats) {
+  if (@available(macOS 11.0, *)) {
+    TORCH_CHECK(params.tile_size == 16,
+                "tile exact gaussian probe is fail-closed to 16x16 tiles; got ",
+                params.tile_size);
+    MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
+    pass.colorAttachments[0].texture = texture;
+    pass.colorAttachments[0].loadAction = MTLLoadActionClear;
+    pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+    pass.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 0.0);
+    pass.tileWidth = params.tile_size;
+    pass.tileHeight = params.tile_size;
+    pass.imageblockSampleLength = pipelines.imageblock_sample_length;
+
+    id<MTLRenderCommandEncoder> render_encoder = [command_buffer renderCommandEncoderWithDescriptor:pass];
+    if (render_encoder == nil) {
+      @throw [NSException exceptionWithName:@"V9HWTileExact"
+                                     reason:@"failed to create tile exact gaussian render command encoder"
+                                   userInfo:nil];
+    }
+
+    const MTLSize tile_threads = MTLSizeMake(params.tile_size, params.tile_size, 1);
+    [render_encoder setRenderPipelineState:pipelines.clear_pso];
+    [render_encoder setTileBuffer:tile_stop_buffer offset:tile_stop_offset atIndex:0];
+    [render_encoder setTileBytes:&params length:sizeof(params) atIndex:1];
+    [render_encoder dispatchThreadsPerTile:tile_threads];
+
+    [render_encoder setRenderPipelineState:pipelines.gaussian_update_pso];
+    [render_encoder setFragmentBytes:&params length:sizeof(params) atIndex:0];
+    [render_encoder setFragmentBuffer:tile_stop_buffer offset:tile_stop_offset atIndex:1];
+    [render_encoder setFragmentBytes:splats.data() length:sizeof(V9GaussianSplatHost) * splats.size() atIndex:2];
+    [render_encoder drawPrimitives:MTLPrimitiveTypeTriangle
+                        vertexStart:0
+                        vertexCount:3
+                      instanceCount:(NSUInteger)splats.size()];
+
+    [render_encoder setRenderPipelineState:pipelines.report_pso];
+    [render_encoder setTileBuffer:tile_stop_buffer offset:tile_stop_offset atIndex:0];
+    [render_encoder setTileBuffer:report_buffer offset:report_offset atIndex:1];
+    [render_encoder setTileBytes:&params length:sizeof(params) atIndex:2];
+    [render_encoder dispatchThreadsPerTile:tile_threads];
+
+    [render_encoder setRenderPipelineState:pipelines.resolve_pso];
+    [render_encoder dispatchThreadsPerTile:tile_threads];
+    [render_encoder endEncoding];
+    return;
+  }
+
+  @throw [NSException exceptionWithName:@"V9HWTileExact"
+                                 reason:@"tile exact gaussian probe requires macOS 11.0 or newer"
                                userInfo:nil];
 }
 
@@ -1000,6 +1180,124 @@ py::dict run_tile_exact_overlap_probe_native(
   return out;
 }
 
+py::dict run_tile_exact_gaussian_probe_native(
+    int64_t height,
+    int64_t width,
+    int64_t tile_size) {
+  TORCH_CHECK(height > 0 && width > 0, "height and width must be positive");
+  TORCH_CHECK(height <= INT32_MAX && width <= INT32_MAX, "height and width must fit int32");
+  TORCH_CHECK(tile_size == 16,
+              "tile_size must be 16 for this exact-gaussian probe. 32x32 exact state is intentionally disabled "
+              "after renderCommandEncoder creation failed with 48 B/sample state on Apple M4; got ",
+              tile_size);
+  TORCH_CHECK(torch::mps::is_available(), "MPS is not available");
+
+  id<MTLDevice> device = system_device();
+  TileExactPipelineBundle pipelines = cached_tile_exact_pipelines(device);
+  torch::Tensor target = make_output_tensor(height, width);
+  const NSUInteger tiles_x = ceil_div_u64((NSUInteger)width, (NSUInteger)tile_size);
+  const NSUInteger tiles_y = ceil_div_u64((NSUInteger)height, (NSUInteger)tile_size);
+  const NSUInteger tile_count = tiles_x * tiles_y;
+  torch::Tensor tile_stop_counts = make_tile_stop_tensor((int64_t)tile_count);
+  torch::Tensor reports = make_report_tensor((int64_t)tile_count);
+
+  id<MTLBuffer> target_buffer = tensor_mtl_buffer(target);
+  TORCH_CHECK(target_buffer != nil, "Failed to access target tensor MTLBuffer storage");
+  id<MTLBuffer> tile_stop_buffer = tensor_mtl_buffer(tile_stop_counts);
+  TORCH_CHECK(tile_stop_buffer != nil, "Failed to access tile_stop_counts tensor MTLBuffer storage");
+  id<MTLBuffer> report_buffer = tensor_mtl_buffer(reports);
+  TORCH_CHECK(report_buffer != nil, "Failed to access report tensor MTLBuffer storage");
+
+  const NSUInteger target_offset = (NSUInteger)(target.storage_offset() * target.element_size());
+  const NSUInteger tile_stop_offset = (NSUInteger)(tile_stop_counts.storage_offset() * tile_stop_counts.element_size());
+  const NSUInteger report_offset = (NSUInteger)(reports.storage_offset() * reports.element_size());
+  const NSUInteger bytes_per_pixel = 4 * sizeof(float);
+  const NSUInteger bytes_per_row = (NSUInteger)width * bytes_per_pixel;
+  TORCH_CHECK(bytes_per_row % 256 == 0,
+              "tile exact gaussian probe uses a direct buffer-backed RGBA32F render target and requires "
+              "width*16 to be 256-byte aligned; got bytes_per_row=",
+              bytes_per_row);
+
+  MTLTextureDescriptor* tex_desc = [MTLTextureDescriptor
+      texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float
+                                   width:(NSUInteger)width
+                                  height:(NSUInteger)height
+                               mipmapped:NO];
+  tex_desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+  tex_desc.storageMode = [target_buffer storageMode];
+
+  id<MTLTexture> texture =
+      [target_buffer newTextureWithDescriptor:tex_desc offset:target_offset bytesPerRow:bytes_per_row];
+  TORCH_CHECK(texture != nil,
+              "Failed to create a render-target texture view over Torch MPS tensor storage for tile gaussian probe");
+
+  V9TileExecParamsHost params{
+      (uint32_t)width,
+      (uint32_t)height,
+      (uint32_t)tiles_x,
+      (uint32_t)tile_size,
+  };
+  const auto splats = default_gaussian_splats();
+
+  dispatch_queue_t queue = torch::mps::get_dispatch_queue();
+  TORCH_CHECK(queue != nullptr, "torch::mps::get_dispatch_queue returned null");
+
+  __block NSString* block_error = nil;
+  dispatch_sync(queue, ^{
+    @autoreleasepool {
+      at::mps::MPSStream* stream = at::mps::getCurrentMPSStream();
+      if (stream != nullptr) {
+        stream->endKernelCoalescing();
+      }
+      id<MTLCommandBuffer> command_buffer = torch::mps::get_command_buffer();
+      if (command_buffer == nil) {
+        block_error = @"torch::mps::get_command_buffer returned nil";
+        return;
+      }
+      @try {
+        encode_tile_exact_gaussian_probe(
+            command_buffer,
+            pipelines,
+            texture,
+            tile_stop_buffer,
+            tile_stop_offset,
+            report_buffer,
+            report_offset,
+            params,
+            splats);
+      } @catch (NSException* exception) {
+        block_error = [exception reason];
+        return;
+      }
+    }
+  });
+
+  TORCH_CHECK(block_error == nil, nsstring_to_string(block_error));
+
+  py::dict out;
+  out["target"] = target;
+  out["tile_stop_counts"] = tile_stop_counts;
+  out["tile_reports"] = reports;
+  out["height"] = height;
+  out["width"] = width;
+  out["tile_size"] = tile_size;
+  out["tiles_x"] = (unsigned long long)tiles_x;
+  out["tiles_y"] = (unsigned long long)tiles_y;
+  out["tile_count"] = (unsigned long long)tile_count;
+  out["direct_target_bytes_per_row"] = (unsigned long long)bytes_per_row;
+  out["native_op_uses_cpu_readback"] = false;
+  out["imageblock_sample_length"] = (unsigned long long)pipelines.imageblock_sample_length;
+  out["imageblock_memory_16x16"] = (unsigned long long)pipelines.imageblock_memory_16x16;
+  out["imageblock_memory_32x32"] = (unsigned long long)pipelines.imageblock_memory_32x32;
+  out["input_splats"] = gaussian_splats_to_python(splats);
+  out["expected_tile_stop_count"] = (int64_t)splats.size();
+  out["expected_semantic"] =
+      "four ordered Gaussian splats evaluated in fragment shader over exact imageblock C/T state";
+  out["state_semantic"] =
+      "tile_stop_counts is the tile max of per-pixel candidate-prefix count for the ordered Gaussian path";
+  return out;
+}
+
 py::dict probe_native(bool compile_pipelines, bool compile_advanced) {
   py::dict out;
   out["native_probe_available"] = true;
@@ -1031,6 +1329,8 @@ py::dict probe_native(bool compile_pipelines, bool compile_advanced) {
   out["tile_execution_probe_error"] = "";
   out["tile_exact_overlap_probe_available"] = py::none();
   out["tile_exact_overlap_probe_error"] = "";
+  out["tile_exact_gaussian_probe_available"] = py::none();
+  out["tile_exact_gaussian_probe_error"] = "";
   out["tile_exact_imageblock_sample_length"] = py::none();
   out["tile_exact_imageblock_memory_16x16"] = py::none();
   out["tile_exact_imageblock_memory_32x32"] = py::none();
@@ -1116,6 +1416,9 @@ py::dict probe_native(bool compile_pipelines, bool compile_advanced) {
     out["tile_exact_overlap_probe_available"] = exact_result.clear_pso != nil && exact_result.update_pso != nil &&
         exact_result.report_pso != nil && exact_result.resolve_pso != nil;
     out["tile_exact_overlap_probe_error"] = exact_result.error;
+    out["tile_exact_gaussian_probe_available"] = exact_result.clear_pso != nil &&
+        exact_result.gaussian_update_pso != nil && exact_result.report_pso != nil && exact_result.resolve_pso != nil;
+    out["tile_exact_gaussian_probe_error"] = exact_result.error;
     if (exact_result.clear_pso != nil && exact_result.update_pso != nil && exact_result.report_pso != nil &&
         exact_result.resolve_pso != nil) {
       out["tile_exact_imageblock_sample_length"] = (unsigned long long)exact_result.imageblock_sample_length;
@@ -1180,4 +1483,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       py::arg("width") = 32,
       py::arg("tile_size") = 32,
       "Run the smallest exact-forward imageblock probe: clear C/T, update two ordered splats, resolve C/T.");
+  m.def(
+      "run_tile_exact_gaussian_probe",
+      &run_tile_exact_gaussian_probe_native,
+      py::arg("height") = 32,
+      py::arg("width") = 32,
+      py::arg("tile_size") = 16,
+      "Run an exact-forward imageblock probe with ordered Gaussian fragment updates and resolve C/T.");
 }

@@ -1,0 +1,1 @@
+{"backend": "v8_hw_eval_compute_replay", "backward_mean_ms": 9.91082905093208, "backward_median_ms": 9.66668751789257, "batch_size": 1, "forward_mean_ms": 16.20288534613792, "forward_median_ms": 12.457853968953714, "gaussians": 4096, "height": 512, "iters": 20, "total_mean_ms": 26.113714397069998, "total_median_ms": 22.077104018535465, "warmup": 3, "width": 512}

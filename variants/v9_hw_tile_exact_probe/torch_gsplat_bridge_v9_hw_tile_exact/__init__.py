@@ -5,6 +5,7 @@ from .interop import (
     render_constant_rgba,
     render_constant_rgba_direct,
     run_tile_exact_execution_probe,
+    run_tile_exact_gaussian_probe,
     run_tile_exact_overlap_probe,
 )
 from .full_backward import (
@@ -27,5 +28,6 @@ __all__ = [
     "render_constant_rgba",
     "render_constant_rgba_direct",
     "run_tile_exact_execution_probe",
+    "run_tile_exact_gaussian_probe",
     "run_tile_exact_overlap_probe",
 ]

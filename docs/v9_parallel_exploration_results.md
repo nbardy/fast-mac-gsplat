@@ -193,6 +193,37 @@ It does not yet prove Gaussian quads, V8 tile-bin ingestion, exact stop-count
 semantics, backward, or performance. The exact 32x32 state path compiles but
 failed render encoder creation on M4, so the API is fail-closed to 16x16.
 
+Follow-up pass: the same variant now exposes
+`run_tile_exact_gaussian_probe(...)`. It runs four ordered Gaussian fragment
+updates through the exact imageblock `C/T` state, returns direct Torch/MPS
+output plus GPU-written `tile_stop_counts`, and validates against a CPU Gaussian
+reference.
+
+Observed on Apple M4:
+
+```text
+tile_exact_gaussian_max_abs_err = 1.1920928955078125e-07
+tile_exact_gaussian_tile_stop_counts = [4, 4, 4, 4]
+```
+
+Small timing smoke:
+
+| Path | Resolution | Median ms | Mean ms |
+|---|---:|---:|---:|
+| direct RGBA32F render | 32x32 | 0.551 | 0.696 |
+| direct RGBA32F render | 512x512 | 0.652 | 0.818 |
+| direct RGBA32F render | 1080x1920 | 1.826 | 2.179 |
+| exact imageblock two-splat overlap | 32x32 | 0.581 | 0.799 |
+| exact imageblock two-splat overlap | 512x512 | 1.212 | 1.708 |
+| exact imageblock two-splat overlap | 1080x1920 | 4.519 | 5.928 |
+| exact Gaussian imageblock | 32x32 | 0.873 | 1.400 |
+| exact Gaussian imageblock | 512x512 | 1.693 | 2.469 |
+| exact Gaussian imageblock | 1080x1920 | 8.610 | 8.560 |
+
+This still does not prove V8 parity. The Gaussian diagnostic uses fullscreen
+fragment evaluation for the four splats; the next implementation step is clipped
+projected Gaussian quads fed from GPU-resident V8 tile bins.
+
 ### Direction C: CUDA Scaffold
 
 `variants/v9_cuda_compute_first` is now a source-level CUDA scaffold. The local
