@@ -34,12 +34,14 @@ python3 setup.py build_ext --inplace
 
 ```bash
 python3 tests/interop_check.py
+python3 tests/full_backward_check.py
 ```
 
 ## Benchmark
 
 ```bash
 python3 benchmarks/benchmark_interop.py --sizes 64x64,512x512,1080x1920 --warmup 3 --iters 10 --paths blit,direct,exact
+python3 benchmarks/benchmark_full_backward.py --height 512 --width 512 --gaussians 4096 --warmup 2 --iters 5
 ```
 
 ## Current Scope
@@ -59,6 +61,10 @@ python3 benchmarks/benchmark_interop.py --sizes 64x64,512x512,1080x1920 --warmup
 - Backward-state gate: the exact overlap path now returns GPU-written MPS
   `tile_stop_counts` (`int32`, one value per tile) plus debug `tile_reports`.
   The 32x32 / 16x16-tile smoke reports `tile_stop_counts=[2, 2, 2, 2]`.
+- Full backward base: `rasterize_projected_gaussians_full_backward` is wired and
+  gradient-checked through the built V8/V8-hw-eval compute replay backend. This
+  is the correct training fallback while the hardware-raster state producer is
+  still a probe.
 - Raster order groups: device feature probe only.
 - ICB: allocation probe only.
 
@@ -82,3 +88,8 @@ reduction, but it still only counts visible fragments in this probe.
 This still does not prove Gaussian/V8 parity. Next work is replacing the fixed
 fullscreen splats with tiny projected Gaussian quads, then feeding the same path
 from GPU-resident V8 tile bins.
+
+Full backward is currently done by compute replay, not hardware-raster replay.
+That is deliberate: the hardware path cannot own training gradients until it
+emits the same sorted bins and candidate-prefix stop counts that V8 backward
+consumes.
