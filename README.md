@@ -51,6 +51,9 @@ fallback-safe implementations of those two plans.
 See `docs/v8_hw_theory_remaining_work.md` for the post-scaffold audit of the
 remaining Metal render-pipeline, imageblock, ROG, ICB, and Torch/MPS interop
 work.
+See `docs/v9_hw_interop_probe_notes.md` for the first working render-pass to
+Torch/MPS tensor interop probe plus tile/imageblock, ROG, and ICB capability
+checks.
 
 ## Variants
 
@@ -68,6 +71,7 @@ work.
 | `v8_direct` | You want the current v6-derived v8 training baseline with host-side metadata parsing. | Best measured 4K/64K uniform forward+backward row so far; not best for every forward-only case. |
 | `v8_hw_eval_fallback` | You want to exercise the Plan 1 hardware-eval API surface while preserving exact v8 compute behavior. | Implemented as a fail-closed scaffold; real imageblock/render-pipeline eval is still pending. |
 | `v8_hw_train_fallback` | You want to exercise the Plan 2 hardware-training state/capture API surface while preserving exact v8 compute behavior. | Implemented as a fail-closed scaffold; real hardware forward state and backward interop are still pending. |
+| `v9_hw_interop_probe` | You want to test whether Metal render-pass output can land in Torch/MPS tensor storage without CPU staging. | Working direct RGBA32F render-to-MPS tensor primitive using a buffer-backed render target; tile/imageblock compiles, ROG is supported on tested M4, and ICB allocation works. Not a Gaussian rasterizer yet. |
 | `v7_hardware` | You want to experiment with Metal render-pipeline forward rasterization. | Not recommended for training yet; backward is too slow at 4K/64K. |
 | `v7_finished_hardware` | You want to test the finished v7 hardware handoff beside local v7. | Preserved source handoff; forward can be benchmarked, but backward gradients currently fail dense-reference checks. |
 | `v7_frontk_k2` / `v7_frontk_k4` / `v7_frontk_k8` | You want to test the v7.1 front-K hardware backward handoff with different saved-per-pixel depths. | Preserved source handoff with local Metal compile/order/bounds fixes; exactness smoke passes, but 4K capture is too slow for the default training path. |
@@ -110,6 +114,7 @@ Shape support depends on the variant:
 | v8 | `torch_gsplat_bridge_v8` | `[G,2/3]` or `[B,G,2/3]`, `[G]` or `[B,G]` | `[H,W,3]` or `[B,H,W,3]` |
 | v8-hw-eval | `torch_gsplat_bridge_v8_hw_eval` | `[G,2/3]` or `[B,G,2/3]`, `[G]` or `[B,G]` | `[H,W,3]` or `[B,H,W,3]` |
 | v8-hw-train | `torch_gsplat_bridge_v8_hw_train` | `[G,2/3]` or `[B,G,2/3]`, `[G]` or `[B,G]` | `[H,W,3]` or `[B,H,W,3]` |
+| v9-hw-interop | `torch_gsplat_bridge_v9_hw_interop` | `height,width,rgba` probe parameters | `[H,W,4]` RGBA32F MPS tensor |
 | v7 | `torch_gsplat_bridge_v7` | `[G,2/3]` or `[B,G,2/3]`, `[G]` or `[B,G]` | `[H,W,3]` or `[B,H,W,3]` |
 | v7-finished | `torch_gsplat_bridge_v7` | `[G,2/3]` or `[B,G,2/3]`, `[G]` or `[B,G]` | `[H,W,3]` or `[B,H,W,3]` |
 | v7.1-frontK | `torch_gsplat_bridge_v71` | `[G,2/3]` or `[B,G,2/3]`, `[G]` or `[B,G]` | `[H,W,3]` or `[B,H,W,3]` |
@@ -129,6 +134,9 @@ fields are not identical:
 - v8-hw-train adds `use_hardware_train`, `hardware_train_policy`, capture flags,
   and `backward_state_mode`; it currently reports unsupported hardware training
   and falls back to exact v8 compute unless `hardware_train_policy="strict"`.
+- v9-hw-interop is a low-level probe, not a rasterizer API. It exposes
+  `probe_hw_interop()` and `render_constant_rgba()` to verify render-pass output
+  into Torch/MPS tensor storage.
 - v6-upgrade and v6-refined also import as `torch_gsplat_bridge_v6`, so install them in a
   separate environment from `variants/v6` if you need to compare package APIs.
 - v7 and v7-finished use the same call shape, but have a smaller config and are experimental.

@@ -1,0 +1,1 @@
+{"gaussians": 65536, "height": 4096, "iters": 3, "max_ms": 14.334624982438982, "mean_ms": 12.52415265965586, "median_ms": 12.378124985843897, "min_ms": 10.859708010684699, "path": "gaussian_eval_rgba32f_direct_to_torch_mps_buffer_backed_texture", "pixels": 16777216, "warmup": 1, "width": 4096}

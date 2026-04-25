@@ -1,0 +1,2 @@
+{"gaussians": 1, "height": 512, "iters": 10, "max_ms": 0.7592909969389439, "mean_ms": 0.49648309650365263, "median_ms": 0.5163125024409965, "min_ms": 0.3793329815380275, "path": "gaussian_eval_rgba32f_direct_to_torch_mps_buffer_backed_texture", "pixels": 262144, "warmup": 3, "width": 512}
+{"gaussians": 1, "height": 1080, "iters": 10, "max_ms": 6.502791977254674, "mean_ms": 1.4492499933112413, "median_ms": 0.8756039896979928, "min_ms": 0.7741669833194464, "path": "gaussian_eval_rgba32f_direct_to_torch_mps_buffer_backed_texture", "pixels": 2073600, "warmup": 3, "width": 1920}
