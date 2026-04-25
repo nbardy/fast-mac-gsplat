@@ -319,6 +319,79 @@ def render_gaussian_eval_format(
     )
 
 
+def render_gaussian_eval_format_sorted(
+    output_format: str,
+    means2d: Tensor,
+    conics: Tensor,
+    colors: Tensor,
+    opacities: Tensor,
+    depths: Tensor,
+    height: int,
+    width: int,
+    *,
+    direct: bool = True,
+    descending: bool = False,
+) -> Tensor:
+    """Render Gaussian splats after a stable depth sort on MPS.
+
+    `descending=False` submits lower numeric depths first, matching the
+    ascending-depth convention used by the v8 Python wrapper before tile
+    binning. `descending=True` reverses that order for painter-order probes
+    against fixed-function source-over blending.
+
+    This wrapper only changes native draw submission order. It does not produce
+    V8's exact `final_T`, `stop_count`, stopped prefix, or backward replay
+    state, so it is an eval/diagnostic path rather than an exact training path.
+    """
+    _check_gaussian_tensor("depths", depths, 1)
+    if int(depths.shape[0]) != int(means2d.shape[0]):
+        raise ValueError("depths must have the same G dimension as means2d")
+
+    perm = torch.argsort(depths.detach(), dim=0, descending=bool(descending), stable=True)
+    return render_gaussian_eval_format(
+        output_format,
+        means2d.index_select(0, perm).contiguous(),
+        conics.index_select(0, perm).contiguous(),
+        colors.index_select(0, perm).contiguous(),
+        opacities.index_select(0, perm).contiguous(),
+        height,
+        width,
+        direct=direct,
+    )
+
+
+def render_gaussian_eval_rgba_sorted(
+    means2d: Tensor,
+    conics: Tensor,
+    colors: Tensor,
+    opacities: Tensor,
+    depths: Tensor,
+    height: int,
+    width: int,
+    *,
+    direct: bool = True,
+    descending: bool = False,
+) -> Tensor:
+    """Render sorted Gaussian splats into RGBA32F.
+
+    This is a convenience wrapper over `render_gaussian_eval_format_sorted`.
+    Sorting only controls draw submission order; it is not an exact V8 training
+    state path.
+    """
+    return render_gaussian_eval_format_sorted(
+        "rgba32f",
+        means2d,
+        conics,
+        colors,
+        opacities,
+        depths,
+        height,
+        width,
+        direct=direct,
+        descending=descending,
+    )
+
+
 def render_gaussian_eval_rgba16(
     means2d: Tensor,
     conics: Tensor,
@@ -339,6 +412,37 @@ def render_gaussian_eval_rgba16(
         height,
         width,
         direct=direct,
+    )
+
+
+def render_gaussian_eval_rgba16_sorted(
+    means2d: Tensor,
+    conics: Tensor,
+    colors: Tensor,
+    opacities: Tensor,
+    depths: Tensor,
+    height: int,
+    width: int,
+    *,
+    direct: bool = True,
+    descending: bool = False,
+) -> Tensor:
+    """Render sorted Gaussian splats into RGBA16F.
+
+    Sorting only controls draw submission order. RGBA16F is useful for fast
+    eval/preview bandwidth, not exact training state.
+    """
+    return render_gaussian_eval_format_sorted(
+        "rgba16f",
+        means2d,
+        conics,
+        colors,
+        opacities,
+        depths,
+        height,
+        width,
+        direct=direct,
+        descending=descending,
     )
 
 

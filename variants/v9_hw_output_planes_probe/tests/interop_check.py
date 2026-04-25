@@ -15,7 +15,9 @@ from torch_gsplat_bridge_v9_hw_output_planes import (
     render_constant_rgba,
     render_constant_rgba_direct,
     render_gaussian_eval_format,
+    render_gaussian_eval_format_sorted,
     render_gaussian_eval_rgba,
+    render_gaussian_eval_rgba_sorted,
     validate_direct_output_formats,
     validate_gaussian_eval_output_formats,
 )
@@ -85,6 +87,60 @@ def main() -> None:
 
     gaussian_validations = validate_gaussian_eval_output_formats(height=16)
     assert all(row["validated"] for row in gaussian_validations), gaussian_validations
+
+    two_means = torch.tensor([[16.5, 8.5], [16.5, 8.5]], dtype=torch.float32, device="mps")
+    two_conics = torch.tensor([[1.0, 0.0, 1.0], [1.0, 0.0, 1.0]], dtype=torch.float32, device="mps")
+    two_colors = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], dtype=torch.float32, device="mps")
+    two_opacities = torch.tensor([0.5, 0.5], dtype=torch.float32, device="mps")
+    two_depths = torch.tensor([1.0, 0.0], dtype=torch.float32, device="mps")
+    reverse = torch.tensor([1, 0], dtype=torch.int64, device="mps")
+
+    input_order = render_gaussian_eval_format(
+        "rgba32f", two_means, two_conics, two_colors, two_opacities, 16, 32, direct=True
+    )
+    reverse_order = render_gaussian_eval_format(
+        "rgba32f",
+        two_means.index_select(0, reverse),
+        two_conics.index_select(0, reverse),
+        two_colors.index_select(0, reverse),
+        two_opacities.index_select(0, reverse),
+        16,
+        32,
+        direct=True,
+    )
+    order_delta = float((input_order.detach().cpu()[8, 16] - reverse_order.detach().cpu()[8, 16]).abs().max().item())
+    assert order_delta > 0.1, order_delta
+
+    sorted_asc = render_gaussian_eval_rgba_sorted(
+        two_means, two_conics, two_colors, two_opacities, two_depths, 16, 32, direct=True
+    )
+    sorted_asc_repeat = render_gaussian_eval_rgba_sorted(
+        two_means, two_conics, two_colors, two_opacities, two_depths, 16, 32, direct=True
+    )
+    repeat_err = float((sorted_asc.detach().cpu() - sorted_asc_repeat.detach().cpu()).abs().max().item())
+    assert repeat_err == 0.0, repeat_err
+    sorted_asc_manual_err = float((sorted_asc.detach().cpu() - reverse_order.detach().cpu()).abs().max().item())
+    assert sorted_asc_manual_err <= 1.0e-6, sorted_asc_manual_err
+
+    sorted_desc = render_gaussian_eval_rgba_sorted(
+        two_means, two_conics, two_colors, two_opacities, two_depths, 16, 32, direct=True, descending=True
+    )
+    sorted_desc_manual_err = float((sorted_desc.detach().cpu() - input_order.detach().cpu()).abs().max().item())
+    assert sorted_desc_manual_err <= 1.0e-6, sorted_desc_manual_err
+
+    equal_depths = torch.zeros((2,), dtype=torch.float32, device="mps")
+    stable_tie = render_gaussian_eval_rgba_sorted(
+        two_means, two_conics, two_colors, two_opacities, equal_depths, 16, 32, direct=True
+    )
+    stable_tie_err = float((stable_tie.detach().cpu() - input_order.detach().cpu()).abs().max().item())
+    assert stable_tie_err <= 1.0e-6, stable_tie_err
+
+    sorted16 = render_gaussian_eval_format_sorted(
+        "rgba16f", two_means, two_conics, two_colors, two_opacities, two_depths, 16, 32, direct=True
+    )
+    assert sorted16.dtype == torch.float16
+    sorted16_manual_err = float((sorted16.detach().cpu().float() - reverse_order.detach().cpu().half().float()).abs().max().item())
+    assert sorted16_manual_err <= 5.0e-4, sorted16_manual_err
 
     checked = probe_hw_interop(compile_pipelines=True, compile_advanced=True, run_render_probe=True)
     assert checked.render_to_mps_tensor_validated, checked.as_dict()

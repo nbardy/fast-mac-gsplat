@@ -66,7 +66,26 @@ render_gaussian_eval_format(
     width,
     direct=True,
 )  # -> MPS float16 [H,W,4], premultiplied RGB plus alpha
+
+render_gaussian_eval_format_sorted(
+    "rgba32f",  # or "rgba16f"
+    means2d,
+    conics,
+    colors,
+    opacities,
+    depths,  # MPS float32 [G]
+    height,
+    width,
+    direct=True,
+    descending=True,
+)  # -> stable depth-sorted submit order; diagnostic/eval only
 ```
+
+`descending=False` submits ascending numeric depth. `descending=True` submits
+the reverse painter order that can match v8 black-background color under fixed
+source-over blending. The sorted wrappers only change draw submission order; the
+path still does not produce `final_T`, `stop_count`, stopped-prefix metadata, or
+an exact backward contract.
 
 ## Current Scope
 
@@ -80,9 +99,10 @@ render_gaussian_eval_format(
   buffers, evaluates the Gaussian in the fragment shader, and writes
   premultiplied RGBA through hardware source-over blending. RGBA32F and RGBA16F
   Gaussian output formats both compile, run, and validate.
-- Limitations: no backward pass, no tile/imageblock path, no depth sort, no
-  v8 parity target, no batching, and direct output still requires aligned rows.
-  Multiple Gaussians blend in input order.
+- Limitations: no backward pass, no tile/imageblock path, no exact training
+  state, no batching, and direct output still requires aligned rows. Multiple
+  Gaussians blend in the submitted order; sorted wrappers are available for
+  eval diagnostics and reverse-order painter probes.
 - Row alignment: direct buffer-backed texture rows must be 256-byte aligned.
   Width multiples are 16 pixels for RGBA32F, 32 for RGBA16F, 64 for R32F, and
   32 for RG32F.
@@ -90,5 +110,6 @@ render_gaussian_eval_format(
 - Raster order groups: device feature probe only.
 - ICB: allocation probe only.
 
-The next useful step is to wire RGBA16F into the parity-shaped fixed-eval route
-and compare image error against the RGBA32F output before making it the default.
+The next useful step is to test reverse-order parity on realistic projected
+scenes, then decide whether this remains preview/eval only or is worth pairing
+with a separate side-state pass.

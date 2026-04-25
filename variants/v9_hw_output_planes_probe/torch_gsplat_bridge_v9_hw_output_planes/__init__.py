@@ -10,8 +10,11 @@ from .interop import (
     render_constant_rgba,
     render_constant_rgba_direct,
     render_gaussian_eval_format,
+    render_gaussian_eval_format_sorted,
     render_gaussian_eval_rgba,
+    render_gaussian_eval_rgba_sorted,
     render_gaussian_eval_rgba16,
+    render_gaussian_eval_rgba16_sorted,
     validate_direct_output_formats,
     validate_gaussian_eval_output_formats,
 )
@@ -28,8 +31,11 @@ __all__ = [
     "render_constant_rgba",
     "render_constant_rgba_direct",
     "render_gaussian_eval_format",
+    "render_gaussian_eval_format_sorted",
     "render_gaussian_eval_rgba",
+    "render_gaussian_eval_rgba_sorted",
     "render_gaussian_eval_rgba16",
+    "render_gaussian_eval_rgba16_sorted",
     "validate_direct_output_formats",
     "validate_gaussian_eval_output_formats",
 ]

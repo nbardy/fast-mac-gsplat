@@ -140,6 +140,77 @@ backward replay with warp/block reductions before global atomics. Vulkan
 hardware raster with fragment interlock or rasterization-order attachment access
 should be a separate branch after the compute baseline is measured.
 
+## Third Parallel Round Results
+
+### Direction B: Reverse-Order Output-Planes Eval
+
+`variants/v9_hw_output_planes_probe` now has format-aware sorted wrappers:
+
+- `render_gaussian_eval_format_sorted(...)`
+- `render_gaussian_eval_rgba_sorted(...)`
+- `render_gaussian_eval_rgba16_sorted(...)`
+
+The sorted parity diagnostic confirms the fixed-function source-over rule:
+black-background V8 color matches only when the hardware path submits splats in
+reverse/depth-descending painter order.
+
+| Case | Format | Order | Max RGB Error vs V8 |
+|---|---|---|---:|
+| 16x32 G=2 | RGBA32F | input / ascending | 0.25 |
+| 16x32 G=2 | RGBA32F | descending | `9.31e-10` |
+| 16x32 G=16 | RGBA32F | input / ascending | 0.385184 |
+| 16x32 G=16 | RGBA32F | descending | `1.19e-07` |
+| 64x64 G=16 | RGBA32F | descending | `1.19e-07` |
+| 64x64 G=16 | RGBA16F | descending | 0.001294 |
+
+This is a real color-only eval result, not an exact training result. The path
+still lacks `final_T`, `stop_count`, stopped-prefix metadata, and backward.
+
+### Direction A: Exact Imageblock C/T Spike
+
+`variants/v9_hw_tile_exact_probe` adds a minimal 16x16-tile exact imageblock
+semantic probe. It clears explicit imageblock state, updates it from two
+ordered fragments with fixed blending disabled, and resolves `float4(C.rgb,T)`
+to a direct Torch/MPS render target.
+
+Observed on Apple M4:
+
+```text
+tile_exact_overlap_max_abs_err = 0.0
+tile_exact_imageblock_sample_length = 48 B
+tile_exact_imageblock_memory_16x16 = 12,288 B
+tile_exact_imageblock_memory_32x32 = 49,152 B
+```
+
+This proves the missing primitive:
+
+```text
+tile clear -> ordered fragment [[imageblock_data]] C/T update
+  -> tile resolve -> direct Torch/MPS output
+```
+
+It does not yet prove Gaussian quads, V8 tile-bin ingestion, exact stop-count
+semantics, backward, or performance. The exact 32x32 state path compiles but
+failed render encoder creation on M4, so the API is fail-closed to 16x16.
+
+### Direction C: CUDA Scaffold
+
+`variants/v9_cuda_compute_first` is now a source-level CUDA scaffold. The local
+Mac environment reports:
+
+```text
+nvcc: missing
+nvidia-smi: missing
+PyTorch CUDA built: false
+torch.cuda.is_available(): false
+MPS available: true
+```
+
+The scaffold exposes environment checks and CUDA skeletons for
+`project_count_fused`, `emit_pairs`, `tile_forward_train`, and
+`tile_backward_replay`. Native build intentionally fails on this host with a
+clear CUDA-only message, so no fake CUDA benchmark was recorded.
+
 ## ICB Crash State
 
 `render_constant_rgba_direct_icb` is disabled/fail-closed in both Python and
@@ -172,8 +243,20 @@ compare against:
   wall time at 512/6K, 1080p/6K, 4K/64K
 ```
 
-The current evidence says fixed-function blending is the blocker, not output
-interop. The next serious Metal branch must either use programmable
-tile/imageblock state to track `C/T/stop`, or explicitly stay eval-only and
-accept approximation. Only after multi-splat forward parity is solved should
-tile/imageblock state be promoted for backward capture.
+The updated evidence is sharper:
+
+- fixed-function blending can match V8 **color** in controlled black-background
+  cases if splats are submitted in reverse painter order;
+- programmable imageblock state can implement exact `C/T` updates at 16x16;
+- neither path currently produces exact backward state.
+
+Next Metal work should therefore split cleanly:
+
+```text
+B: test reverse-order eval on realistic scenes and decide RGBA16F tolerance
+A: replace fixed fullscreen fragments with projected Gaussian quads, then feed
+   the exact imageblock path from GPU-resident V8 tile bins
+```
+
+Only after `final_T` plus stopped-prefix metadata are solved should any
+hardware path claim exact forward+backward training.
