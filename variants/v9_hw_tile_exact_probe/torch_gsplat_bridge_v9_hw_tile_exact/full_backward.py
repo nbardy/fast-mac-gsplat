@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,7 @@ def _ops_ready(namespace: str) -> bool:
     return ns is not None and hasattr(ns, "bin")
 
 
+@lru_cache(maxsize=1)
 def _load_full_backward_backend():
     candidates = (
         ("torch_gsplat_bridge_v8", "v8", "gsplat_metal_v8", "v8_compute_replay"),
@@ -114,10 +116,10 @@ def rasterize_projected_gaussians_full_backward(
     path is not allowed to own training gradients until it can emit V8-equivalent
     sorted bins and candidate-prefix `tile_stop_counts` for real Gaussians.
     """
-    status = probe_full_backward()
-    if not status.available:
-        raise RuntimeError(f"V9 full-backward backend unavailable: {status.error}")
-    backend, _ = _load_full_backward_backend()
+    try:
+        backend, _ = _load_full_backward_backend()
+    except Exception as exc:
+        raise RuntimeError(f"V9 full-backward backend unavailable: {type(exc).__name__}: {exc}") from exc
     return backend.rasterize_projected_gaussians(
         means2d,
         conics,
