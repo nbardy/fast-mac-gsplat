@@ -148,7 +148,8 @@ def run_tile_exact_overlap_probe(height: int = 32, width: int = 32, tile_size: i
 
     The native path clears explicit imageblock C/T state, draws two ordered
     full-screen constant-alpha splats with blending disabled, then tile-resolves
-    `float4(C.rgb, T)` into a direct Torch/MPS render target.
+    `float4(C.rgb, T)` into a direct Torch/MPS render target. It also emits a
+    V8-shaped `tile_stop_counts` tensor for the toy overlap case.
     """
     if _C is None:
         raise RuntimeError("native extension is not imported; build variants/v9_hw_tile_exact_probe first")

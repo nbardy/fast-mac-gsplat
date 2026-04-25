@@ -11,7 +11,12 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from torch_gsplat_bridge_v9_hw_tile_exact import probe_hw_interop, render_constant_rgba, render_constant_rgba_direct
+from torch_gsplat_bridge_v9_hw_tile_exact import (
+    probe_hw_interop,
+    render_constant_rgba,
+    render_constant_rgba_direct,
+    run_tile_exact_overlap_probe,
+)
 
 
 def parse_size(raw: str) -> tuple[int, int]:
@@ -39,6 +44,10 @@ def main() -> None:
     path_fns = {
         "blit": ("render_rgba32f_private_texture_gpu_blit_to_torch_mps_buffer", render_constant_rgba),
         "direct": ("render_rgba32f_direct_to_torch_mps_buffer_backed_texture", render_constant_rgba_direct),
+        "exact": (
+            "tile_exact_imageblock_forward_with_atomic_tile_stop_counts",
+            lambda height, width: run_tile_exact_overlap_probe(height, width, 16),
+        ),
     }
     for path_name in [p.strip() for p in args.paths.split(",") if p.strip()]:
         if path_name not in path_fns:
@@ -46,7 +55,7 @@ def main() -> None:
         path_label, fn = path_fns[path_name]
         for raw_size in args.sizes.split(","):
             height, width = parse_size(raw_size.strip())
-            if path_name == "direct" and (width * 16) % 256 != 0:
+            if path_name in {"direct", "exact"} and (width * 16) % 256 != 0:
                 print(json.dumps({
                     "height": height,
                     "width": width,

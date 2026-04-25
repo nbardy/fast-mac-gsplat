@@ -16,7 +16,7 @@ measures the primitives that imageblocks, ROG, and later ICB would depend on:
 5. dispatch a tile shader inside a render pass whose color attachment is the
    direct Torch MPS target;
 6. run the minimal exact imageblock overlap path:
-   `tile clear -> ordered fragment C/T update -> tile resolve`;
+   `tile clear -> ordered fragment C/T update + atomic tile stop -> tile report -> tile resolve`;
 7. return tensors without native `waitUntilCompleted`, `getBytes`, or CPU
    staging.
 
@@ -39,7 +39,7 @@ python3 tests/interop_check.py
 ## Benchmark
 
 ```bash
-python3 benchmarks/benchmark_interop.py --sizes 64x64,512x512,1080x1920 --warmup 3 --iters 10 --paths blit,direct
+python3 benchmarks/benchmark_interop.py --sizes 64x64,512x512,1080x1920 --warmup 3 --iters 10 --paths blit,direct,exact
 ```
 
 ## Current Scope
@@ -56,6 +56,9 @@ python3 benchmarks/benchmark_interop.py --sizes 64x64,512x512,1080x1920 --warmup
   explicit imageblock `C/T` state and blending disabled. Expected output is
   `float4(0.25, 0.375, 0.0, 0.375)` and the smoke test reports
   `tile_exact_overlap_max_abs_err=0.0`.
+- Backward-state gate: the exact overlap path now returns GPU-written MPS
+  `tile_stop_counts` (`int32`, one value per tile) plus debug `tile_reports`.
+  The 32x32 / 16x16-tile smoke reports `tile_stop_counts=[2, 2, 2, 2]`.
 - Raster order groups: device feature probe only.
 - ICB: allocation probe only.
 
@@ -63,13 +66,18 @@ On Apple M4, `C/T + stop_count + flags` compiles with a 48 B imageblock sample:
 12 KiB for a 16x16 tile and 48 KiB for a 32x32 tile. A 32x32 execution dispatch
 reports a 32x32 imageblock footprint.
 
-The exact init/update/flush shader sequence now works for a 16x16-tile
+The exact init/update/report/flush shader sequence now works for a 16x16-tile
 constant-overlap case. Metal treats tile kernels as explicit-layout
 imageblocks, so clear uses `imageblock.data(...)`; fragment update and tile
 resolve use `[[imageblock_data]]` structs with `[[raster_order_group(0)]]`
 members. The 32x32 exact-overlap path compiles but failed render-encoder
 creation on Apple M4 with the 48 B/sample state, so the API is intentionally
 fail-closed to 16x16.
+
+Tile shaders cannot declare their own threadgroup scratch arrays on this path,
+so tile-level stop is updated by fragment-side atomic max into an MPS buffer.
+That matches the eventual V8-shaped state tensor better than a tile-local toy
+reduction, but it still only counts visible fragments in this probe.
 
 This still does not prove Gaussian/V8 parity. Next work is replacing the fixed
 fullscreen splats with tiny projected Gaussian quads, then feeding the same path

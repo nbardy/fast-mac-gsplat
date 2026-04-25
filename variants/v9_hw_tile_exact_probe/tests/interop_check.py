@@ -78,12 +78,26 @@ def main() -> None:
     if status.tile_exact_overlap_probe_available:
         exact_probe = run_tile_exact_overlap_probe(32, 32, 16)
         target = exact_probe["target"]
+        tile_stop_counts = exact_probe["tile_stop_counts"]
+        tile_reports = exact_probe["tile_reports"]
         assert tuple(target.shape) == (32, 32, 4)
+        assert tuple(tile_stop_counts.shape) == (4,)
+        assert tuple(tile_reports.shape) == (4, 4)
         expected_rgba = tuple(float(x) for x in exact_probe["expected_rgba"])
         expected = torch.tensor(expected_rgba, dtype=torch.float32).view(1, 1, 4).expand(32, 32, 4)
         max_err = float((target.detach().cpu() - expected).abs().max().item())
         assert max_err <= 1.0e-6, (max_err, exact_probe.get("expected_semantic"))
+        stop_cpu = tile_stop_counts.detach().cpu()
+        expected_stop = int(exact_probe["expected_tile_stop_count"])
+        assert torch.equal(stop_cpu, torch.full_like(stop_cpu, expected_stop)), stop_cpu
+        reports_cpu = tile_reports.detach().cpu()
+        assert torch.equal(reports_cpu[:, 0], torch.full_like(reports_cpu[:, 0], float(expected_stop))), reports_cpu
+        expected_final_t = float(exact_probe["expected_final_T"])
+        assert torch.allclose(reports_cpu[:, 1], torch.full_like(reports_cpu[:, 1], expected_final_t)), reports_cpu
+        assert torch.equal(reports_cpu[:, 2], torch.zeros_like(reports_cpu[:, 2])), reports_cpu
+        assert torch.equal(reports_cpu[:, 3], torch.arange(4, dtype=torch.float32)), reports_cpu
         print(f"tile_exact_overlap_max_abs_err={max_err}")
+        print(f"tile_exact_overlap_tile_stop_counts={stop_cpu.tolist()}")
         try:
             run_tile_exact_overlap_probe(32, 32, 32)
         except ValueError as exc:

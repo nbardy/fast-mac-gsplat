@@ -147,11 +147,18 @@ struct V9ExactVSOut {
 
 kernel void v9_exact_clear_tile(
     imageblock<V9ExactImageblock, imageblock_layout_explicit> imageblock_data,
-    ushort2 tid [[thread_position_in_threadgroup]]) {
+    device atomic_uint* tile_stop_counts [[buffer(0)]],
+    constant V9TileExecParams& params [[buffer(1)]],
+    ushort2 tid [[thread_position_in_threadgroup]],
+    uint2 tile_id [[threadgroup_position_in_grid]]) {
   threadgroup_imageblock V9ExactPixelState& pixel = imageblock_data.data(tid)->pixel;
   pixel.c_t = float4(0.0f, 0.0f, 0.0f, 1.0f);
   pixel.stop_count = 0u;
   pixel.flags = 0u;
+  if (tid.x == 0 && tid.y == 0) {
+    const uint tile_index = tile_id.y * params.tiles_x + tile_id.x;
+    atomic_store_explicit(&tile_stop_counts[tile_index], 0u, memory_order_relaxed);
+  }
 }
 
 vertex V9ExactVSOut v9_exact_fullscreen_vs(uint vid [[vertex_id]], uint iid [[instance_id]]) {
@@ -168,7 +175,9 @@ vertex V9ExactVSOut v9_exact_fullscreen_vs(uint vid [[vertex_id]], uint iid [[in
 
 fragment V9ExactFragOut v9_exact_update_fs(
     V9ExactVSOut in [[stage_in]],
-    V9ExactImageblock imageblock_data [[imageblock_data]]) {
+    V9ExactImageblock imageblock_data [[imageblock_data]],
+    constant V9TileExecParams& params [[buffer(0)]],
+    device atomic_uint* tile_stop_counts [[buffer(1)]]) {
   V9ExactPixelState pixel = imageblock_data.pixel;
   if ((pixel.flags & 1u) == 0u) {
     const bool first = (in.splat_id == 0u);
@@ -183,6 +192,10 @@ fragment V9ExactFragOut v9_exact_update_fs(
     }
   }
 
+  const uint2 pixel_xy = uint2(in.position.xy);
+  const uint tile_index = (pixel_xy.y / params.tile_size) * params.tiles_x + (pixel_xy.x / params.tile_size);
+  atomic_fetch_max_explicit(&tile_stop_counts[tile_index], pixel.stop_count, memory_order_relaxed);
+
   V9ExactFragOut out;
   out.imageblock_data.pixel = pixel;
   return out;
@@ -190,6 +203,21 @@ fragment V9ExactFragOut v9_exact_update_fs(
 
 fragment float4 v9_exact_resolve_tile(V9ExactImageblock imageblock_data [[imageblock_data]]) {
   return imageblock_data.pixel.c_t;
+}
+
+kernel void v9_exact_report_tile(
+    imageblock<V9ExactImageblock, imageblock_layout_explicit> imageblock_data,
+    device atomic_uint* tile_stop_counts [[buffer(0)]],
+    device float4* reports [[buffer(1)]],
+    constant V9TileExecParams& params [[buffer(2)]],
+    ushort2 tid [[thread_position_in_threadgroup]],
+    uint2 tile_id [[threadgroup_position_in_grid]]) {
+  if (tid.x == 0 && tid.y == 0) {
+    threadgroup_imageblock V9ExactPixelState& pixel = imageblock_data.data(tid)->pixel;
+    const uint tile_index = tile_id.y * params.tiles_x + tile_id.x;
+    const uint stop = atomic_load_explicit(&tile_stop_counts[tile_index], memory_order_relaxed);
+    reports[tile_index] = float4(float(stop), pixel.c_t.a, float(pixel.flags), float(tile_index));
+  }
 }
 )METAL";
 
@@ -212,6 +240,7 @@ struct TilePipelineResult {
 struct TileExactPipelineBundle {
   id<MTLRenderPipelineState> clear_pso;
   id<MTLRenderPipelineState> update_pso;
+  id<MTLRenderPipelineState> report_pso;
   id<MTLRenderPipelineState> resolve_pso;
   std::string error;
   NSUInteger imageblock_sample_length;
@@ -342,18 +371,19 @@ TilePipelineResult build_tile_pipeline_for_function(
 }
 
 TileExactPipelineBundle build_tile_exact_pipelines(id<MTLDevice> device) {
-  TileExactPipelineBundle result{nil, nil, nil, "", 0, 0, 0};
+  TileExactPipelineBundle result{nil, nil, nil, nil, "", 0, 0, 0};
   id<MTLLibrary> library = compile_library(device, kTileProbeSource, result.error);
   if (library == nil) return result;
 
   id<MTLFunction> clear_fn = [library newFunctionWithName:@"v9_exact_clear_tile"];
   id<MTLFunction> vs_fn = [library newFunctionWithName:@"v9_exact_fullscreen_vs"];
   id<MTLFunction> update_fn = [library newFunctionWithName:@"v9_exact_update_fs"];
+  id<MTLFunction> report_fn = [library newFunctionWithName:@"v9_exact_report_tile"];
   id<MTLFunction> resolve_fn = [library newFunctionWithName:@"v9_exact_resolve_tile"];
-  if (clear_fn == nil || vs_fn == nil || update_fn == nil || resolve_fn == nil) {
+  if (clear_fn == nil || vs_fn == nil || update_fn == nil || report_fn == nil || resolve_fn == nil) {
     result.error =
         "compiled tile exact library is missing v9_exact_clear_tile, v9_exact_fullscreen_vs, "
-        "v9_exact_update_fs, or v9_exact_resolve_tile";
+        "v9_exact_update_fs, v9_exact_report_tile, or v9_exact_resolve_tile";
     return result;
   }
 
@@ -389,11 +419,27 @@ TileExactPipelineBundle build_tile_exact_pipelines(id<MTLDevice> device) {
       return result;
     }
 
+    MTLTileRenderPipelineDescriptor* report_desc = [[MTLTileRenderPipelineDescriptor alloc] init];
+    report_desc.label = @"v9_hw_tile_exact_report_tile";
+    report_desc.tileFunction = report_fn;
+    report_desc.threadgroupSizeMatchesTileSize = YES;
+    report_desc.maxTotalThreadsPerThreadgroup = 256;
+    report_desc.rasterSampleCount = 1;
+    report_desc.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA32Float;
+
+    err = nil;
+    result.report_pso =
+        [device newRenderPipelineStateWithTileDescriptor:report_desc options:MTLPipelineOptionNone reflection:nil error:&err];
+    if (result.report_pso == nil) {
+      result.error = std::string("report tile pipeline: ") + nserror_to_string(err);
+      return result;
+    }
+
     MTLTileRenderPipelineDescriptor* resolve_desc = [[MTLTileRenderPipelineDescriptor alloc] init];
     resolve_desc.label = @"v9_hw_tile_exact_resolve_tile";
     resolve_desc.tileFunction = resolve_fn;
     resolve_desc.threadgroupSizeMatchesTileSize = YES;
-    resolve_desc.maxTotalThreadsPerThreadgroup = 1024;
+    resolve_desc.maxTotalThreadsPerThreadgroup = 256;
     resolve_desc.rasterSampleCount = 1;
     resolve_desc.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA32Float;
 
@@ -408,16 +454,19 @@ TileExactPipelineBundle build_tile_exact_pipelines(id<MTLDevice> device) {
     result.imageblock_sample_length = std::max({
         [result.clear_pso imageblockSampleLength],
         [result.update_pso imageblockSampleLength],
+        [result.report_pso imageblockSampleLength],
         [result.resolve_pso imageblockSampleLength],
     });
     result.imageblock_memory_16x16 = std::max({
         [result.clear_pso imageblockMemoryLengthForDimensions:MTLSizeMake(16, 16, 1)],
         [result.update_pso imageblockMemoryLengthForDimensions:MTLSizeMake(16, 16, 1)],
+        [result.report_pso imageblockMemoryLengthForDimensions:MTLSizeMake(16, 16, 1)],
         [result.resolve_pso imageblockMemoryLengthForDimensions:MTLSizeMake(16, 16, 1)],
     });
     result.imageblock_memory_32x32 = std::max({
         [result.clear_pso imageblockMemoryLengthForDimensions:MTLSizeMake(32, 32, 1)],
         [result.update_pso imageblockMemoryLengthForDimensions:MTLSizeMake(32, 32, 1)],
+        [result.report_pso imageblockMemoryLengthForDimensions:MTLSizeMake(32, 32, 1)],
         [result.resolve_pso imageblockMemoryLengthForDimensions:MTLSizeMake(32, 32, 1)],
     });
     return result;
@@ -444,12 +493,14 @@ id<MTLRenderPipelineState> cached_tile_execution_pipeline(id<MTLDevice> device) 
 
 TileExactPipelineBundle cached_tile_exact_pipelines(id<MTLDevice> device) {
   static std::mutex mu;
-  static TileExactPipelineBundle bundle{nil, nil, nil, "", 0, 0, 0};
+  static TileExactPipelineBundle bundle{nil, nil, nil, nil, "", 0, 0, 0};
   std::lock_guard<std::mutex> lock(mu);
-  if (bundle.clear_pso == nil && bundle.update_pso == nil && bundle.resolve_pso == nil && bundle.error.empty()) {
+  if (bundle.clear_pso == nil && bundle.update_pso == nil && bundle.report_pso == nil && bundle.resolve_pso == nil &&
+      bundle.error.empty()) {
     bundle = build_tile_exact_pipelines(device);
   }
-  TORCH_CHECK(bundle.clear_pso != nil && bundle.update_pso != nil && bundle.resolve_pso != nil,
+  TORCH_CHECK(bundle.clear_pso != nil && bundle.update_pso != nil && bundle.report_pso != nil &&
+                  bundle.resolve_pso != nil,
               "Failed to build v9 tile exact imageblock pipelines: ",
               bundle.error);
   return bundle;
@@ -470,6 +521,13 @@ torch::Tensor make_report_tensor(int64_t tile_count) {
   auto opts = torch::TensorOptions().dtype(torch::kFloat32).device(torch::kMPS);
   torch::Tensor out = torch::empty({tile_count, 4}, opts);
   TORCH_CHECK(out.is_contiguous(), "new MPS report tensor is unexpectedly non-contiguous");
+  return out;
+}
+
+torch::Tensor make_tile_stop_tensor(int64_t tile_count) {
+  auto opts = torch::TensorOptions().dtype(torch::kInt32).device(torch::kMPS);
+  torch::Tensor out = torch::empty({tile_count}, opts);
+  TORCH_CHECK(out.is_contiguous(), "new MPS tile_stop_counts tensor is unexpectedly non-contiguous");
   return out;
 }
 
@@ -537,19 +595,23 @@ void encode_tile_exact_overlap_probe(
     id<MTLCommandBuffer> command_buffer,
     const TileExactPipelineBundle& pipelines,
     id<MTLTexture> texture,
-    NSUInteger tile_size) {
+    id<MTLBuffer> tile_stop_buffer,
+    NSUInteger tile_stop_offset,
+    id<MTLBuffer> report_buffer,
+    NSUInteger report_offset,
+    const V9TileExecParamsHost& params) {
   if (@available(macOS 11.0, *)) {
-    TORCH_CHECK(tile_size == 16,
+    TORCH_CHECK(params.tile_size == 16,
                 "tile exact overlap probe is fail-closed to 16x16 tiles: 32x32 exact C/T/stop state "
                 "compiled but renderCommandEncoder creation failed on Apple M4, likely tile-memory budget; got ",
-                tile_size);
+                params.tile_size);
     MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
     pass.colorAttachments[0].texture = texture;
     pass.colorAttachments[0].loadAction = MTLLoadActionClear;
     pass.colorAttachments[0].storeAction = MTLStoreActionStore;
     pass.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 0.0);
-    pass.tileWidth = tile_size;
-    pass.tileHeight = tile_size;
+    pass.tileWidth = params.tile_size;
+    pass.tileHeight = params.tile_size;
     pass.imageblockSampleLength = pipelines.imageblock_sample_length;
 
     id<MTLRenderCommandEncoder> render_encoder = [command_buffer renderCommandEncoderWithDescriptor:pass];
@@ -559,12 +621,22 @@ void encode_tile_exact_overlap_probe(
                                    userInfo:nil];
     }
 
-    const MTLSize tile_threads = MTLSizeMake(tile_size, tile_size, 1);
+    const MTLSize tile_threads = MTLSizeMake(params.tile_size, params.tile_size, 1);
     [render_encoder setRenderPipelineState:pipelines.clear_pso];
+    [render_encoder setTileBuffer:tile_stop_buffer offset:tile_stop_offset atIndex:0];
+    [render_encoder setTileBytes:&params length:sizeof(params) atIndex:1];
     [render_encoder dispatchThreadsPerTile:tile_threads];
 
     [render_encoder setRenderPipelineState:pipelines.update_pso];
+    [render_encoder setFragmentBytes:&params length:sizeof(params) atIndex:0];
+    [render_encoder setFragmentBuffer:tile_stop_buffer offset:tile_stop_offset atIndex:1];
     [render_encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3 instanceCount:2];
+
+    [render_encoder setRenderPipelineState:pipelines.report_pso];
+    [render_encoder setTileBuffer:tile_stop_buffer offset:tile_stop_offset atIndex:0];
+    [render_encoder setTileBuffer:report_buffer offset:report_offset atIndex:1];
+    [render_encoder setTileBytes:&params length:sizeof(params) atIndex:2];
+    [render_encoder dispatchThreadsPerTile:tile_threads];
 
     [render_encoder setRenderPipelineState:pipelines.resolve_pso];
     [render_encoder dispatchThreadsPerTile:tile_threads];
@@ -827,11 +899,22 @@ py::dict run_tile_exact_overlap_probe_native(
   id<MTLDevice> device = system_device();
   TileExactPipelineBundle pipelines = cached_tile_exact_pipelines(device);
   torch::Tensor target = make_output_tensor(height, width);
+  const NSUInteger tiles_x = ceil_div_u64((NSUInteger)width, (NSUInteger)tile_size);
+  const NSUInteger tiles_y = ceil_div_u64((NSUInteger)height, (NSUInteger)tile_size);
+  const NSUInteger tile_count = tiles_x * tiles_y;
+  torch::Tensor tile_stop_counts = make_tile_stop_tensor((int64_t)tile_count);
+  torch::Tensor reports = make_report_tensor((int64_t)tile_count);
 
   id<MTLBuffer> target_buffer = tensor_mtl_buffer(target);
   TORCH_CHECK(target_buffer != nil, "Failed to access target tensor MTLBuffer storage");
+  id<MTLBuffer> tile_stop_buffer = tensor_mtl_buffer(tile_stop_counts);
+  TORCH_CHECK(tile_stop_buffer != nil, "Failed to access tile_stop_counts tensor MTLBuffer storage");
+  id<MTLBuffer> report_buffer = tensor_mtl_buffer(reports);
+  TORCH_CHECK(report_buffer != nil, "Failed to access report tensor MTLBuffer storage");
 
   const NSUInteger target_offset = (NSUInteger)(target.storage_offset() * target.element_size());
+  const NSUInteger tile_stop_offset = (NSUInteger)(tile_stop_counts.storage_offset() * tile_stop_counts.element_size());
+  const NSUInteger report_offset = (NSUInteger)(reports.storage_offset() * reports.element_size());
   const NSUInteger bytes_per_pixel = 4 * sizeof(float);
   const NSUInteger bytes_per_row = (NSUInteger)width * bytes_per_pixel;
   TORCH_CHECK(bytes_per_row % 256 == 0,
@@ -852,6 +935,13 @@ py::dict run_tile_exact_overlap_probe_native(
   TORCH_CHECK(texture != nil,
               "Failed to create a render-target texture view over Torch MPS tensor storage for tile exact probe");
 
+  V9TileExecParamsHost params{
+      (uint32_t)width,
+      (uint32_t)height,
+      (uint32_t)tiles_x,
+      (uint32_t)tile_size,
+  };
+
   dispatch_queue_t queue = torch::mps::get_dispatch_queue();
   TORCH_CHECK(queue != nullptr, "torch::mps::get_dispatch_queue returned null");
 
@@ -868,7 +958,15 @@ py::dict run_tile_exact_overlap_probe_native(
         return;
       }
       @try {
-        encode_tile_exact_overlap_probe(command_buffer, pipelines, texture, (NSUInteger)tile_size);
+        encode_tile_exact_overlap_probe(
+            command_buffer,
+            pipelines,
+            texture,
+            tile_stop_buffer,
+            tile_stop_offset,
+            report_buffer,
+            report_offset,
+            params);
       } @catch (NSException* exception) {
         block_error = [exception reason];
         return;
@@ -880,16 +978,25 @@ py::dict run_tile_exact_overlap_probe_native(
 
   py::dict out;
   out["target"] = target;
+  out["tile_stop_counts"] = tile_stop_counts;
+  out["tile_reports"] = reports;
   out["height"] = height;
   out["width"] = width;
   out["tile_size"] = tile_size;
+  out["tiles_x"] = (unsigned long long)tiles_x;
+  out["tiles_y"] = (unsigned long long)tiles_y;
+  out["tile_count"] = (unsigned long long)tile_count;
   out["direct_target_bytes_per_row"] = (unsigned long long)bytes_per_row;
   out["native_op_uses_cpu_readback"] = false;
   out["imageblock_sample_length"] = (unsigned long long)pipelines.imageblock_sample_length;
   out["imageblock_memory_16x16"] = (unsigned long long)pipelines.imageblock_memory_16x16;
   out["imageblock_memory_32x32"] = (unsigned long long)pipelines.imageblock_memory_32x32;
   out["expected_rgba"] = py::make_tuple(0.25, 0.375, 0.0, 0.375);
+  out["expected_tile_stop_count"] = 2;
+  out["expected_final_T"] = 0.375;
   out["expected_semantic"] = "two ordered constant-alpha splats: C0 += 1*0.25*red; C1 += 0.75*0.5*green; T=0.375";
+  out["state_semantic"] =
+      "tile_stop_counts is the tile max of imageblock per-pixel stop_count for this visible-fragment toy path";
   return out;
 }
 
@@ -1006,10 +1113,11 @@ py::dict probe_native(bool compile_pipelines, bool compile_advanced) {
     out["tile_execution_probe_error"] = exec_result.error;
 
     TileExactPipelineBundle exact_result = build_tile_exact_pipelines(device);
-    out["tile_exact_overlap_probe_available"] =
-        exact_result.clear_pso != nil && exact_result.update_pso != nil && exact_result.resolve_pso != nil;
+    out["tile_exact_overlap_probe_available"] = exact_result.clear_pso != nil && exact_result.update_pso != nil &&
+        exact_result.report_pso != nil && exact_result.resolve_pso != nil;
     out["tile_exact_overlap_probe_error"] = exact_result.error;
-    if (exact_result.clear_pso != nil && exact_result.update_pso != nil && exact_result.resolve_pso != nil) {
+    if (exact_result.clear_pso != nil && exact_result.update_pso != nil && exact_result.report_pso != nil &&
+        exact_result.resolve_pso != nil) {
       out["tile_exact_imageblock_sample_length"] = (unsigned long long)exact_result.imageblock_sample_length;
       out["tile_exact_imageblock_memory_16x16"] = (unsigned long long)exact_result.imageblock_memory_16x16;
       out["tile_exact_imageblock_memory_32x32"] = (unsigned long long)exact_result.imageblock_memory_32x32;
