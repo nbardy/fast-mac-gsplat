@@ -65,6 +65,9 @@ class RasterConfig:
     batch_strategy: str = "auto"  # auto | flatten | serial
     batch_launch_limit_tiles: int = 262144
     batch_launch_limit_gaussians: int = 262144
+    # Caller guarantees all per-splat inputs are already stably sorted by
+    # nondecreasing depth per batch. This skips argsort/gather and backward unsort.
+    inputs_sorted_by_depth: bool = False
 
 
 def _runtime_validate(config: RasterConfig) -> RuntimeShaderConfig:
@@ -188,6 +191,34 @@ def _batched_gather_1d(x: Tensor, perm: Tensor) -> Tensor:
     return x.gather(1, perm)
 
 
+def _maybe_sort_inputs_by_depth(
+    means2d_b: Tensor,
+    conics_b: Tensor,
+    colors_b: Tensor,
+    opacities_b: Tensor,
+    depths_b: Tensor,
+    *,
+    inputs_sorted_by_depth: bool,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    if inputs_sorted_by_depth:
+        empty_perm = torch.empty((0,), device=depths_b.device, dtype=torch.int64)
+        return (
+            empty_perm,
+            means2d_b.contiguous(),
+            conics_b.contiguous(),
+            colors_b.contiguous(),
+            opacities_b.contiguous(),
+        )
+    perm = torch.argsort(depths_b.detach(), dim=1, stable=True)
+    return (
+        perm,
+        _batched_gather_2d(means2d_b, perm).contiguous(),
+        _batched_gather_2d(conics_b, perm).contiguous(),
+        _batched_gather_2d(colors_b, perm).contiguous(),
+        _batched_gather_1d(opacities_b, perm).contiguous(),
+    )
+
+
 def _unsort_batched(grad: Tensor, perm: Tensor) -> Tensor:
     out = torch.empty_like(grad)
     if grad.ndim == 3:
@@ -308,16 +339,20 @@ class _RasterizeProjectedGaussiansV5(torch.autograd.Function):
         meta_i32: Tensor,
         meta_f32: Tensor,
         enable_overflow_fallback: bool,
+        inputs_sorted_by_depth: bool,
     ) -> Tensor:
         if not hasattr(torch.ops, "gsplat_metal_v5"):
             raise RuntimeError("gsplat_metal_v5 custom ops not found. Build the extension first.")
 
         B, G = means2d_b.shape[:2]
-        perm = torch.argsort(depths_b.detach(), dim=1, stable=True)
-        means2d_s = _batched_gather_2d(means2d_b, perm).contiguous()
-        conics_s = _batched_gather_2d(conics_b, perm).contiguous()
-        colors_s = _batched_gather_2d(colors_b, perm).contiguous()
-        opacities_s = _batched_gather_1d(opacities_b, perm).contiguous()
+        perm, means2d_s, conics_s, colors_s, opacities_s = _maybe_sort_inputs_by_depth(
+            means2d_b,
+            conics_b,
+            colors_b,
+            opacities_b,
+            depths_b,
+            inputs_sorted_by_depth=inputs_sorted_by_depth,
+        )
 
         means_flat = means2d_s.reshape(B * G, 2).contiguous()
         conics_flat = conics_s.reshape(B * G, 3).contiguous()
@@ -391,6 +426,7 @@ class _RasterizeProjectedGaussiansV5(torch.autograd.Function):
         ctx.tiles_x = tiles_x
         ctx.tile_size = tile_size
         ctx.enable_overflow_fallback = enable_overflow_fallback
+        ctx.inputs_sorted_by_depth = inputs_sorted_by_depth
         return out
 
     @staticmethod
@@ -452,12 +488,18 @@ class _RasterizeProjectedGaussiansV5(torch.autograd.Function):
 
         B = ctx.batch_size
         G = ctx.gaussians_per_batch
-        g_means_b = _unsort_batched(g_means_flat.view(B, G, 2), perm)
-        g_conics_b = _unsort_batched(g_conics_flat.view(B, G, 3), perm)
-        g_colors_b = _unsort_batched(g_colors_flat.view(B, G, 3), perm)
-        g_opacities_b = _unsort_batched(g_opacities_flat.view(B, G), perm)
+        if ctx.inputs_sorted_by_depth:
+            g_means_b = g_means_flat.view(B, G, 2)
+            g_conics_b = g_conics_flat.view(B, G, 3)
+            g_colors_b = g_colors_flat.view(B, G, 3)
+            g_opacities_b = g_opacities_flat.view(B, G)
+        else:
+            g_means_b = _unsort_batched(g_means_flat.view(B, G, 2), perm)
+            g_conics_b = _unsort_batched(g_conics_flat.view(B, G, 3), perm)
+            g_colors_b = _unsort_batched(g_colors_flat.view(B, G, 3), perm)
+            g_opacities_b = _unsort_batched(g_opacities_flat.view(B, G), perm)
         g_depths_b = torch.zeros_like(depths_b)
-        return g_means_b, g_conics_b, g_colors_b, g_opacities_b, g_depths_b, None, None, None
+        return g_means_b, g_conics_b, g_colors_b, g_opacities_b, g_depths_b, None, None, None, None
 
 
 def _rasterize_chunk_eval(
@@ -470,11 +512,14 @@ def _rasterize_chunk_eval(
 ) -> Tensor:
     B, G = means2d_b.shape[:2]
     meta_i32, meta_f32 = _make_meta(config, means2d_b.device, B, G)
-    perm = torch.argsort(depths_b.detach(), dim=1, stable=True)
-    means2d_s = _batched_gather_2d(means2d_b, perm).contiguous()
-    conics_s = _batched_gather_2d(conics_b, perm).contiguous()
-    colors_s = _batched_gather_2d(colors_b, perm).contiguous()
-    opacities_s = _batched_gather_1d(opacities_b, perm).contiguous()
+    _, means2d_s, conics_s, colors_s, opacities_s = _maybe_sort_inputs_by_depth(
+        means2d_b,
+        conics_b,
+        colors_b,
+        opacities_b,
+        depths_b,
+        inputs_sorted_by_depth=bool(config.inputs_sorted_by_depth),
+    )
 
     means_flat = means2d_s.reshape(B * G, 2).contiguous()
     conics_flat = conics_s.reshape(B * G, 3).contiguous()
@@ -540,7 +585,19 @@ def _rasterize_batched(
 
         if train_mode:
             meta_i32, meta_f32 = _make_meta(config, m.device, b1 - b0, G)
-            outs.append(_RasterizeProjectedGaussiansV5.apply(m, q, c, o, d, meta_i32, meta_f32, bool(config.enable_overflow_fallback)))
+            outs.append(
+                _RasterizeProjectedGaussiansV5.apply(
+                    m,
+                    q,
+                    c,
+                    o,
+                    d,
+                    meta_i32,
+                    meta_f32,
+                    bool(config.enable_overflow_fallback),
+                    bool(config.inputs_sorted_by_depth),
+                )
+            )
         else:
             outs.append(_rasterize_chunk_eval(m, q, c, o, d, config))
     return torch.cat(outs, dim=0) if len(outs) > 1 else outs[0]
@@ -599,11 +656,18 @@ def profile_projected_gaussians(
         o = opacities_b[b0:b1].contiguous()
         d = depths_b[b0:b1].contiguous()
 
-        perm = torch.argsort(d.detach(), dim=1, stable=True)
-        m_s = _batched_gather_2d(m, perm).contiguous().reshape(-1, 2)
-        q_s = _batched_gather_2d(q, perm).contiguous().reshape(-1, 3)
-        c_s = _batched_gather_2d(c, perm).contiguous().reshape(-1, 3)
-        o_s = _batched_gather_1d(o, perm).contiguous().reshape(-1)
+        _, m_s_b, q_s_b, c_s_b, o_s_b = _maybe_sort_inputs_by_depth(
+            m,
+            q,
+            c,
+            o,
+            d,
+            inputs_sorted_by_depth=bool(config.inputs_sorted_by_depth),
+        )
+        m_s = m_s_b.reshape(-1, 2)
+        q_s = q_s_b.reshape(-1, 3)
+        c_s = c_s_b.reshape(-1, 3)
+        o_s = o_s_b.reshape(-1)
 
         meta_i32, meta_f32 = _make_meta(config, means2d_b.device, b1 - b0, G)
         tile_counts, tile_offsets, binned_ids = torch.ops.gsplat_metal_v5.bin(

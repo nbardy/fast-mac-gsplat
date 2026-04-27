@@ -37,6 +37,7 @@ python3 setup.py build_ext --inplace
 
 ```bash
 python3 tests/interop_check.py
+python3 tests/tile_stop_semantics_check.py
 python3 tests/full_backward_check.py
 ```
 
@@ -65,6 +66,10 @@ python3 benchmarks/benchmark_full_backward.py --height 512 --width 512 --gaussia
   explicit imageblock `C/T` path, direct MPS output, and GPU-written tile
   stop-count tensor. The smoke test compares the render output against a CPU
   Gaussian reference.
+- V8 stop-count semantics harness: `tests/tile_stop_semantics_check.py`
+  fail-closes the current gate with two tiny CPU cases. It shows V8
+  candidate-prefix `tile_stop_counts` exclude skipped/off-tile splats while the
+  current V9 fullscreen diagnostic draw list still counts them.
 - Backward-state gate: the exact overlap path now returns GPU-written MPS
   `tile_stop_counts` (`int32`, one value per tile) plus debug `tile_reports`.
   The 32x32 / 16x16-tile smoke reports `tile_stop_counts=[2, 2, 2, 2]`.
@@ -92,9 +97,11 @@ so tile-level stop is updated by fragment-side atomic max into an MPS buffer.
 That matches the eventual V8-shaped state tensor better than a tile-local toy
 reduction, but it still only counts visible fragments in this probe.
 
-This still does not prove V8 parity. Next work is replacing the fullscreen
-Gaussian diagnostic draw with clipped projected Gaussian quads, then feeding the
-same path from GPU-resident V8 tile bins.
+This still does not prove V8 parity. The fail-closed semantic harness reports
+`one_tile_skipped_candidate` as V8 `[2]` vs V9 fullscreen `[3]`, and
+`two_tile_clipping_gap` as V8 `[1, 1]` vs V9 fullscreen `[3, 3]`. Next work is
+replacing the fullscreen Gaussian diagnostic draw with clipped projected
+Gaussian quads, then feeding the same path from GPU-resident V8 tile bins.
 
 Full backward is currently done by compute replay, not hardware-raster replay.
 That is deliberate: the hardware path cannot own training gradients until it

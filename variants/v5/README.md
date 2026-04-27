@@ -25,6 +25,17 @@ python setup.py build_ext --inplace
 python tests/reference_check.py
 ```
 
+## Depth Sorting Contract
+
+By default, `RasterConfig(inputs_sorted_by_depth=False)` stably sorts splats by
+nondecreasing `depths` inside V5, gathers `means2d` / `conics` / `colors` /
+`opacities` into that order, and unsorts input gradients in backward.
+
+Set `inputs_sorted_by_depth=True` only when the caller has already applied that
+same per-batch stable depth order to every per-splat input tensor. Under that
+explicit contract V5 skips the internal `argsort`, gather, and backward unsort.
+Passing unsorted tensors with this flag changes compositing order and gradients.
+
 ## Benchmarks
 
 ```bash

@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import torch_gsplat_bridge_v5.rasterize as v5_rasterize
 from torch_gsplat_bridge_v5 import RasterConfig, rasterize_projected_gaussians
 
 
@@ -109,6 +110,37 @@ def assert_close(name: str, got: torch.Tensor, ref: torch.Tensor, threshold: flo
     print(f"{name} max error:", err)
     if err > threshold:
         raise AssertionError(f"{name} max error {err} exceeded {threshold}")
+
+
+def run_raster_case(
+    means2d: torch.Tensor,
+    conics: torch.Tensor,
+    colors: torch.Tensor,
+    opacities: torch.Tensor,
+    depths: torch.Tensor,
+    cfg: RasterConfig,
+):
+    means2d_i = means2d.detach().clone().requires_grad_(True)
+    conics_i = conics.detach().clone().requires_grad_(True)
+    colors_i = colors.detach().clone().requires_grad_(True)
+    opacities_i = opacities.detach().clone().requires_grad_(True)
+    out = rasterize_projected_gaussians(means2d_i, conics_i, colors_i, opacities_i, depths.detach().clone(), cfg)
+    out.square().mean().backward()
+    return (
+        out.detach().cpu(),
+        means2d_i.grad.detach().cpu(),
+        conics_i.grad.detach().cpu(),
+        colors_i.grad.detach().cpu(),
+        opacities_i.grad.detach().cpu(),
+    )
+
+
+def gather_by_perm_2d(x: torch.Tensor, perm: torch.Tensor) -> torch.Tensor:
+    return x.gather(1, perm.unsqueeze(-1).expand(-1, -1, x.shape[-1])).contiguous()
+
+
+def gather_by_perm_1d(x: torch.Tensor, perm: torch.Tensor) -> torch.Tensor:
+    return x.gather(1, perm).contiguous()
 
 
 def check_case(B: int):
@@ -214,6 +246,84 @@ def check_saturated_many_splats():
     assert_close("saturated opacities grad", opacities.grad.detach().cpu(), opacities_r.grad, 1.0e-5)
 
 
+def check_presorted_fast_path():
+    device = torch.device("mps")
+    torch.manual_seed(7)
+    B, G, H, W = 2, 12, 24, 24
+    means2d_raw = torch.rand(B, G, 2, device=device, dtype=torch.float32)
+    means2d_raw[..., 0] *= W
+    means2d_raw[..., 1] *= H
+    sigmas = torch.rand(B, G, 2, device=device, dtype=torch.float32) * 4.0 + 1.5
+    conics_raw = torch.stack(
+        [
+            1.0 / sigmas[..., 0].square(),
+            torch.zeros(B, G, device=device, dtype=torch.float32),
+            1.0 / sigmas[..., 1].square(),
+        ],
+        dim=-1,
+    ).contiguous()
+    colors_raw = torch.rand(B, G, 3, device=device, dtype=torch.float32)
+    opacities_raw = torch.rand(B, G, device=device, dtype=torch.float32) * 0.5 + 0.2
+    depths_raw = torch.rand(B, G, device=device, dtype=torch.float32)
+
+    perm = torch.argsort(depths_raw, dim=1, stable=True)
+    means2d = gather_by_perm_2d(means2d_raw, perm)
+    conics = gather_by_perm_2d(conics_raw, perm)
+    colors = gather_by_perm_2d(colors_raw, perm)
+    opacities = gather_by_perm_1d(opacities_raw, perm)
+    depths = gather_by_perm_1d(depths_raw, perm)
+
+    cfg_default = RasterConfig(height=H, width=W, tile_size=16, max_fast_pairs=256)
+    cfg_presorted = RasterConfig(height=H, width=W, tile_size=16, max_fast_pairs=256, inputs_sorted_by_depth=True)
+
+    with torch.no_grad():
+        base_eval = rasterize_projected_gaussians(means2d, conics, colors, opacities, depths, cfg_default).detach().cpu()
+    base = run_raster_case(means2d, conics, colors, opacities, depths, cfg_default)
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("presorted path unexpectedly used sort/gather/unsort")
+
+    orig_argsort = torch.argsort
+    orig_gather_2d = v5_rasterize._batched_gather_2d
+    orig_gather_1d = v5_rasterize._batched_gather_1d
+    orig_unsort = v5_rasterize._unsort_batched
+    try:
+        torch.argsort = forbidden
+        v5_rasterize._batched_gather_2d = forbidden
+        v5_rasterize._batched_gather_1d = forbidden
+        v5_rasterize._unsort_batched = forbidden
+        with torch.no_grad():
+            fast_eval = rasterize_projected_gaussians(means2d, conics, colors, opacities, depths, cfg_presorted).detach().cpu()
+        fast = run_raster_case(means2d, conics, colors, opacities, depths, cfg_presorted)
+    finally:
+        torch.argsort = orig_argsort
+        v5_rasterize._batched_gather_2d = orig_gather_2d
+        v5_rasterize._batched_gather_1d = orig_gather_1d
+        v5_rasterize._unsort_batched = orig_unsort
+
+    names = [
+        "presorted image",
+        "presorted means grad",
+        "presorted conics grad",
+        "presorted colors grad",
+        "presorted opacities grad",
+    ]
+    assert_close("presorted eval image", fast_eval, base_eval, 1.0e-6)
+    for name, got, ref in zip(names, fast, base):
+        assert_close(name, got, ref, 1.0e-6)
+
+    try:
+        torch.argsort = forbidden
+        run_raster_case(means2d, conics, colors, opacities, depths, cfg_default)
+    except AssertionError as exc:
+        if "sort/gather/unsort" not in str(exc):
+            raise
+    else:
+        raise AssertionError("default path unexpectedly skipped depth sorting")
+    finally:
+        torch.argsort = orig_argsort
+
+
 def check_eval_overflow_disabled_raises():
     device = torch.device("mps")
     G, H, W = 4, 16, 16
@@ -241,6 +351,7 @@ def main():
     check_case(1)
     check_case(2)
     check_saturated_many_splats()
+    check_presorted_fast_path()
     check_eval_overflow_disabled_raises()
 
 
