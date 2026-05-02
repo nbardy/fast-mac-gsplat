@@ -1,0 +1,101 @@
+# torch-metal-gsplat-v6-refined-features
+
+Torch-native projected 2D Gaussian rasterizer for Apple Silicon / MPS with a
+Metal hot path that composites arbitrary per-splat feature channels.
+
+This is an isolated feature-channel namespace fork derived from
+`variants/v5_features`, created so the Dynaworld trainer can select a
+`v6_refined_features` feature backend independently from the older
+`v5_features` baseline.
+
+Important current limitation: this is **not yet** a full port of v6_refined's
+active-tile scheduling and adaptive stop-count kernels to arbitrary feature
+channels. It preserves the tested F-channel + accumulated-alpha contract while
+giving us a clean namespace to do that v6-speed work next.
+
+## Feature Contract
+
+- Package: `torch_gsplat_bridge_v6_refined_features`
+- Custom-op namespace: `torch.ops.gsplat_metal_v6_refined_features`
+- Input `colors` tensor is feature data with shape `[G,F]` or `[B,G,F]`.
+- Output is `(features, accumulated_alpha)`.
+- `features` shape is `[H,W,F]` or `[B,H,W,F]`.
+- `accumulated_alpha` shape is `[H,W]` or `[B,H,W]`, where `0` means no splat
+  coverage and `1` means fully opaque.
+- `F` is runtime inferred from `colors.shape[-1]`.
+- `RasterConfig.background` may be length 1, which broadcasts to every feature
+  channel, or exactly length `F`.
+- The default runtime cap is `GSP_FEATURE_CAP=64`. Set a larger cap before
+  import if a run needs `F > 64`.
+
+## Inherited from v5_features
+
+- **Batchwise rendering**: accepts `[B,G,2/3/F]` inputs and renders `[B,H,W,F]`
+- **Auto batch chunking**: `batch_strategy=auto|flatten|serial`
+- **Inference-only fast path**: no sorted-ID writeback when gradients are not needed
+- **Training fast path**: writes sorted IDs back into `binned_ids` and saves per-tile stop counts for backward
+- **Runtime-specialized ablations** via env before import:
+  - `GSP_TILE_SIZE=8|16|32`
+  - `GSP_CHUNK=32|64|128`
+  - `GSP_FAST_CAP=1024|2048|4096`
+  - `GSP_FEATURE_CAP=64` by default; raise for larger feature tensors
+
+## Build
+
+```bash
+python3 setup.py build_ext --inplace
+```
+
+## Quick Check
+
+```bash
+python3 tests/feature_contract_check.py
+python3 tests/alpha_output_check.py
+python3 tests/reference_check.py
+```
+
+`feature_contract_check.py` covers the fork-specific contract:
+
+- shapes for `F in {1,3,4,8,16,32,64}`
+- F=3 forward parity against original v5
+- `dL/dfeatures` against a CPU Torch reference for `F in {3,8,32}`
+- 100-iteration no-NaN smoke at `F=32`
+
+`alpha_output_check.py` covers the accumulated-alpha contract:
+
+- forward shape/value checks for empty, one-splat, and two-splat pixels
+- alpha-only loss gradients on means2d, conics, and opacities with zero color grad
+- alpha parity against an explicit synthetic all-ones feature channel
+- combined feature+alpha backward linearity
+- F=3 alpha parity against original v5 transmittance
+
+## Depth Sorting Contract
+
+By default, `RasterConfig(inputs_sorted_by_depth=False)` stably sorts splats by
+nondecreasing `depths` inside this fork, gathers `means2d` / `conics` /
+`colors` / `opacities` into that order, and unsorts input gradients in backward.
+
+Set `inputs_sorted_by_depth=True` only when the caller has already applied that
+same per-batch stable depth order to every per-splat input tensor. Under that
+explicit contract this fork skips the internal `argsort`, gather, and backward
+unsort. Passing unsorted tensors with this flag changes compositing order and
+gradients.
+
+## Benchmarks
+
+```bash
+python3 benchmarks/benchmark_mps.py --height 4096 --width 4096 --gaussians 65536 --case medium_sigma_3_8 --feature-dim 32 --backward --profile
+python3 benchmarks/benchmark_mps.py --height 4096 --width 4096 --gaussians 65536 --batch-size 4 --case medium_sigma_3_8 --feature-dim 32 --backward --profile
+```
+
+## Notes
+
+- input API is projected 2D splats, not full 3D camera projection
+- depth gradients are zero; sort order is piecewise constant
+- overflow tiles fall back to a slower path
+- `auto` batch mode chunks large batches to cap total launched tiles / gaussians
+- v6_refined_features uses one generic feature-channel path. It does not stage feature
+  channels in threadgroup memory, so `F=32` avoids a large threadgroup-memory
+  expansion at the cost of streaming feature channels from device memory.
+- Keep original `v5_features` as the stable F-channel baseline; use this fork
+  when callers need a separate namespace for v6-refined feature experiments.
