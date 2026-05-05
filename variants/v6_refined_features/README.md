@@ -8,10 +8,10 @@ This is an isolated feature-channel namespace fork derived from
 `v6_refined_features` feature backend independently from the older
 `v5_features` baseline.
 
-Important current limitation: this is **not yet** a full port of v6_refined's
-active-tile scheduling and adaptive stop-count kernels to arbitrary feature
-channels. It preserves the tested F-channel + accumulated-alpha contract while
-giving us a clean namespace to do that v6-speed work next.
+This fork now carries the v6_refined active-tile scheduling surface for
+arbitrary feature channels plus accumulated alpha. Direct tiles remain the
+default; use `active_policy="auto"` or `"on"` for sparse-screen / overflow-tail
+probes, matching the RGB v6_refined branch's caution around active scheduling.
 
 ## Feature Contract
 
@@ -34,6 +34,8 @@ giving us a clean namespace to do that v6-speed work next.
 - **Auto batch chunking**: `batch_strategy=auto|flatten|serial`
 - **Inference-only fast path**: no sorted-ID writeback when gradients are not needed
 - **Training fast path**: writes sorted IDs back into `binned_ids` and saves per-tile stop counts for backward
+- **Active-tile fast path**: optional v6_refined-style active-tile eval/train
+  kernels for arbitrary `F`, with alpha output and `grad_alpha` backward
 - **Runtime-specialized ablations** via env before import:
   - `GSP_TILE_SIZE=8|16|32`
   - `GSP_CHUNK=32|64|128`
@@ -86,6 +88,7 @@ gradients.
 ```bash
 python3 benchmarks/benchmark_mps.py --height 4096 --width 4096 --gaussians 65536 --case medium_sigma_3_8 --feature-dim 32 --backward --profile
 python3 benchmarks/benchmark_mps.py --height 4096 --width 4096 --gaussians 65536 --batch-size 4 --case medium_sigma_3_8 --feature-dim 32 --backward --profile
+python3 benchmarks/benchmark_mps.py --height 4096 --width 4096 --gaussians 65536 --batch-size 4 --case quadrant_cluster --feature-dim 32 --backward --profile --active-policy auto
 ```
 
 ## Notes
@@ -97,5 +100,9 @@ python3 benchmarks/benchmark_mps.py --height 4096 --width 4096 --gaussians 65536
 - v6_refined_features uses one generic feature-channel path. It does not stage feature
   channels in threadgroup memory, so `F=32` avoids a large threadgroup-memory
   expansion at the cost of streaming feature channels from device memory.
+- Active tiles are not a global win. Dense-screen cases can be slower because
+  they pay active-output initialization and sparse launch overhead. Use the
+  profile fields (`selected_use_active_tiles`, `active_tile_fraction`,
+  `overflow_tile_count`, stop-ratio stats) before promoting active mode.
 - Keep original `v5_features` as the stable F-channel baseline; use this fork
   when callers need a separate namespace for v6-refined feature experiments.

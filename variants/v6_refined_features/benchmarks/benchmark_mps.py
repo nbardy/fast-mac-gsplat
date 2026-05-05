@@ -87,6 +87,14 @@ def main():
     p.add_argument("--backward", action="store_true")
     p.add_argument("--profile", action="store_true")
     p.add_argument("--batch-strategy", type=str, default="auto")
+    p.add_argument("--stop-count-mode", type=str, default="adaptive")
+    p.add_argument("--dense-threshold", type=int, default=64)
+    p.add_argument("--active-policy", type=str, default="off")
+    p.add_argument("--active-tiles", action=argparse.BooleanOptionalAction, default=None)
+    p.add_argument("--sort-active-tiles", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--active-sparse-fraction-threshold", type=float, default=0.45)
+    p.add_argument("--active-dense-multiplier", type=float, default=2.0)
+    p.add_argument("--max-fast-pairs", type=int, default=-1)
     p.add_argument("--alpha-loss", action="store_true")
     p.add_argument("--json", action="store_true")
     args = p.parse_args()
@@ -115,8 +123,15 @@ def main():
         height=args.height,
         width=args.width,
         tile_size=rt.tile_size,
-        max_fast_pairs=rt.fast_cap,
+        max_fast_pairs=args.max_fast_pairs if args.max_fast_pairs > 0 else rt.fast_cap,
         batch_strategy=args.batch_strategy,
+        use_active_tiles=args.active_tiles,
+        active_policy=args.active_policy,
+        sort_active_tiles_by_count=bool(args.sort_active_tiles),
+        active_sparse_fraction_threshold=args.active_sparse_fraction_threshold,
+        active_dense_multiplier=args.active_dense_multiplier,
+        stop_count_mode=args.stop_count_mode,
+        stop_count_dense_threshold=args.dense_threshold,
     )
 
     profile_stats = None
@@ -167,6 +182,11 @@ def main():
         "feature_dim": args.feature_dim,
         "batch_size": args.batch_size,
         "batch_strategy": args.batch_strategy,
+        "stop_count_mode": args.stop_count_mode,
+        "dense_threshold": args.dense_threshold,
+        "active_policy": args.active_policy,
+        "active_tiles_override": args.active_tiles,
+        "sort_active_tiles": bool(args.sort_active_tiles),
         "backward": bool(args.backward),
         "alpha_loss": bool(args.alpha_loss),
         "mean_ms": sum(total_times) / len(total_times),
@@ -187,7 +207,8 @@ def main():
     else:
         kind = "forward_backward" if args.backward else "forward"
         print(
-            f"case={args.case} B={args.batch_size} strat={args.batch_strategy} {kind} "
+            f"case={args.case} B={args.batch_size} strat={args.batch_strategy} stop={args.stop_count_mode} {kind} "
+            f"active_policy={args.active_policy} active_override={args.active_tiles} "
             f"F={args.feature_dim} "
             f"mean_ms={result['mean_ms']:.3f} median_ms={result['median_ms']:.3f} "
             f"fwd_ms={result['forward_ms']:.3f} bwd_ms={result['backward_ms']:.3f} "

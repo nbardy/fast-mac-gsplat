@@ -78,6 +78,9 @@ struct MetalV6RefinedFeaturesKernels {
   std::shared_ptr<MetalKernelFunction> tile_fast_forward_eval;
   std::shared_ptr<MetalKernelFunction> tile_fast_forward_state;
   std::shared_ptr<MetalKernelFunction> tile_fast_backward_saved;
+  std::shared_ptr<MetalKernelFunction> tile_active_forward_eval;
+  std::shared_ptr<MetalKernelFunction> tile_active_forward_state;
+  std::shared_ptr<MetalKernelFunction> tile_active_backward_saved;
   std::shared_ptr<MetalKernelFunction> tile_overflow_forward;
   std::shared_ptr<MetalKernelFunction> tile_overflow_backward;
 };
@@ -93,6 +96,9 @@ MetalV6RefinedFeaturesKernels& kernels() {
     out.tile_fast_forward_eval = lib->getKernelFunction("v6_refined_features_tile_fast_forward_eval");
     out.tile_fast_forward_state = lib->getKernelFunction("v6_refined_features_tile_fast_forward_state");
     out.tile_fast_backward_saved = lib->getKernelFunction("v6_refined_features_tile_fast_backward_saved");
+    out.tile_active_forward_eval = lib->getKernelFunction("v6_refined_features_tile_active_forward_eval");
+    out.tile_active_forward_state = lib->getKernelFunction("v6_refined_features_tile_active_forward_state");
+    out.tile_active_backward_saved = lib->getKernelFunction("v6_refined_features_tile_active_backward_saved");
     out.tile_overflow_forward = lib->getKernelFunction("v6_refined_features_tile_overflow_forward");
     out.tile_overflow_backward = lib->getKernelFunction("v6_refined_features_tile_overflow_backward");
   });
@@ -173,6 +179,20 @@ void launch(std::shared_ptr<MetalKernelFunction> fn, Fn&& body) {
     fn->startEncoding();
     body(*fn);
   });
+}
+
+std::tuple<torch::Tensor, torch::Tensor> make_background_outputs(
+    const ParsedMeta& meta,
+    const torch::Tensor& meta_f32,
+    const torch::TensorOptions& opts_f) {
+  auto out = torch::empty({meta.batch_size, meta.height, meta.width, meta.feature_dim}, opts_f);
+  auto out_alpha = torch::zeros({meta.batch_size, meta.height, meta.width}, opts_f);
+  auto mf = meta_f32.cpu();
+  auto* fp = mf.data_ptr<float>();
+  for (int f = 0; f < meta.feature_dim; ++f) {
+    out.select(-1, f).fill_(fp[4 + f]);
+  }
+  return std::make_tuple(out, out_alpha);
 }
 
 }  // namespace
@@ -379,6 +399,163 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_ren
     });
   }
 
+  return std::make_tuple(g_means2d, g_conics, g_colors, g_opacities);
+}
+
+std::tuple<torch::Tensor, torch::Tensor> metal_render_active_forward_eval(
+    const torch::Tensor& means2d,
+    const torch::Tensor& conics,
+    const torch::Tensor& colors,
+    const torch::Tensor& opacities,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    const torch::Tensor& active_tile_ids,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_offsets,
+    const torch::Tensor& binned_ids) {
+  check_inputs(means2d, conics, colors, opacities);
+  check_aux_i32(active_tile_ids, "active_tile_ids");
+  check_aux_i32(tile_counts, "tile_counts");
+  check_aux_i32(tile_offsets, "tile_offsets");
+  check_aux_i32(binned_ids, "binned_ids");
+  auto meta = parse_meta(meta_i32, meta_f32);
+  auto& sc = shader_config();
+  check_meta_inputs(meta, sc, means2d, colors);
+  auto& k = kernels();
+  auto opts_f = means2d.options().dtype(torch::kFloat32);
+
+  auto outputs = make_background_outputs(meta, meta_f32, opts_f);
+  auto out = std::get<0>(outputs);
+  auto out_alpha = std::get<1>(outputs);
+  const int64_t Ta = active_tile_ids.size(0);
+  if (Ta > 0) {
+    launch(k.tile_active_forward_eval, [&](MetalKernelFunction& fn) {
+      fn.setArg(0, active_tile_ids);
+      fn.setArg(1, tile_counts);
+      fn.setArg(2, tile_offsets);
+      fn.setArg(3, binned_ids);
+      fn.setArg(4, means2d);
+      fn.setArg(5, conics);
+      fn.setArg(6, colors);
+      fn.setArg(7, opacities);
+      fn.setArg(8, meta_i32);
+      fn.setArg(9, meta_f32);
+      fn.setArg(10, out);
+      fn.setArg(11, out_alpha);
+      fn.dispatch((uint64_t)Ta * (uint64_t)sc.threads, (uint64_t)sc.threads);
+    });
+  }
+  return std::make_tuple(out, out_alpha);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> metal_render_active_forward_state(
+    const torch::Tensor& means2d,
+    const torch::Tensor& conics,
+    const torch::Tensor& colors,
+    const torch::Tensor& opacities,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    torch::Tensor& binned_ids,
+    const torch::Tensor& active_tile_ids,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_offsets) {
+  check_inputs(means2d, conics, colors, opacities);
+  check_aux_i32(active_tile_ids, "active_tile_ids");
+  check_aux_i32(tile_counts, "tile_counts");
+  check_aux_i32(tile_offsets, "tile_offsets");
+  check_aux_i32(binned_ids, "binned_ids");
+  auto meta = parse_meta(meta_i32, meta_f32);
+  auto& sc = shader_config();
+  check_meta_inputs(meta, sc, means2d, colors);
+  auto& k = kernels();
+  auto opts_f = means2d.options().dtype(torch::kFloat32);
+  auto opts_i32 = means2d.options().dtype(torch::kInt32);
+
+  auto outputs = make_background_outputs(meta, meta_f32, opts_f);
+  auto out = std::get<0>(outputs);
+  auto out_alpha = std::get<1>(outputs);
+  auto tile_stop_counts = torch::zeros({meta.tile_count}, opts_i32);
+  const int64_t Ta = active_tile_ids.size(0);
+  if (Ta > 0) {
+    launch(k.tile_active_forward_state, [&](MetalKernelFunction& fn) {
+      fn.setArg(0, active_tile_ids);
+      fn.setArg(1, tile_counts);
+      fn.setArg(2, tile_offsets);
+      fn.setArg(3, binned_ids);
+      fn.setArg(4, means2d);
+      fn.setArg(5, conics);
+      fn.setArg(6, colors);
+      fn.setArg(7, opacities);
+      fn.setArg(8, meta_i32);
+      fn.setArg(9, meta_f32);
+      fn.setArg(10, out);
+      fn.setArg(11, out_alpha);
+      fn.setArg(12, tile_stop_counts);
+      fn.dispatch((uint64_t)Ta * (uint64_t)sc.threads, (uint64_t)sc.threads);
+    });
+  }
+  return std::make_tuple(out, out_alpha, tile_stop_counts);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_render_active_backward_saved(
+    const torch::Tensor& grad_features,
+    const torch::Tensor& grad_alpha,
+    const torch::Tensor& means2d,
+    const torch::Tensor& conics,
+    const torch::Tensor& colors,
+    const torch::Tensor& opacities,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    const torch::Tensor& active_tile_ids,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_offsets,
+    const torch::Tensor& binned_ids,
+    const torch::Tensor& tile_stop_counts) {
+  check_inputs(means2d, conics, colors, opacities);
+  TORCH_CHECK(grad_features.device().is_mps(), "grad_features must be on MPS");
+  TORCH_CHECK(grad_alpha.device().is_mps(), "grad_alpha must be on MPS");
+  check_aux_i32(active_tile_ids, "active_tile_ids");
+  check_aux_i32(tile_counts, "tile_counts");
+  check_aux_i32(tile_offsets, "tile_offsets");
+  check_aux_i32(binned_ids, "binned_ids");
+  check_aux_i32(tile_stop_counts, "tile_stop_counts");
+
+  auto meta = parse_meta(meta_i32, meta_f32);
+  auto& sc = shader_config();
+  check_meta_inputs(meta, sc, means2d, colors);
+  check_image_grad(grad_features, meta, "grad_features");
+  check_alpha_grad(grad_alpha, meta, "grad_alpha");
+  auto& k = kernels();
+  auto opts_f = means2d.options().dtype(torch::kFloat32);
+
+  auto g_means2d = torch::zeros_like(means2d, opts_f);
+  auto g_conics = torch::zeros_like(conics, opts_f);
+  auto g_colors = torch::zeros_like(colors, opts_f);
+  auto g_opacities = torch::zeros_like(opacities, opts_f);
+
+  const int64_t Ta = active_tile_ids.size(0);
+  if (Ta > 0) {
+    launch(k.tile_active_backward_saved, [&](MetalKernelFunction& fn) {
+      fn.setArg(0, grad_features.contiguous());
+      fn.setArg(1, grad_alpha.contiguous());
+      fn.setArg(2, active_tile_ids);
+      fn.setArg(3, tile_counts);
+      fn.setArg(4, tile_offsets);
+      fn.setArg(5, binned_ids);
+      fn.setArg(6, tile_stop_counts);
+      fn.setArg(7, means2d);
+      fn.setArg(8, conics);
+      fn.setArg(9, colors);
+      fn.setArg(10, opacities);
+      fn.setArg(11, meta_i32);
+      fn.setArg(12, meta_f32);
+      fn.setArg(13, g_means2d);
+      fn.setArg(14, g_conics);
+      fn.setArg(15, g_colors);
+      fn.setArg(16, g_opacities);
+      fn.dispatch((uint64_t)Ta * (uint64_t)sc.threads, (uint64_t)sc.threads);
+    });
+  }
   return std::make_tuple(g_means2d, g_conics, g_colors, g_opacities);
 }
 

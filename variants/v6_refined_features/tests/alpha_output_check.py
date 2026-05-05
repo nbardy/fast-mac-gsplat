@@ -221,12 +221,65 @@ def test_f3_v5_alpha_parity() -> None:
     print("Test E passed.")
 
 
+def test_active_f32_matches_direct_for_feature_and_alpha_grad() -> None:
+    torch.manual_seed(23)
+    device = _device()
+    gaussians, feature_dim, height, width = 16, 32, 16, 16
+    means2d, conics, colors, opacities, depths = _random_inputs(
+        device,
+        gaussians=gaussians,
+        feature_dim=feature_dim,
+        height=height,
+    )
+
+    def run(active_policy: str):
+        m = means2d.detach().clone().requires_grad_(True)
+        c = conics.detach().clone().requires_grad_(True)
+        col = colors.detach().clone().requires_grad_(True)
+        o = opacities.detach().clone().requires_grad_(True)
+        cfg = _config(height, width, feature_dim)
+        cfg = RasterConfig(
+            height=cfg.height,
+            width=cfg.width,
+            tile_size=cfg.tile_size,
+            max_fast_pairs=cfg.max_fast_pairs,
+            alpha_threshold=cfg.alpha_threshold,
+            transmittance_threshold=cfg.transmittance_threshold,
+            background=cfg.background,
+            enable_overflow_fallback=cfg.enable_overflow_fallback,
+            inputs_sorted_by_depth=cfg.inputs_sorted_by_depth,
+            batch_strategy=cfg.batch_strategy,
+            batch_launch_limit_tiles=cfg.batch_launch_limit_tiles,
+            batch_launch_limit_gaussians=cfg.batch_launch_limit_gaussians,
+            active_policy=active_policy,
+            stop_count_mode="adaptive",
+            stop_count_dense_threshold=8,
+        )
+        feat, alpha = rasterize_projected_gaussians(m, c, col, o, depths, cfg)
+        (feat.square().mean() + alpha.square().mean()).backward()
+        return feat, alpha, (m.grad, c.grad, col.grad, o.grad)
+
+    direct_feat, direct_alpha, direct_grads = run("off")
+    active_feat, active_alpha, active_grads = run("on")
+    assert _max_abs(direct_feat - active_feat) < 1.0e-6, "active F32 features differ from direct"
+    assert _max_abs(direct_alpha - active_alpha) < 1.0e-6, "active F32 alpha differs from direct"
+    for name, direct_grad, active_grad in zip(
+        ("means2d", "conics", "features", "opacities"),
+        direct_grads,
+        active_grads,
+    ):
+        diff = _max_abs(direct_grad - active_grad)
+        assert diff < 1.0e-5, f"active F32 {name} grad differs from direct, diff={diff:g}"
+    print("Test F passed.")
+
+
 def main() -> None:
     test_forward_alpha_shape_and_values()
     test_alpha_only_loss_propagates_to_geometry()
     test_alpha_matches_synthetic_feature_channel()
     test_combined_backward_linear()
     test_f3_v5_alpha_parity()
+    test_active_f32_matches_direct_for_feature_and_alpha_grad()
 
 
 if __name__ == "__main__":

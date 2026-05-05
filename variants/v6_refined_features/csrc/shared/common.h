@@ -18,6 +18,9 @@ struct ParsedMeta {
   int gaussians_per_batch;
   int tiles_per_image;
   int feature_dim;
+  int stop_count_mode;
+  int stop_count_dense_threshold;
+  int reserved0;
 
   float alpha_threshold;
   float transmittance_threshold;
@@ -26,7 +29,7 @@ struct ParsedMeta {
 };
 
 inline ParsedMeta parse_meta(const torch::Tensor& meta_i32, const torch::Tensor& meta_f32) {
-  TORCH_CHECK(meta_i32.numel() >= 12, "meta_i32 must have at least 12 values");
+  TORCH_CHECK(meta_i32.numel() >= 15, "meta_i32 must have at least 15 values");
   TORCH_CHECK(meta_f32.numel() >= 4, "meta_f32 must have at least 4 values");
   auto mi = meta_i32.cpu();
   auto mf = meta_f32.cpu();
@@ -45,6 +48,9 @@ inline ParsedMeta parse_meta(const torch::Tensor& meta_i32, const torch::Tensor&
   out.gaussians_per_batch = ip[9];
   out.tiles_per_image = ip[10];
   out.feature_dim = ip[11];
+  out.stop_count_mode = ip[12];
+  out.stop_count_dense_threshold = ip[13];
+  out.reserved0 = ip[14];
   out.alpha_threshold = fp[0];
   out.transmittance_threshold = fp[1];
   out.eps = fp[2];
@@ -91,6 +97,45 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_ren
     const torch::Tensor& opacities,
     const torch::Tensor& meta_i32,
     const torch::Tensor& meta_f32,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_offsets,
+    const torch::Tensor& binned_ids,
+    const torch::Tensor& tile_stop_counts);
+
+std::tuple<torch::Tensor, torch::Tensor> metal_render_active_forward_eval(
+    const torch::Tensor& means2d,
+    const torch::Tensor& conics,
+    const torch::Tensor& colors,
+    const torch::Tensor& opacities,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    const torch::Tensor& active_tile_ids,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_offsets,
+    const torch::Tensor& binned_ids);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> metal_render_active_forward_state(
+    const torch::Tensor& means2d,
+    const torch::Tensor& conics,
+    const torch::Tensor& colors,
+    const torch::Tensor& opacities,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    torch::Tensor& binned_ids,
+    const torch::Tensor& active_tile_ids,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_offsets);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_render_active_backward_saved(
+    const torch::Tensor& grad_features,
+    const torch::Tensor& grad_alpha,
+    const torch::Tensor& means2d,
+    const torch::Tensor& conics,
+    const torch::Tensor& colors,
+    const torch::Tensor& opacities,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    const torch::Tensor& active_tile_ids,
     const torch::Tensor& tile_counts,
     const torch::Tensor& tile_offsets,
     const torch::Tensor& binned_ids,

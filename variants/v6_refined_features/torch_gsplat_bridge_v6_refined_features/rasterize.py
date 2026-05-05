@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -74,6 +74,15 @@ class RasterConfig:
     # Caller guarantees all per-splat inputs are already stably sorted by
     # nondecreasing depth per batch. This skips argsort/gather and backward unsort.
     inputs_sorted_by_depth: bool = False
+    # Direct-tile kernels remain the default. Active scheduling mirrors
+    # v6_refined: opt in explicitly or let auto choose sparse/overflow tails.
+    use_active_tiles: Optional[bool] = None
+    active_policy: str = "off"  # off | on | auto
+    sort_active_tiles_by_count: bool = True
+    active_sparse_fraction_threshold: float = 0.45
+    active_dense_multiplier: float = 2.0
+    stop_count_mode: str = "adaptive"  # always | never | adaptive
+    stop_count_dense_threshold: int = 64
 
 
 def _runtime_validate(config: RasterConfig, feature_dim: int | None = None) -> RuntimeShaderConfig:
@@ -90,6 +99,16 @@ def _runtime_validate(config: RasterConfig, feature_dim: int | None = None) -> R
         )
     if config.batch_strategy not in ("auto", "flatten", "serial"):
         raise ValueError("batch_strategy must be one of: auto, flatten, serial")
+    if config.active_policy not in ("off", "on", "auto"):
+        raise ValueError("active_policy must be one of: off, on, auto")
+    if not (0.0 <= float(config.active_sparse_fraction_threshold) <= 1.0):
+        raise ValueError("active_sparse_fraction_threshold must be in [0,1]")
+    if float(config.active_dense_multiplier) <= 0.0:
+        raise ValueError("active_dense_multiplier must be positive")
+    if config.stop_count_mode not in ("always", "never", "adaptive"):
+        raise ValueError("stop_count_mode must be one of: always, never, adaptive")
+    if config.stop_count_dense_threshold <= 0:
+        raise ValueError("stop_count_dense_threshold must be positive")
     if feature_dim is not None:
         if feature_dim <= 0:
             raise ValueError("feature_dim must be positive")
@@ -99,6 +118,10 @@ def _runtime_validate(config: RasterConfig, feature_dim: int | None = None) -> R
                 "Set GSP_FEATURE_CAP before importing/running the extension, or reduce colors.shape[-1]."
             )
     return rt
+
+
+def _stop_mode_to_int(mode: str) -> int:
+    return {"always": 0, "never": 1, "adaptive": 2}[mode]
 
 
 def _background_for_feature_dim(config: RasterConfig, feature_dim: int, feature_cap: int) -> list[float]:
@@ -142,6 +165,9 @@ def _make_meta(
             gaussians_per_batch,
             tiles_per_image,
             feature_dim,
+            _stop_mode_to_int(config.stop_count_mode),
+            int(config.stop_count_dense_threshold),
+            0,
         ],
         device=device,
         dtype=torch.int32,
@@ -394,6 +420,94 @@ def _choose_batch_chunk_size(config: RasterConfig, batch_size: int, gaussians_pe
     return max(1, min(batch_size, by_tiles, by_gaussians))
 
 
+def _make_active_tile_ids(tile_counts: Tensor, max_fast_pairs: int, *, sort_by_count: bool) -> Tensor:
+    fast_mask = (tile_counts > 0) & (tile_counts <= int(max_fast_pairs))
+    active_tile_ids = torch.nonzero(fast_mask, as_tuple=False).flatten().to(torch.int32)
+    if active_tile_ids.numel() == 0:
+        return active_tile_ids.contiguous()
+    if sort_by_count:
+        counts = tile_counts.index_select(0, active_tile_ids.to(torch.long))
+        perm = torch.argsort(counts, stable=True)
+        active_tile_ids = active_tile_ids.index_select(0, perm)
+    return active_tile_ids.contiguous()
+
+
+def _band_counts(tile_counts: Tensor, active_tile_ids: Tensor, dense_threshold: int) -> dict[str, int]:
+    if active_tile_ids.numel() == 0:
+        return {"active_tile_count": 0, "dense_active_tile_count": 0, "light_active_tile_count": 0}
+    counts = tile_counts.index_select(0, active_tile_ids.to(torch.long)).to(torch.int32)
+    dense = counts >= int(dense_threshold)
+    return {
+        "active_tile_count": int(active_tile_ids.numel()),
+        "dense_active_tile_count": int(dense.sum().item()),
+        "light_active_tile_count": int((~dense).sum().item()),
+    }
+
+
+def _resolve_active_tile_mode(
+    tile_counts: Tensor,
+    max_fast_pairs: int,
+    *,
+    use_active_tiles_override: Optional[bool],
+    active_policy: str,
+    sparse_fraction_threshold: float,
+    dense_multiplier: float,
+) -> tuple[bool, dict[str, Any]]:
+    total_tiles = int(tile_counts.numel())
+    if total_tiles == 0:
+        return False, {
+            "active_tile_count": 0,
+            "active_tile_fraction": 0.0,
+            "overflow_tile_count": 0,
+            "max_pairs_per_tile": 0,
+            "selected_active_policy": "off",
+            "selected_use_active_tiles": False,
+            "selected_active_reason": "no_tiles",
+        }
+
+    active_tile_count = int((tile_counts > 0).sum().item())
+    active_tile_fraction = float(active_tile_count) / float(max(total_tiles, 1))
+    overflow_tile_count = int((tile_counts > int(max_fast_pairs)).sum().item())
+    max_pairs_per_tile = int(tile_counts.max().item()) if tile_counts.numel() else 0
+
+    if use_active_tiles_override is not None:
+        use_active_tiles = bool(use_active_tiles_override)
+        selected_active_policy = "legacy"
+        selected_active_reason = "override_true" if use_active_tiles else "override_false"
+    elif active_policy == "on":
+        use_active_tiles = True
+        selected_active_policy = "on"
+        selected_active_reason = "forced_on"
+    elif active_policy == "off":
+        use_active_tiles = False
+        selected_active_policy = "off"
+        selected_active_reason = "forced_off"
+    else:
+        sparse = active_tile_fraction < float(sparse_fraction_threshold)
+        overflow = overflow_tile_count > 0
+        dense_tail = max_pairs_per_tile > int(float(dense_multiplier) * int(max_fast_pairs))
+        use_active_tiles = bool(sparse or overflow or dense_tail)
+        selected_active_policy = "auto"
+        reasons = []
+        if sparse:
+            reasons.append("sparse")
+        if overflow:
+            reasons.append("overflow")
+        if dense_tail:
+            reasons.append("dense_tail")
+        selected_active_reason = "+".join(reasons) if reasons else "uniform_dense"
+
+    return bool(use_active_tiles), {
+        "active_tile_count": active_tile_count,
+        "active_tile_fraction": active_tile_fraction,
+        "overflow_tile_count": overflow_tile_count,
+        "max_pairs_per_tile": max_pairs_per_tile,
+        "selected_active_policy": selected_active_policy,
+        "selected_use_active_tiles": bool(use_active_tiles),
+        "selected_active_reason": selected_active_reason,
+    }
+
+
 class _RasterizeProjectedGaussiansV6RefinedFeatures(torch.autograd.Function):
     @staticmethod
     def forward(
@@ -407,6 +521,11 @@ class _RasterizeProjectedGaussiansV6RefinedFeatures(torch.autograd.Function):
         meta_f32: Tensor,
         enable_overflow_fallback: bool,
         inputs_sorted_by_depth: bool,
+        use_active_tiles_override: Optional[bool],
+        active_policy: str,
+        active_sparse_fraction_threshold: float,
+        active_dense_multiplier: float,
+        sort_active_tiles_by_count: bool,
     ) -> tuple[Tensor, Tensor]:
         if not hasattr(torch.ops, "gsplat_metal_v6_refined_features"):
             raise RuntimeError("gsplat_metal_v6_refined_features custom ops not found. Build the extension first.")
@@ -430,9 +549,44 @@ class _RasterizeProjectedGaussiansV6RefinedFeatures(torch.autograd.Function):
         tile_counts, tile_offsets, binned_ids = torch.ops.gsplat_metal_v6_refined_features.bin(
             means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32
         )
-        out_fast, alpha_fast, tile_stop_counts = torch.ops.gsplat_metal_v6_refined_features.render_fast_forward_state(
-            means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32, binned_ids, tile_counts, tile_offsets
+
+        use_active_tiles, _ = _resolve_active_tile_mode(
+            tile_counts,
+            int(meta_i32[7].item()),
+            use_active_tiles_override=use_active_tiles_override,
+            active_policy=active_policy,
+            sparse_fraction_threshold=float(active_sparse_fraction_threshold),
+            dense_multiplier=float(active_dense_multiplier),
         )
+        if use_active_tiles:
+            active_tile_ids = _make_active_tile_ids(
+                tile_counts, int(meta_i32[7].item()), sort_by_count=bool(sort_active_tiles_by_count)
+            )
+            out_fast, alpha_fast, tile_stop_counts = torch.ops.gsplat_metal_v6_refined_features.render_active_forward_state(
+                means_flat,
+                conics_flat,
+                colors_flat,
+                opacities_flat,
+                meta_i32,
+                meta_f32,
+                binned_ids,
+                active_tile_ids,
+                tile_counts,
+                tile_offsets,
+            )
+        else:
+            active_tile_ids = torch.empty((0,), device=means2d_b.device, dtype=torch.int32)
+            out_fast, alpha_fast, tile_stop_counts = torch.ops.gsplat_metal_v6_refined_features.render_fast_forward_state(
+                means_flat,
+                conics_flat,
+                colors_flat,
+                opacities_flat,
+                meta_i32,
+                meta_f32,
+                binned_ids,
+                tile_counts,
+                tile_offsets,
+            )
 
         tile_size = int(meta_i32[4].item())
         tiles_x = int(meta_i32[3].item())
@@ -484,6 +638,7 @@ class _RasterizeProjectedGaussiansV6RefinedFeatures(torch.autograd.Function):
             depths_b,
             meta_i32,
             meta_f32,
+            active_tile_ids,
             tile_counts,
             tile_offsets,
             binned_ids,
@@ -500,6 +655,7 @@ class _RasterizeProjectedGaussiansV6RefinedFeatures(torch.autograd.Function):
         ctx.tile_size = tile_size
         ctx.enable_overflow_fallback = enable_overflow_fallback
         ctx.inputs_sorted_by_depth = inputs_sorted_by_depth
+        ctx.use_active_tiles = bool(use_active_tiles)
         return out, alpha
 
     @staticmethod
@@ -513,6 +669,7 @@ class _RasterizeProjectedGaussiansV6RefinedFeatures(torch.autograd.Function):
             depths_b,
             meta_i32,
             meta_f32,
+            active_tile_ids,
             tile_counts,
             tile_offsets,
             binned_ids,
@@ -541,20 +698,37 @@ class _RasterizeProjectedGaussiansV6RefinedFeatures(torch.autograd.Function):
             _zero_tile_images_(grad_fast, overflow_tile_ids, ctx.tiles_per_image, ctx.tiles_x, ctx.tile_size)
             _zero_tile_scalars_(grad_alpha_fast, overflow_tile_ids, ctx.tiles_per_image, ctx.tiles_x, ctx.tile_size)
 
-        g_means_flat, g_conics_flat, g_colors_flat, g_opacities_flat = torch.ops.gsplat_metal_v6_refined_features.render_fast_backward_saved(
-            grad_fast,
-            grad_alpha_fast,
-            means_flat,
-            conics_flat,
-            colors_flat,
-            opacities_flat,
-            meta_i32,
-            meta_f32,
-            tile_counts,
-            tile_offsets,
-            binned_ids,
-            tile_stop_counts,
-        )
+        if ctx.use_active_tiles:
+            g_means_flat, g_conics_flat, g_colors_flat, g_opacities_flat = torch.ops.gsplat_metal_v6_refined_features.render_active_backward_saved(
+                grad_fast,
+                grad_alpha_fast,
+                means_flat,
+                conics_flat,
+                colors_flat,
+                opacities_flat,
+                meta_i32,
+                meta_f32,
+                active_tile_ids,
+                tile_counts,
+                tile_offsets,
+                binned_ids,
+                tile_stop_counts,
+            )
+        else:
+            g_means_flat, g_conics_flat, g_colors_flat, g_opacities_flat = torch.ops.gsplat_metal_v6_refined_features.render_fast_backward_saved(
+                grad_fast,
+                grad_alpha_fast,
+                means_flat,
+                conics_flat,
+                colors_flat,
+                opacities_flat,
+                meta_i32,
+                meta_f32,
+                tile_counts,
+                tile_offsets,
+                binned_ids,
+                tile_stop_counts,
+            )
 
         if ctx.enable_overflow_fallback and overflow_tile_ids.numel() > 0:
             grad_tiles = _gather_tile_images(grad_features.contiguous(), overflow_tile_ids, ctx.tiles_per_image, ctx.tiles_x, ctx.tile_size)
@@ -591,7 +765,22 @@ class _RasterizeProjectedGaussiansV6RefinedFeatures(torch.autograd.Function):
             g_colors_b = _unsort_batched(g_colors_flat.view(B, G, F), perm)
             g_opacities_b = _unsort_batched(g_opacities_flat.view(B, G), perm)
         g_depths_b = torch.zeros_like(depths_b)
-        return g_means_b, g_conics_b, g_colors_b, g_opacities_b, g_depths_b, None, None, None, None
+        return (
+            g_means_b,
+            g_conics_b,
+            g_colors_b,
+            g_opacities_b,
+            g_depths_b,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 def _rasterize_chunk_eval(
@@ -622,9 +811,35 @@ def _rasterize_chunk_eval(
     tile_counts, tile_offsets, binned_ids = torch.ops.gsplat_metal_v6_refined_features.bin(
         means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32
     )
-    out_fast, alpha_fast = torch.ops.gsplat_metal_v6_refined_features.render_fast_forward_eval(
-        means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32, tile_counts, tile_offsets, binned_ids
+
+    use_active_tiles, _ = _resolve_active_tile_mode(
+        tile_counts,
+        int(meta_i32[7].item()),
+        use_active_tiles_override=config.use_active_tiles,
+        active_policy=config.active_policy,
+        sparse_fraction_threshold=float(config.active_sparse_fraction_threshold),
+        dense_multiplier=float(config.active_dense_multiplier),
     )
+    if use_active_tiles:
+        active_tile_ids = _make_active_tile_ids(
+            tile_counts, int(meta_i32[7].item()), sort_by_count=bool(config.sort_active_tiles_by_count)
+        )
+        out_fast, alpha_fast = torch.ops.gsplat_metal_v6_refined_features.render_active_forward_eval(
+            means_flat,
+            conics_flat,
+            colors_flat,
+            opacities_flat,
+            meta_i32,
+            meta_f32,
+            active_tile_ids,
+            tile_counts,
+            tile_offsets,
+            binned_ids,
+        )
+    else:
+        out_fast, alpha_fast = torch.ops.gsplat_metal_v6_refined_features.render_fast_forward_eval(
+            means_flat, conics_flat, colors_flat, opacities_flat, meta_i32, meta_f32, tile_counts, tile_offsets, binned_ids
+        )
 
     if config.enable_overflow_fallback:
         overflow_tile_ids, overflow_tile_offsets, overflow_sorted_ids = _gather_overflow_segments(
@@ -692,6 +907,11 @@ def _rasterize_batched(
                     meta_f32,
                     bool(config.enable_overflow_fallback),
                     bool(config.inputs_sorted_by_depth),
+                    config.use_active_tiles,
+                    config.active_policy,
+                    float(config.active_sparse_fraction_threshold),
+                    float(config.active_dense_multiplier),
+                    bool(config.sort_active_tiles_by_count),
                 )
             )
             outs.append(chunk_out)
@@ -749,6 +969,11 @@ def profile_projected_gaussians(
 
     all_tile_counts = []
     all_stop_counts = []
+    all_active_counts = []
+    all_dense_active = []
+    all_selected_use_active = []
+    all_active_fractions = []
+    all_selected_reasons = []
     images = []
 
     for b0 in range(0, B, chunk_b):
@@ -778,13 +1003,47 @@ def profile_projected_gaussians(
         )
         all_tile_counts.append(tile_counts.detach().cpu().to(torch.float32))
 
+        use_active_tiles, mode_stats = _resolve_active_tile_mode(
+            tile_counts,
+            int(meta_i32[7].item()),
+            use_active_tiles_override=config.use_active_tiles,
+            active_policy=config.active_policy,
+            sparse_fraction_threshold=float(config.active_sparse_fraction_threshold),
+            dense_multiplier=float(config.active_dense_multiplier),
+        )
+        if use_active_tiles:
+            active_tile_ids = _make_active_tile_ids(
+                tile_counts, int(meta_i32[7].item()), sort_by_count=bool(config.sort_active_tiles_by_count)
+            )
+        else:
+            active_tile_ids = torch.empty((0,), device=tile_counts.device, dtype=torch.int32)
+        band_stats = (
+            _band_counts(tile_counts, active_tile_ids, config.stop_count_dense_threshold)
+            if use_active_tiles
+            else {
+                "active_tile_count": mode_stats["active_tile_count"],
+                "dense_active_tile_count": 0,
+                "light_active_tile_count": mode_stats["active_tile_count"],
+            }
+        )
+        all_active_counts.append(band_stats["active_tile_count"])
+        all_dense_active.append(band_stats["dense_active_tile_count"])
+        all_selected_use_active.append(bool(mode_stats["selected_use_active_tiles"]))
+        all_active_fractions.append(float(mode_stats["active_tile_fraction"]))
+        all_selected_reasons.append(str(mode_stats["selected_active_reason"]))
+
         if run_forward or return_image:
             if return_image:
                 chunk_img, _chunk_alpha = _rasterize_chunk_eval(m, q, c, o, d, config)
                 images.append(chunk_img)
-            _, _alpha, stop_counts = torch.ops.gsplat_metal_v6_refined_features.render_fast_forward_state(
-                m_s, q_s, c_s, o_s, meta_i32, meta_f32, binned_ids, tile_counts, tile_offsets
-            )
+            if use_active_tiles:
+                _, _alpha, stop_counts = torch.ops.gsplat_metal_v6_refined_features.render_active_forward_state(
+                    m_s, q_s, c_s, o_s, meta_i32, meta_f32, binned_ids, active_tile_ids, tile_counts, tile_offsets
+                )
+            else:
+                _, _alpha, stop_counts = torch.ops.gsplat_metal_v6_refined_features.render_fast_forward_state(
+                    m_s, q_s, c_s, o_s, meta_i32, meta_f32, binned_ids, tile_counts, tile_offsets
+                )
             all_stop_counts.append(stop_counts.detach().cpu().to(torch.float32))
 
     counts_cpu = torch.cat(all_tile_counts, dim=0) if all_tile_counts else torch.zeros(0, dtype=torch.float32)
@@ -801,7 +1060,20 @@ def profile_projected_gaussians(
         "max_pairs_per_tile": int(counts_cpu.max().item()) if counts_cpu.numel() else 0,
         "overflow_tile_count": int((counts_cpu > int(config.max_fast_pairs)).sum().item()) if counts_cpu.numel() else 0,
         "chosen_batch_chunk": int(chunk_b),
+        "active_tile_count": int(sum(all_active_counts)),
+        "dense_active_tile_count": int(sum(all_dense_active)),
+        "stop_count_mode": config.stop_count_mode,
+        "active_policy": config.active_policy,
+        "use_active_tiles_override": None if config.use_active_tiles is None else bool(config.use_active_tiles),
     }
+
+    stats.update(
+        {
+            "mean_active_tile_fraction": float(sum(all_active_fractions) / len(all_active_fractions)) if all_active_fractions else 0.0,
+            "selected_use_active_tiles": bool(any(all_selected_use_active)) if all_selected_use_active else False,
+            "selected_active_reason": ",".join(sorted(set(all_selected_reasons))) if all_selected_reasons else "",
+        }
+    )
 
     if all_stop_counts:
         stop_cpu = torch.cat(all_stop_counts, dim=0)

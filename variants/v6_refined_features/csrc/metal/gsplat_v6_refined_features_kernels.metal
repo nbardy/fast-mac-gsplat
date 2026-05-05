@@ -36,6 +36,9 @@ struct MetaI32 {
   int gaussians_per_batch;
   int tiles_per_image;
   int feature_dim;
+  int stop_count_mode;
+  int stop_count_dense_threshold;
+  int reserved0;
 };
 
 struct MetaF32 {
@@ -621,6 +624,288 @@ kernel void v6_refined_features_tile_fast_backward_saved(
   // so using it as the loop bound makes saturated pixels take fewer barriers
   // than unsaturated pixels. Iterate over the tile-level stop count and mask
   // each pixel with `global_i < end_i` inside the loop.
+  for (int chunk_end = int(stop_count); chunk_end > 0; chunk_end -= int(GSP_CHUNK)) {
+    int chunk_start_i = max(0, chunk_end - int(GSP_CHUNK));
+    uint chunk_start = uint(chunk_start_i);
+    uint chunk_n = uint(chunk_end - chunk_start_i);
+    load_chunk_params(means2d, conics, opacities, mi, shared_ids, chunk_start, chunk_n, tid, sh_means, sh_conics, sh_opacities);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (int local = int(chunk_n) - 1; local >= 0; --local) {
+      uint global_i = chunk_start + uint(local);
+      uint g = shared_ids[global_i];
+      float2 m = sh_means[uint(local)];
+      float3 q = load3_sh(sh_conics, uint(local));
+      float opacity = sh_opacities[uint(local)];
+      float l_gmx = 0.0f, l_gmy = 0.0f, l_ga = 0.0f, l_gb = 0.0f, l_gc = 0.0f, l_gop = 0.0f;
+      if (valid && global_i < end_i) {
+        float alpha, raw_alpha, power; float2 d;
+        if (eval_alpha(p, m, q.x, q.y, q.z, opacity, mf, alpha, raw_alpha, power, d)) {
+          float denom = max(1.0f - alpha, mf.eps);
+          float T_prev = T_cur / denom;
+          float dot_gc = dot_pixel_features(grad_features, colors, pix, g, mi) + alpha_grad;
+          float g_alpha = T_prev * (dot_gc - gT);
+          atomic_add_feature_grads(g_colors, grad_features, pix, g, T_prev * alpha, mi);
+          float gate = (raw_alpha < mf.max_alpha) ? 1.0f : 0.0f;
+          float g_raw = g_alpha * gate;
+          float g_power = g_raw * raw_alpha;
+          l_ga = g_power * (-0.5f) * d.x * d.x;
+          l_gb = g_power * (-1.0f) * d.x * d.y;
+          l_gc = g_power * (-0.5f) * d.y * d.y;
+          float g_dx = g_power * (-(q.x * d.x + q.y * d.y));
+          float g_dy = g_power * (-(q.y * d.x + q.z * d.y));
+          l_gmx = -g_dx;
+          l_gmy = -g_dy;
+          l_gop = g_raw * (raw_alpha / max(opacity, mf.eps));
+          gT = alpha * dot_gc + (1.0f - alpha) * gT;
+          T_cur = T_prev;
+        }
+      }
+      float4 s0 = simd_sum(float4(l_gmx, l_gmy, l_ga, l_gb));
+      float4 s1 = simd_sum(float4(l_gc, 0.0f, 0.0f, 0.0f));
+      float s2 = simd_sum(l_gop);
+      if (simd_lane == 0u) { partial0[simd_group] = s0; partial1[simd_group] = s1; partial2[simd_group] = s2; }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      if (simd_group == 0u) {
+        float4 v0 = (simd_lane < GSP_SIMDGROUPS) ? partial0[simd_lane] : float4(0.0f);
+        float4 v1 = (simd_lane < GSP_SIMDGROUPS) ? partial1[simd_lane] : float4(0.0f);
+        float v2 = (simd_lane < GSP_SIMDGROUPS) ? partial2[simd_lane] : 0.0f;
+        float4 t0 = simd_sum(v0);
+        float4 t1 = simd_sum(v1);
+        float t2 = simd_sum(v2);
+        if (simd_lane == 0u) {
+          atomic_fetch_add_explicit(&g_means2d[g * 2u + 0u], t0.x, memory_order_relaxed);
+          atomic_fetch_add_explicit(&g_means2d[g * 2u + 1u], t0.y, memory_order_relaxed);
+          atomic_fetch_add_explicit(&g_conics[g * 3u + 0u], t0.z, memory_order_relaxed);
+          atomic_fetch_add_explicit(&g_conics[g * 3u + 1u], t0.w, memory_order_relaxed);
+          atomic_fetch_add_explicit(&g_conics[g * 3u + 2u], t1.x, memory_order_relaxed);
+          atomic_fetch_add_explicit(&g_opacities[g], t2, memory_order_relaxed);
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+}
+
+kernel void v6_refined_features_tile_active_forward_eval(
+    const device uint* active_tile_ids [[buffer(0)]],
+    const device uint* tile_counts [[buffer(1)]],
+    const device int* tile_offsets [[buffer(2)]],
+    const device uint* binned_ids [[buffer(3)]],
+    const device float2* means2d [[buffer(4)]],
+    const device float* conics [[buffer(5)]],
+    const device float* colors [[buffer(6)]],
+    const device float* opacities [[buffer(7)]],
+    constant MetaI32& mi [[buffer(8)]],
+    constant MetaF32& mf [[buffer(9)]],
+    device float* out_features [[buffer(10)]],
+    device float* out_alpha [[buffer(11)]],
+    uint active_idx [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint simd_lane [[thread_index_in_simdgroup]],
+    uint simd_group [[simdgroup_index_in_threadgroup]]) {
+  uint tg_id = active_tile_ids[active_idx];
+  if (tg_id >= uint(mi.tile_count)) return;
+  uint batch, x, y;
+  tile_pixel_from_tid(tg_id, tid, mi, batch, x, y);
+  bool valid = (x < uint(mi.width) && y < uint(mi.height));
+  uint pix = valid ? pixel_index(batch, x, y, mi) : 0u;
+  uint count = tile_counts[tg_id];
+  if (count == 0u || count > uint(mi.max_fast_pairs)) {
+    if (valid) {
+      write_background(out_features, pix, mi, mf);
+      out_alpha[pix] = 0.0f;
+    }
+    return;
+  }
+  threadgroup uint shared_ids[GSP_FAST_CAP];
+  threadgroup float2 sh_means[GSP_CHUNK];
+  threadgroup float sh_conics[GSP_CHUNK * 3u];
+  threadgroup float sh_opacities[GSP_CHUNK];
+  threadgroup uint tg_alive[GSP_SIMDGROUPS];
+  uint start = uint(tile_offsets[tg_id]);
+  for (uint i = tid; i < count; i += GSP_THREADS) shared_ids[i] = binned_ids[start + i];
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  bitonic_sort_ids(shared_ids, count, tid);
+  float T = 1.0f;
+  float2 p = float2(float(x) + 0.5f, float(y) + 0.5f);
+  if (valid) zero_pixel(out_features, pix, mi);
+  for (uint chunk_start = 0u; chunk_start < count; chunk_start += GSP_CHUNK) {
+    uint chunk_n = min(GSP_CHUNK, count - chunk_start);
+    load_chunk_params(means2d, conics, opacities, mi, shared_ids, chunk_start, chunk_n, tid, sh_means, sh_conics, sh_opacities);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    uint alive_total = reduce_alive((valid && T > mf.transmittance_threshold) ? 1u : 0u, simd_lane, simd_group, tg_alive);
+    if (alive_total == 0u) break;
+    if (valid && T > mf.transmittance_threshold) {
+      for (uint j = 0u; j < chunk_n; ++j) {
+        float alpha, raw_alpha, power; float2 d;
+        float2 m = sh_means[j];
+        float3 q = load3_sh(sh_conics, j);
+        if (!eval_alpha(p, m, q.x, q.y, q.z, sh_opacities[j], mf, alpha, raw_alpha, power, d)) continue;
+        float w = T * alpha;
+        uint g = shared_ids[chunk_start + j];
+        add_weighted_features(out_features, colors, pix, g, w, mi);
+        T *= (1.0f - alpha);
+        if (T <= mf.transmittance_threshold) break;
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  if (valid) {
+    add_background_tail(out_features, pix, T, mi, mf);
+    out_alpha[pix] = 1.0f - T;
+  }
+}
+
+kernel void v6_refined_features_tile_active_forward_state(
+    const device uint* active_tile_ids [[buffer(0)]],
+    const device uint* tile_counts [[buffer(1)]],
+    const device int* tile_offsets [[buffer(2)]],
+    device uint* binned_ids [[buffer(3)]],
+    const device float2* means2d [[buffer(4)]],
+    const device float* conics [[buffer(5)]],
+    const device float* colors [[buffer(6)]],
+    const device float* opacities [[buffer(7)]],
+    constant MetaI32& mi [[buffer(8)]],
+    constant MetaF32& mf [[buffer(9)]],
+    device float* out_features [[buffer(10)]],
+    device float* out_alpha [[buffer(11)]],
+    device int* out_stop_counts [[buffer(12)]],
+    uint active_idx [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint simd_lane [[thread_index_in_simdgroup]],
+    uint simd_group [[simdgroup_index_in_threadgroup]]) {
+  uint tg_id = active_tile_ids[active_idx];
+  if (tg_id >= uint(mi.tile_count)) return;
+  uint batch, x, y;
+  tile_pixel_from_tid(tg_id, tid, mi, batch, x, y);
+  bool valid = (x < uint(mi.width) && y < uint(mi.height));
+  uint pix = valid ? pixel_index(batch, x, y, mi) : 0u;
+  uint count = tile_counts[tg_id];
+  uint start = uint(tile_offsets[tg_id]);
+  if (count == 0u || count > uint(mi.max_fast_pairs)) {
+    if (tid == 0u) out_stop_counts[tg_id] = 0;
+    if (valid) {
+      write_background(out_features, pix, mi, mf);
+      out_alpha[pix] = 0.0f;
+    }
+    return;
+  }
+  bool compute_stop = (mi.stop_count_mode == 0) || ((mi.stop_count_mode == 2) && (int(count) >= mi.stop_count_dense_threshold));
+  if (!compute_stop && tid == 0u) out_stop_counts[tg_id] = int(count);
+  threadgroup uint shared_ids[GSP_FAST_CAP];
+  threadgroup float2 sh_means[GSP_CHUNK];
+  threadgroup float sh_conics[GSP_CHUNK * 3u];
+  threadgroup float sh_opacities[GSP_CHUNK];
+  threadgroup uint tg_alive[GSP_SIMDGROUPS];
+  threadgroup uint tg_stop[GSP_SIMDGROUPS];
+  for (uint i = tid; i < count; i += GSP_THREADS) shared_ids[i] = binned_ids[start + i];
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  bitonic_sort_ids(shared_ids, count, tid);
+  for (uint i = tid; i < count; i += GSP_THREADS) binned_ids[start + i] = shared_ids[i];
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float T = 1.0f;
+  uint local_stop = compute_stop ? 0u : count;
+  float2 p = float2(float(x) + 0.5f, float(y) + 0.5f);
+  if (valid) zero_pixel(out_features, pix, mi);
+  for (uint chunk_start = 0u; chunk_start < count; chunk_start += GSP_CHUNK) {
+    uint chunk_n = min(GSP_CHUNK, count - chunk_start);
+    load_chunk_params(means2d, conics, opacities, mi, shared_ids, chunk_start, chunk_n, tid, sh_means, sh_conics, sh_opacities);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    uint alive_total = reduce_alive((valid && T > mf.transmittance_threshold) ? 1u : 0u, simd_lane, simd_group, tg_alive);
+    if (alive_total == 0u) break;
+    if (valid && T > mf.transmittance_threshold) {
+      for (uint j = 0u; j < chunk_n; ++j) {
+        if (compute_stop) local_stop = chunk_start + j + 1u;
+        float alpha, raw_alpha, power; float2 d;
+        float2 m = sh_means[j];
+        float3 q = load3_sh(sh_conics, j);
+        if (!eval_alpha(p, m, q.x, q.y, q.z, sh_opacities[j], mf, alpha, raw_alpha, power, d)) continue;
+        float w = T * alpha;
+        uint g = shared_ids[chunk_start + j];
+        add_weighted_features(out_features, colors, pix, g, w, mi);
+        T *= (1.0f - alpha);
+        if (T <= mf.transmittance_threshold) break;
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  if (compute_stop) {
+    uint tile_stop = reduce_max_u32(local_stop, simd_lane, simd_group, tg_stop);
+    if (tid == 0u) out_stop_counts[tg_id] = int(tile_stop);
+  }
+  if (valid) {
+    add_background_tail(out_features, pix, T, mi, mf);
+    out_alpha[pix] = 1.0f - T;
+  }
+}
+
+kernel void v6_refined_features_tile_active_backward_saved(
+    const device float* grad_features [[buffer(0)]],
+    const device float* grad_alpha [[buffer(1)]],
+    const device uint* active_tile_ids [[buffer(2)]],
+    const device uint* tile_counts [[buffer(3)]],
+    const device int* tile_offsets [[buffer(4)]],
+    const device uint* binned_ids [[buffer(5)]],
+    const device int* tile_stop_counts [[buffer(6)]],
+    const device float2* means2d [[buffer(7)]],
+    const device float* conics [[buffer(8)]],
+    const device float* colors [[buffer(9)]],
+    const device float* opacities [[buffer(10)]],
+    constant MetaI32& mi [[buffer(11)]],
+    constant MetaF32& mf [[buffer(12)]],
+    device atomic_float* g_means2d [[buffer(13)]],
+    device atomic_float* g_conics [[buffer(14)]],
+    device atomic_float* g_colors [[buffer(15)]],
+    device atomic_float* g_opacities [[buffer(16)]],
+    uint active_idx [[threadgroup_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint simd_lane [[thread_index_in_simdgroup]],
+    uint simd_group [[simdgroup_index_in_threadgroup]]) {
+  uint tg_id = active_tile_ids[active_idx];
+  if (tg_id >= uint(mi.tile_count)) return;
+  uint count = tile_counts[tg_id];
+  uint stop_count = min(count, uint(max(tile_stop_counts[tg_id], 0)));
+  if (count == 0u || count > uint(mi.max_fast_pairs) || stop_count == 0u) return;
+  threadgroup uint shared_ids[GSP_FAST_CAP];
+  threadgroup float2 sh_means[GSP_CHUNK];
+  threadgroup float sh_conics[GSP_CHUNK * 3u];
+  threadgroup float sh_opacities[GSP_CHUNK];
+  threadgroup uint tg_alive[GSP_SIMDGROUPS];
+  threadgroup float4 partial0[GSP_SIMDGROUPS];
+  threadgroup float4 partial1[GSP_SIMDGROUPS];
+  threadgroup float partial2[GSP_SIMDGROUPS];
+  uint start = uint(tile_offsets[tg_id]);
+  for (uint i = tid; i < stop_count; i += GSP_THREADS) shared_ids[i] = binned_ids[start + i];
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  uint batch, x, y;
+  tile_pixel_from_tid(tg_id, tid, mi, batch, x, y);
+  bool valid = (x < uint(mi.width) && y < uint(mi.height));
+  uint pix = valid ? pixel_index(batch, x, y, mi) : 0u;
+  float2 p = float2(float(x) + 0.5f, float(y) + 0.5f);
+  float T_final = 1.0f;
+  uint end_i = stop_count;
+  for (uint chunk_start = 0u; chunk_start < stop_count; chunk_start += GSP_CHUNK) {
+    uint chunk_n = min(GSP_CHUNK, stop_count - chunk_start);
+    load_chunk_params(means2d, conics, opacities, mi, shared_ids, chunk_start, chunk_n, tid, sh_means, sh_conics, sh_opacities);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    uint alive_total = reduce_alive((valid && T_final > mf.transmittance_threshold) ? 1u : 0u, simd_lane, simd_group, tg_alive);
+    if (alive_total == 0u) break;
+    if (valid && T_final > mf.transmittance_threshold) {
+      for (uint j = 0u; j < chunk_n; ++j) {
+        float alpha, raw_alpha, power; float2 d;
+        float2 m = sh_means[j];
+        float3 q = load3_sh(sh_conics, j);
+        if (!eval_alpha(p, m, q.x, q.y, q.z, sh_opacities[j], mf, alpha, raw_alpha, power, d)) continue;
+        T_final *= (1.0f - alpha);
+        if (T_final <= mf.transmittance_threshold) { end_i = chunk_start + j + 1u; break; }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  float T_cur = T_final;
+  float gT = valid ? dot_pixel_bg(grad_features, pix, mi, mf) : 0.0f;
+  float alpha_grad = valid ? grad_alpha[pix] : 0.0f;
   for (int chunk_end = int(stop_count); chunk_end > 0; chunk_end -= int(GSP_CHUNK)) {
     int chunk_start_i = max(0, chunk_end - int(GSP_CHUNK));
     uint chunk_start = uint(chunk_start_i);
