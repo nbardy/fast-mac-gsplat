@@ -166,3 +166,38 @@ id_skeleton feature max_abs=0
 id_skeleton alpha max_abs=0
 feature id skeleton parity: ok
 ```
+
+## Bounded Benchmark
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
+  third_party/fast-mac-gsplat/variants/v6_feature_lookup_experiment/benchmarks/benchmark_lookup_basis.py \
+  --height 128 --width 128 --batch-size 16 --gaussians 2048 \
+  --feature-dim 32 --compact-dims 4,8,16 --warmup 1 --iters 2 \
+  --no-overflow-fallback
+```
+
+The benchmark compares:
+
+- `direct`: build `full_features = feature_weights @ lookup`, then rasterize F
+  channels
+- `lookup`: rasterize K compact channels, then reconstruct F channels after the
+  rasterizer
+
+The memory fields are sampled MPS allocation after synchronized backward, not a
+true peak-memory counter.
+
+Observed local rows:
+
+| Shape | K | direct mean ms | lookup mean ms | direct current bytes | lookup current bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 128px B4/G2048/F32 | 4 | 49.9 | 18.9 | 10749184 | 10782464 |
+| 128px B4/G2048/F32 | 8 | 42.6 | 22.6 | 11929856 | 13142272 |
+| 128px B4/G2048/F32 | 16 | 41.7 | 30.8 | 12486912 | 15534336 |
+| 128px B16/G2048/F32 | 4 | 162.2 | 84.0 | 42992896 | 43127552 |
+| 128px B16/G2048/F32 | 8 | 164.6 | 100.3 | 44569856 | 49419520 |
+| 128px B16/G2048/F32 | 16 | 112.6 | 75.4 | 110631168 | 60299520 |
+
+Read: compact lookup is a real timing candidate on this bounded synthetic
+shape, but sampled memory is not a monotonic win. The final `[B,H,W,F]` tensor
+still exists after reconstruction.
