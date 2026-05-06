@@ -134,3 +134,35 @@ Use the dynaworld root as the uv project, matching the repo guide:
 ( cd /Users/nicholasbardy/git/gsplats_browser/dynaworld/third_party/fast-mac-gsplat/variants/v6_feature_lookup_experiment
   uv run --project /Users/nicholasbardy/git/gsplats_browser/dynaworld python setup.py build_ext --inplace )
 ```
+
+## Quick Check
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
+  third_party/fast-mac-gsplat/variants/v6_feature_lookup_experiment/tests/feature_lookup_parity_check.py
+```
+
+This checks two contracts:
+
+- compact-basis rendering matches direct full-feature rendering when
+  `features = feature_weights @ feature_lookup`, including gradients for means,
+  conics, compact weights, lookup table, and opacity
+- the current ID/weight skeleton matches explicitly densified compact
+  coefficients
+
+Observed on 2026-05-07:
+
+```text
+features max_abs=8.9406967e-08
+alpha max_abs=0
+loss max_abs=0
+grad_means max_abs=5.8207661e-11
+grad_conics max_abs=1.4901161e-08
+grad_weights max_abs=6.0535967e-09
+grad_lookup max_abs=2.5611371e-09
+grad_opacities max_abs=1.8626451e-09
+feature lookup direct parity: ok
+id_skeleton feature max_abs=0
+id_skeleton alpha max_abs=0
+feature id skeleton parity: ok
+```
