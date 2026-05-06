@@ -184,8 +184,10 @@ The benchmark compares:
 - `lookup`: rasterize K compact channels, then reconstruct F channels after the
   rasterizer
 
-The memory fields are sampled MPS allocation after synchronized backward, not a
-true peak-memory counter.
+The benchmark reports both allocation after synchronized backward and a
+background-sampled peak during the measured forward/backward window. The sampled
+peak is better than the after-backward value, but it is still not an Xcode/Metal
+hardware memory capture.
 
 Observed local rows:
 
@@ -201,3 +203,27 @@ Observed local rows:
 Read: compact lookup is a real timing candidate on this bounded synthetic
 shape, but sampled memory is not a monotonic win. The final `[B,H,W,F]` tensor
 still exists after reconstruction.
+
+Sampled-peak follow-up:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python \
+  third_party/fast-mac-gsplat/variants/v6_feature_lookup_experiment/benchmarks/benchmark_lookup_basis.py \
+  --height 128 --width 128 --batch-size 16 --gaussians 8192 \
+  --feature-dim 32 --compact-dims 4,8,16 --warmup 1 --iters 2 \
+  --seed 14 --no-overflow-fallback --memory-sample-interval-ms 0.25
+```
+
+| Shape | K | direct mean ms | lookup mean ms | direct sampled peak | lookup sampled peak |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 128px B16/G2048/F32 | 4 | 158.8 | 81.0 | 152014080 | 117284096 |
+| 128px B16/G2048/F32 | 8 | 159.8 | 96.5 | 154112256 | 124100864 |
+| 128px B16/G2048/F32 | 16 | 112.6 | 75.4 | 151361024 | 167093504 |
+| 128px B16/G8192/F32 | 4 | 225.9 | 96.9 | 244678400 | 166563584 |
+| 128px B16/G8192/F32 | 8 | 179.6 | 117.9 | 278758400 | 210605056 |
+| 128px B16/G8192/F32 | 16 | 184.1 | 155.6 | 282427392 | 198021120 |
+
+Read: at the more relevant `G=8192` row, compact lookup is faster and lowers
+sampled current allocation for K=4/8/16. At smaller `G=2048`, K=16 was faster
+but had higher sampled current allocation than direct. Treat lookup as promising
+for large-G compact features, not as a proven general memory fix.
