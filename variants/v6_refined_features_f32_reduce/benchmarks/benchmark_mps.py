@@ -96,6 +96,8 @@ def main():
     p.add_argument("--active-sparse-fraction-threshold", type=float, default=0.45)
     p.add_argument("--active-dense-multiplier", type=float, default=2.0)
     p.add_argument("--max-fast-pairs", type=int, default=-1)
+    p.add_argument("--alpha-threshold", type=float, default=1.0 / 255.0)
+    p.add_argument("--transmittance-threshold", type=float, default=1.0e-4)
     p.add_argument("--alpha-loss", action="store_true")
     p.add_argument("--json", action="store_true")
     args = p.parse_args()
@@ -133,6 +135,8 @@ def main():
         active_dense_multiplier=args.active_dense_multiplier,
         stop_count_mode=args.stop_count_mode,
         stop_count_dense_threshold=args.dense_threshold,
+        alpha_threshold=args.alpha_threshold,
+        transmittance_threshold=args.transmittance_threshold,
     )
 
     profile_stats = None
@@ -188,6 +192,8 @@ def main():
         "active_policy": args.active_policy,
         "active_tiles_override": args.active_tiles,
         "sort_active_tiles": bool(args.sort_active_tiles),
+        "alpha_threshold": args.alpha_threshold,
+        "transmittance_threshold": args.transmittance_threshold,
         "backward": bool(args.backward),
         "freeze_colors": bool(args.freeze_colors),
         "alpha_loss": bool(args.alpha_loss),

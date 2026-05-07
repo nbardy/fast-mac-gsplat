@@ -154,6 +154,10 @@ inline void reduce_atomic_add_feature_grads(
     uint simd_lane,
     uint simd_group,
     threadgroup float* partial_features) {
+  // CUDA port note: this is the main f32_reduce idea. Do a warp-level reduce,
+  // then a block/threadgroup reduce, then one global atomic per splat/channel
+  // for this tile. A direct CUDA port should preserve that reduction topology
+  // before trying vectorization or channel blocking.
   uint fdim = feature_dim(mi);
   uint grad_base = pix * fdim;
   uint color_base = g * fdim;
@@ -192,6 +196,10 @@ inline float safe_det(float a, float b, float c, float eps) {
   return max(a * c - b * b, eps);
 }
 
+// CUDA port note: this is the bin-time alpha support cutoff. It changes the
+// candidate list before rasterization, unlike transmittance early-out which is
+// per pixel. Keep this cutoff paired with eval_alpha(...) when porting the
+// pruning experiments so Metal and CUDA prune the same support.
 inline bool alpha_support_params(float opacity, constant MetaF32& mf, thread float& tau) {
   if (opacity <= mf.alpha_threshold) return false;
   float ratio = max(mf.alpha_threshold / max(opacity, mf.eps), mf.eps);
@@ -253,6 +261,9 @@ inline bool eval_alpha(
   if (power > 0.0f) return false;
   raw_alpha = opacity * exp(power);
   alpha = min(mf.max_alpha, raw_alpha);
+  // CUDA port note: this is the per-pixel alpha cutoff. The threshold sweep
+  // speedup comes from this and alpha_support_params(...) together, not from a
+  // top-k ranking pass.
   return alpha >= mf.alpha_threshold;
 }
 
@@ -655,6 +666,12 @@ kernel void v6_refined_features_f32_reduce_tile_fast_backward_saved(
   bool feature3 = (mi.feature_dim == 3);
   bool skip_color_grad = (mi.reserved0 != 0);
   bool reduce_feature3 = feature3 && !skip_color_grad;
+  // CUDA port note: stop_count is the tile max depth prefix. Raising
+  // transmittance_threshold can stop individual pixels earlier, but this
+  // backward loop still pays the tile max prefix to keep barriers uniform. A
+  // CUDA top-p optimization needs per-pixel prefix handling or a different
+  // block schedule; just changing transmittance_threshold will not remove the
+  // bulk of backward work.
   // Keep barrier control uniform across the threadgroup. `end_i` is per pixel,
   // so using it as the loop bound makes saturated pixels take fewer barriers
   // than unsaturated pixels. Iterate over the tile-level stop count and mask
