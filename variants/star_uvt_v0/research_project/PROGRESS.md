@@ -1,6 +1,6 @@
 # STAR-UVT Progress
 
-Last updated: 2026-05-11
+Last updated: 2026-05-12
 
 ## Checklist
 
@@ -124,6 +124,7 @@ Last updated: 2026-05-11
 - [x] Gate 6cu: 256px single-video cap/tube scale gate.
 - [x] Gate 6cv: 256px single-video 400-step three-seed robustness check.
 - [x] Gate 6cw: 256px per-frame video-init baseline feasibility probe.
+- [x] Gate 6cx: 256px fast per-frame direct-splat baseline and same-train-time check.
 - [ ] Gate 6u: 256px/16-frame longer-budget comparison against the 18-minute V-JEPA F32 row.
 - [ ] Gate 6v: camera-model parity decision for DeepView fisheye versus current pinhole harness.
 
@@ -1237,6 +1238,31 @@ faster to train, and `116.91503081403435x` faster to render at this 5-step
 feasibility point. Do not spend a full 200-step 256px per-frame run in this
 Python baseline harness unless the baseline renderer is replaced or heavily
 optimized.
+
+Gate 6cx replaces that Python per-frame raster loop with an explicit
+`--per-frame-render-backend fast_mac` option backed by the existing
+`v6_refined` projected-Gaussian autograd renderer. The compatibility smokes
+`research_project/benchmarks/results/video_fit_per_frame_backend_dense_smoke_16_2f_1step.json`,
+`research_project/benchmarks/results/video_fit_per_frame_backend_fastmac_smoke_16_2f_1step.json`,
+and `research_project/benchmarks/results/video_fit_skip_uvt_fastmac_smoke_16_2f_1step.json`
+pass. The 256px 5-step rerun with the same fair direct-splat init settings
+(`spatial_precision=0.125`, opacity `0.7`, stratified video samples) matches the
+old dense baseline quality while removing the bottleneck: direct splats reach
+PSNR `6.473215818405151` in `0.4040724170008616s`, median render
+`5.363958000089042ms`; STAR reaches PSNR `13.252005577087402` in
+`1.8657846669993887s`, median render `9.621167002478614ms`.
+
+The corrected 256px same-step row changes the speed story. At 200 steps, STAR
+reaches PSNR `24.47240114212036` in `64.06204816699756s`, median render
+`16.813333500977024ms`; fast direct splats reach PSNR `20.513088703155518` in
+`5.162235333002172s`, median render `6.129583500296576ms`. STAR is
+`+3.9593124389648438` dB at equal steps, but the fast direct baseline is faster
+to train and render at this 256px setting. A same-wall-clock direct-only run
+with `2500` fast direct steps reaches PSNR `21.23270273208618` in
+`69.8356277089988s`, median render `8.872333499311935ms`. So the honest 256px
+single-video read is: STAR has a large quality lead at equal steps and
+comparable train time, but it is not currently a render-speed win versus the
+fast direct-splat baseline.
 
 ```bash
 python3 research_project/benchmarks/multicam_heldout_compare.py \

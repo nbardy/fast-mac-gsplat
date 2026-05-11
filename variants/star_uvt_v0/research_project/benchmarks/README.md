@@ -2387,8 +2387,9 @@ render medians are `26.702728999225656 ms`, `19.233874998462852 ms`, and
 speed aggregate.
 
 Per-frame video-init baseline feasibility, 2026-05-11: the benchmark now accepts
-`--per-frame-init-mode video_samples`, `--per-frame-spatial-precision`,
-`--per-frame-opacity`, and `--per-frame-sample-mode`. The smoke
+`--per-frame-init-mode video_samples`, `--per-frame-render-backend`,
+`--per-frame-spatial-precision`, `--per-frame-opacity`, and
+`--per-frame-sample-mode`. The smoke
 `research_project/benchmarks/results/video_fit_per_frame_video_init_smoke_16_2f_1step.json`
 passes and writes the new init fields. On native 256px, the 5-step paired probe
 with 64 video-initialized splats/frame reaches direct PSNR
@@ -2400,6 +2401,25 @@ with 64 video-initialized splats/frame reaches direct PSNR
 per-frame init row was even weaker at PSNR `5.105733871459961`, so video init is
 the fairer direct baseline, but the Python per-frame renderer is too slow for a
 full 200-step 256px same-step baseline.
+
+Fast direct-splat baseline follow-up, 2026-05-12: `--per-frame-render-backend
+fast_mac` now routes the independent per-frame 2D Gaussian baseline through the
+existing `v6_refined` projected-Gaussian autograd renderer. The dense default,
+fast MPS path, and direct-only `--skip-uvt` path all have smoke artifacts:
+`video_fit_per_frame_backend_dense_smoke_16_2f_1step`,
+`video_fit_per_frame_backend_fastmac_smoke_16_2f_1step`, and
+`video_fit_skip_uvt_fastmac_smoke_16_2f_1step`. With the same fair direct init
+settings as the old dense row, the 5-step fast direct baseline reaches PSNR
+`6.473215818405151` in `0.4040724170008616 s`, median render
+`5.363958000089042 ms`, matching the dense quality while removing the bottleneck.
+At 200 equal steps, STAR reaches PSNR `24.47240114212036` in
+`64.06204816699756 s`, median render `16.813333500977024 ms`; fast direct splats
+reach PSNR `20.513088703155518` in `5.162235333002172 s`, median render
+`6.129583500296576 ms`. A direct-only same-train-time proxy with `2500` fast
+direct steps reaches PSNR `21.23270273208618` in `69.8356277089988 s`, median
+render `8.872333499311935 ms`. Conclusion: STAR keeps a large 256px
+single-video quality lead at equal steps and comparable train time, but it is
+not currently faster to render than the fast direct-splat baseline.
 
 Equal-step tube-count retune, 2026-05-11: the 1792-tube row is not the fastest
 equal-step speed/quality point. With synchronized 20-repeat render timing, 896

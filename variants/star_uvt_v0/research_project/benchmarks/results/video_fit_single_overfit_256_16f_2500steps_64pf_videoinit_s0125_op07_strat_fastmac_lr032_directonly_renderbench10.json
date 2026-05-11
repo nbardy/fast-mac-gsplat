@@ -1,0 +1,50 @@
+{
+  "contact_sheet": "research_project/benchmarks/results/video_fit_single_overfit_256_16f_2500steps_64pf_videoinit_s0125_op07_strat_fastmac_lr032_directonly_renderbench10.png",
+  "device": "mps",
+  "frames": 16,
+  "height": 256,
+  "lr": 0.04,
+  "per_frame": {
+    "fast_max_pairs": 2048,
+    "final_l1": 0.05822429060935974,
+    "final_loss": 0.007528870366513729,
+    "final_mse": 0.007528870366513729,
+    "final_psnr": 21.23270273208618,
+    "init_mode": "video_samples",
+    "init_opacity": 0.7,
+    "init_spatial_precision": 0.125,
+    "initial_loss": 0.33601459860801697,
+    "loss_ratio": 0.022406378763610357,
+    "lr": 0.32,
+    "parameter_count": 9216,
+    "render_backend": "fast_mac",
+    "render_benchmark_ms": {
+      "max": 9.863999999652151,
+      "median": 8.872333499311935,
+      "min": 8.185124999727122,
+      "samples": [
+        8.8560830008646,
+        9.863999999652151,
+        8.582874997955514,
+        9.308959000918549,
+        8.69408300059149,
+        9.222167002008064,
+        8.185124999727122,
+        8.289332999993348,
+        8.88858399775927,
+        9.816707999561913
+      ]
+    },
+    "render_benchmark_repeats": 10,
+    "render_ms": 8.8560830008646,
+    "sample_mode": "stratified",
+    "splats_per_frame": 64,
+    "total_splats": 1024,
+    "wall_clock_ms": 69835.6277089988
+  },
+  "seed": 5,
+  "steps": 2500,
+  "uvt": null,
+  "video_path": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/test_data/test_video_small.mp4",
+  "width": 256
+}

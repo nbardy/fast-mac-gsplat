@@ -350,7 +350,20 @@ PSNR `6.486777663230896` in `76.71433137500208s`, with median render
 `779.2045410024002ms`; STAR reaches PSNR `13.252005577087402` in
 `1.7836201249992882s`, median render `6.664707998425001ms`. This says the next
 strong baseline should use a faster direct-splat renderer, not a 200-step
-extension of this Python per-frame harness.
+extension of this Python per-frame harness. The benchmark now has that faster
+path as `--per-frame-render-backend fast_mac`, using the existing `v6_refined`
+projected-Gaussian autograd renderer. With the same fair video-init settings as
+the old dense row, the 5-step direct baseline reaches PSNR `6.473215818405151`
+in `0.4040724170008616s`, median render `5.363958000089042ms`, so the bottleneck
+is removed. The corrected 200-step same-step row reaches STAR PSNR
+`24.47240114212036` in `64.06204816699756s`, median render
+`16.813333500977024ms`, while fast direct splats reach PSNR
+`20.513088703155518` in `5.162235333002172s`, median render
+`6.129583500296576ms`. A same-wall-clock direct-only run with `2500` fast direct
+steps reaches PSNR `21.23270273208618` in `69.8356277089988s`, median render
+`8.872333499311935ms`. This preserves a large 256px STAR quality lead at equal
+steps and comparable train time, but it also means STAR is not a render-speed
+win against the fast direct-splat baseline at this setting.
 An explicit temporal-piece init, `--uvt-sample-mode temporal_quarters`, is
 rejected for this recipe: at the same 400 steps it reached PSNR
 `23.275623321533203`, losing `0.29433250427246094` dB to random sampling.
