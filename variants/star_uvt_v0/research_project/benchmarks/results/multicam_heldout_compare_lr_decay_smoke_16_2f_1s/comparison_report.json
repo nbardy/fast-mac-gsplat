@@ -1,0 +1,135 @@
+{
+  "free_dynamic_splats": null,
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "device": "cpu",
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "heldout_lens_models": [
+      "opencv_fisheye"
+    ],
+    "max_frames": 2,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "reference_vjepa_f32_256_16f_alpha1_128": {
+      "heldout_eval_psnr": 13.6248,
+      "source": "dynaworld/BASELINES.md",
+      "train_psnr": 19.4875,
+      "wall_clock": "18m00s train loop; 18m22s W&B runtime"
+    },
+    "seed": 5,
+    "skip_splats": true,
+    "splat_camera_projection": "legacy_pinhole",
+    "target_size": 16,
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "train_lens_models": [
+      "opencv_fisheye",
+      "opencv_fisheye"
+    ],
+    "train_seconds": 1.0,
+    "uvt_camera_projection": "dataset_lens"
+  },
+  "star_uvt": {
+    "camera_projection": "dataset_lens",
+    "checkpoint_curve": {
+      "best_by_heldout_psnr": {
+        "elapsed_s": 0.04406758298864588,
+        "eval_heldout_render_only_elapsed_s": 0.0031810419750399888,
+        "eval_l1": 0.2862231433391571,
+        "eval_psnr": 9.359490871429443,
+        "eval_render_only_elapsed_s": 0.006725709012243897,
+        "heldout_eval_l1": 0.2946986258029938,
+        "heldout_eval_psnr": 9.14693546295166,
+        "step": 2
+      },
+      "rows": [
+        {
+          "elapsed_s": 0.02868979098275304,
+          "eval_heldout_render_only_elapsed_s": 0.0017402090015821159,
+          "eval_l1": 0.28974421322345734,
+          "eval_psnr": 9.294327735900879,
+          "eval_render_only_elapsed_s": 0.0056276669492945075,
+          "heldout_eval_l1": 0.2972010672092438,
+          "heldout_eval_psnr": 9.088188171386719,
+          "step": 1
+        },
+        {
+          "elapsed_s": 0.04406758298864588,
+          "eval_heldout_render_only_elapsed_s": 0.0031810419750399888,
+          "eval_l1": 0.2862231433391571,
+          "eval_psnr": 9.359490871429443,
+          "eval_render_only_elapsed_s": 0.006725709012243897,
+          "heldout_eval_l1": 0.2946986258029938,
+          "heldout_eval_psnr": 9.14693546295166,
+          "step": 2
+        }
+      ]
+    },
+    "checkpoint_every_steps": 1,
+    "depth_margin": 0.05,
+    "depth_margin_reg": 0.0,
+    "depth_slope_reg": 0.0,
+    "depth_velocity_reg": 0.0,
+    "init_frames": "all",
+    "init_lambda_t": 0.35,
+    "init_opacity": 0.35,
+    "init_precision_xy": 30.0,
+    "init_sampling": "grid",
+    "init_views": "all_train",
+    "logs": [
+      {
+        "depth_margin_proxy": 0.2755390703678131,
+        "depth_slope_proxy": 0.0,
+        "elapsed_s": 0.02868979098275304,
+        "loss": 0.29551053047180176,
+        "lr": 0.03,
+        "model_reg": 2.3343245629803278e-06,
+        "projected_reg": 0.0,
+        "recon_loss": 0.2955082058906555,
+        "step": 1,
+        "tile_load_proxy": 12.246685028076172
+      }
+    ],
+    "loss_scope": "temporal_window",
+    "lr": 0.03,
+    "lr_decay_factor": 0.5,
+    "lr_decay_step": 1,
+    "metal_stats": null,
+    "metrics": {
+      "eval_heldout_render_only_elapsed_s": 0.0029154160292819142,
+      "eval_l1": 0.2862231433391571,
+      "eval_mse": 0.11610249429941177,
+      "eval_psnr": 9.359490871429443,
+      "eval_render_elapsed_s": 0.008163334045093507,
+      "eval_render_max_sequence_s": 0.0029154160292819142,
+      "eval_render_mean_sequence_s": 0.00237393033845971,
+      "eval_render_only_elapsed_s": 0.007121791015379131,
+      "eval_render_sequence_count": 3,
+      "eval_ssim": 0.09968582168221474,
+      "eval_train_render_only_elapsed_s": 0.004206374986097217,
+      "heldout_eval_l1": 0.2946986258029938,
+      "heldout_eval_mse": 0.12170445919036865,
+      "heldout_eval_psnr": 9.14693546295166,
+      "heldout_eval_ssim": 0.06007559970021248
+    },
+    "min_lambda_t": 1e-05,
+    "min_precision_xy": 1e-05,
+    "position_reg": 1e-06,
+    "render_backend": "dense",
+    "steps": 2,
+    "tile_capacity": 128,
+    "tile_load_reg": 0.0,
+    "tile_load_target": 0.0,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8,
+    "train_loop_elapsed_s": 0.044091332994867116,
+    "train_schedule": "random",
+    "tube_count": 128,
+    "velocity_reg": 0.0001,
+    "window_frames": 2
+  }
+}

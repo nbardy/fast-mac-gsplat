@@ -82,6 +82,33 @@ on top of the original v6 line. `variants/v6_upgrade` is preserved separately so
 the source handoff can be tested without overwriting the current v6 baseline.
 `variants/v6_refined` is preserved the same way for the refined handoff.
 
+### Feature-shader forks (v9 → v13)
+
+These variants build on the v6 feature-splatting line. They share the
+`torch_gsplat_bridge_v9..v13...` package namespaces and stack the optimizations
+listed below; none of them replace the stable feature path.
+
+| Variant | Builds on | Adds |
+|---|---|---|
+| `v9_features_gradcache_zero_bg` | v6 features + gradcache | Zero-feature-background tail-skip for sparse coverage. |
+| `v10_features_gradcache_zero_bg_hostmeta` | v9 | Host-side metadata split for tile bin parsing. |
+| `v11_features_gradcache_zero_bg_hostmeta_fixedbin` | v10 | Fixed-capacity tile bins; no overflow fallback path. |
+| `v12a_fused_colorize_l1_no_norm` | v11 | Fused linear-sigmoid colorize + RGB L1 inside raster backward (no norm). |
+| `v12b_fused_colorize_rmsnorm_l1` | v11 | v12a path with RMSNorm before colorize. |
+| `v12c_fused_raster_color_loss_backward` | v11 | Fused raster + color + mean-MSE pixel-grad backward; skips the dense `grad_features[B,H,W,F]` buffer. |
+| `v13a_temporal_recompute_state` | v11 | Exact backward-time recomputation of fixedbin raster metadata. |
+| `v13b_rgb_grad_handoff` | v11 | RGB-gradient handoff boundary on top of the fixedbin path. |
+
+### 4D screen-time tube renderer (STAR-GS)
+
+`variants/star_uvt_v0/` is the first cut of a 4D screen-time tube renderer
+following the STAR-GS plan. It is deliberately narrow: it takes already-projected
+`ScreenTimeTube` packets in `(u, v, t)`, bins on 3D UVT tiles, and composites by
+center-time depth with a fixed-capacity per-tile buffer. No camera projection,
+no HexGaussian, no backward, no training integration yet. The goal is to answer
+whether a Metal UVT tile renderer beats brute-force screen-time compositing and
+whether tile-tube pair counts beat summed per-frame tile-splat counts.
+
 ## API
 
 The renderer variants use the same high-level API shape:

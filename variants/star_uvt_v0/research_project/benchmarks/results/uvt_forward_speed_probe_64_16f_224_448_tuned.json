@@ -1,0 +1,62 @@
+{
+  "rows": [
+    {
+      "dense_render_ms": 173.44070901162922,
+      "device": "mps",
+      "frames": 16,
+      "iterations": 1,
+      "metal_render_ms": 132.2492090112064,
+      "metal_stats": {
+        "effective_pair_ratio_after_unstable_fallback": 0.7782855868910935,
+        "forward_wall_clock_ms": 1.0803329932969064,
+        "max_rgb_error": 0.013710730709135532,
+        "max_tile_count": 26,
+        "mean_rgb_error": 0.0011856701457872987,
+        "mean_tile_count": 13.63671875,
+        "metal_buffer_memory": 530432,
+        "overflow_tile_count": 0,
+        "pair_ratio": 0.7782855868910935,
+        "stable_tile_fraction": 1.0,
+        "summed_per_frame_tile_splat_pairs": 8971,
+        "unstable_tile_fraction": 0.0,
+        "uvt_tile_tube_pairs": 6982
+      },
+      "opacity": 0.7,
+      "seed": 7,
+      "spatial_precision": 0.25,
+      "target_size": 64,
+      "temporal_precision": 0.5,
+      "tube_count": 224,
+      "warmup_iterations": 1
+    },
+    {
+      "dense_render_ms": 298.84366600890644,
+      "device": "mps",
+      "frames": 16,
+      "iterations": 1,
+      "metal_render_ms": 327.9570830054581,
+      "metal_stats": {
+        "effective_pair_ratio_after_unstable_fallback": 0.7766065388951522,
+        "forward_wall_clock_ms": 1.3199999812059104,
+        "max_rgb_error": 0.017425570636987686,
+        "max_tile_count": 54,
+        "mean_rgb_error": 0.0019398623844608665,
+        "mean_tile_count": 26.908203125,
+        "metal_buffer_memory": 530432,
+        "overflow_tile_count": 0,
+        "pair_ratio": 0.7766065388951522,
+        "stable_tile_fraction": 1.0,
+        "summed_per_frame_tile_splat_pairs": 17740,
+        "unstable_tile_fraction": 0.0,
+        "uvt_tile_tube_pairs": 13777
+      },
+      "opacity": 0.7,
+      "seed": 7,
+      "spatial_precision": 0.25,
+      "target_size": 64,
+      "temporal_precision": 0.5,
+      "tube_count": 448,
+      "warmup_iterations": 1
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "contact_sheet": "research_project/benchmarks/results/video_fit_skip_uvt_fastmac_smoke_16_2f_1step.png",
+  "device": "mps",
+  "frames": 2,
+  "height": 16,
+  "lr": 0.04,
+  "per_frame": {
+    "fast_max_pairs": 2048,
+    "final_l1": 0.49607381224632263,
+    "final_loss": 0.28257307410240173,
+    "final_mse": 0.28257307410240173,
+    "final_psnr": 5.48869252204895,
+    "init_mode": "video_samples",
+    "init_opacity": 0.35,
+    "init_spatial_precision": 0.25,
+    "initial_loss": 0.2864901125431061,
+    "loss_ratio": 0.9863274917031736,
+    "lr": 0.04,
+    "parameter_count": 72,
+    "render_backend": "fast_mac",
+    "render_benchmark_ms": {
+      "max": 5.9026670023740735,
+      "median": 5.9026670023740735,
+      "min": 5.9026670023740735,
+      "samples": [
+        5.9026670023740735
+      ]
+    },
+    "render_benchmark_repeats": 1,
+    "render_ms": 5.9026670023740735,
+    "sample_mode": "random",
+    "splats_per_frame": 4,
+    "total_splats": 8,
+    "wall_clock_ms": 1323.5788329984643
+  },
+  "seed": 5,
+  "steps": 1,
+  "uvt": null,
+  "video_path": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/test_data/test_video_small_128_4fps.mp4",
+  "width": 16
+}

@@ -1,0 +1,103 @@
+{
+  "free_dynamic_splats": {
+    "logs": [
+      {
+        "elapsed_s": 0.014313542022136971,
+        "loss": 0.611126184463501,
+        "step": 1
+      }
+    ],
+    "metrics": {
+      "eval_heldout_render_only_elapsed_s": 0.0012374999932944775,
+      "eval_l1": 0.6180269718170166,
+      "eval_mse": 0.42099976539611816,
+      "eval_psnr": 3.7590484619140625,
+      "eval_render_elapsed_s": 0.007277249998878688,
+      "eval_render_max_sequence_s": 0.0012467919732443988,
+      "eval_render_mean_sequence_s": 0.0012169723243763049,
+      "eval_render_only_elapsed_s": 0.003650916973128915,
+      "eval_render_sequence_count": 3,
+      "eval_ssim": 0.044859979301691055,
+      "eval_train_render_only_elapsed_s": 0.0024134169798344374,
+      "heldout_eval_l1": 0.6091495156288147,
+      "heldout_eval_mse": 0.4106670320034027,
+      "heldout_eval_psnr": 3.8651015758514404,
+      "heldout_eval_ssim": 0.04037453234195709
+    },
+    "renderer": "dense",
+    "splat_count": 16,
+    "steps": 2,
+    "train_loop_elapsed_s": 0.017998791998252273
+  },
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "device": "cpu",
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "max_frames": 2,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "reference_vjepa_f32_256_16f_alpha1_128": {
+      "heldout_eval_psnr": 13.6248,
+      "source": "dynaworld/BASELINES.md",
+      "train_psnr": 19.4875,
+      "wall_clock": "18m00s train loop; 18m22s W&B runtime"
+    },
+    "target_size": 32,
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "train_seconds": 1.0
+  },
+  "star_uvt": {
+    "depth_slope_reg": 0.001,
+    "depth_velocity_reg": 0.0,
+    "init_lambda_t": 0.35,
+    "init_opacity": 0.35,
+    "init_precision_xy": 30.0,
+    "init_views": "first",
+    "logs": [
+      {
+        "depth_slope_proxy": 0.0,
+        "elapsed_s": 0.11177329099155031,
+        "loss": 0.3505130708217621,
+        "model_reg": 2.0049735667271307e-06,
+        "projected_reg": 0.0,
+        "recon_loss": 0.3505110740661621,
+        "step": 1,
+        "tile_load_proxy": 26.796092987060547
+      }
+    ],
+    "loss_scope": "temporal_window",
+    "metal_stats": null,
+    "metrics": {
+      "eval_heldout_render_only_elapsed_s": 0.001037000009091571,
+      "eval_l1": 0.3468394875526428,
+      "eval_mse": 0.15873809903860092,
+      "eval_psnr": 7.999025106430054,
+      "eval_render_elapsed_s": 0.011723665986210108,
+      "eval_render_max_sequence_s": 0.001209375011967495,
+      "eval_render_mean_sequence_s": 0.0011419583364234616,
+      "eval_render_only_elapsed_s": 0.003425875009270385,
+      "eval_render_sequence_count": 3,
+      "eval_ssim": 0.032905420288443565,
+      "eval_train_render_only_elapsed_s": 0.002388875000178814,
+      "heldout_eval_l1": 0.3575270473957062,
+      "heldout_eval_mse": 0.16886287927627563,
+      "heldout_eval_psnr": 7.724658012390137,
+      "heldout_eval_ssim": 0.023621274158358574
+    },
+    "min_lambda_t": 1e-05,
+    "min_precision_xy": 1e-05,
+    "position_reg": 1e-06,
+    "render_backend": "dense",
+    "steps": 2,
+    "tile_load_reg": 0.01,
+    "tile_load_target": 64.0,
+    "train_loop_elapsed_s": 0.12107649998506531,
+    "tube_count": 16,
+    "velocity_reg": 0.0001,
+    "window_frames": 2
+  }
+}

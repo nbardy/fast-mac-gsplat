@@ -1,0 +1,75 @@
+{
+  "free_dynamic_splats": {
+    "logs": [
+      {
+        "elapsed_s": 0.002873458986869082,
+        "loss": 0.6205600500106812,
+        "step": 1
+      }
+    ],
+    "metrics": {
+      "eval_l1": 0.6139391362667084,
+      "eval_mse": 0.4099963903427124,
+      "eval_psnr": 3.8737934827804565,
+      "eval_render_elapsed_s": 0.0042019159882329404,
+      "eval_ssim": 0.02814703807234764,
+      "heldout_eval_l1": 0.6069123148918152,
+      "heldout_eval_mse": 0.4030250012874603,
+      "heldout_eval_psnr": 3.9466800689697266,
+      "heldout_eval_ssim": 0.016289005056023598
+    },
+    "renderer": "dense",
+    "splat_count": 8,
+    "steps": 2,
+    "train_loop_elapsed_s": 0.005013041984057054
+  },
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "device": "cpu",
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "max_frames": 2,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "reference_vjepa_f32_256_16f_alpha1_128": {
+      "heldout_eval_psnr": 13.6248,
+      "source": "dynaworld/BASELINES.md",
+      "train_psnr": 19.4875,
+      "wall_clock": "18m00s train loop; 18m22s W&B runtime"
+    },
+    "target_size": 16,
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "train_seconds": 1.0
+  },
+  "star_uvt": {
+    "init_lambda_t": 0.35,
+    "init_opacity": 0.35,
+    "init_precision_xy": 30.0,
+    "init_views": "all_train",
+    "logs": [
+      {
+        "elapsed_s": 0.019322792009916157,
+        "loss": 0.3695759177207947,
+        "step": 1
+      }
+    ],
+    "metrics": {
+      "eval_l1": 0.3621920049190521,
+      "eval_mse": 0.16212917864322662,
+      "eval_psnr": 7.901397228240967,
+      "eval_render_elapsed_s": 0.003830832982202992,
+      "eval_ssim": 0.011443657334893942,
+      "heldout_eval_l1": 0.37102851271629333,
+      "heldout_eval_mse": 0.16918055713176727,
+      "heldout_eval_psnr": 7.716495513916016,
+      "heldout_eval_ssim": 0.009112060070037842
+    },
+    "render_backend": "dense",
+    "steps": 2,
+    "train_loop_elapsed_s": 0.02183687500655651,
+    "tube_count": 8
+  }
+}

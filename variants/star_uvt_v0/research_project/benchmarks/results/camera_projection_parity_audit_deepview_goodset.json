@@ -1,0 +1,132 @@
+{
+  "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+  "data": {
+    "frame_indices": null,
+    "frame_source": "multicam_val",
+    "frames_dir": null,
+    "max_frames": 16,
+    "multicam_anchor_camera": "camera_0006",
+    "multicam_condition_camera": "camera_0006",
+    "multicam_heldout_camera": "camera_0005",
+    "multicam_manifest": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/data/multicam_val/clip_sets/multicam_val_v1_128_4fps_16f/manifest.jsonl",
+    "multicam_sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+    "multicam_sample_index": 0,
+    "multicam_split": "val",
+    "multicam_train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "sequence_dir": "test_data",
+    "video_path": null
+  },
+  "grid_size": 17,
+  "heldout_cameras": [
+    "camera_0005"
+  ],
+  "rows": [
+    {
+      "cameras": [
+        {
+          "camera": "camera_0006",
+          "distortion": [
+            0.09857633709907532,
+            -0.01805287040770054,
+            0.0,
+            0.0
+          ],
+          "lens_model": "opencv_fisheye",
+          "max_shift_px": 25.300168991088867,
+          "mean_shift_px": 8.06247615814209,
+          "p50_shift_px": 6.857291221618652,
+          "p95_shift_px": 19.612333297729492,
+          "split": "train"
+        },
+        {
+          "camera": "camera_0014",
+          "distortion": [
+            0.0994812399148941,
+            -0.0182016734033823,
+            0.0,
+            0.0
+          ],
+          "lens_model": "opencv_fisheye",
+          "max_shift_px": 25.61309242248535,
+          "mean_shift_px": 8.1063814163208,
+          "p50_shift_px": 6.95562219619751,
+          "p95_shift_px": 19.632535934448242,
+          "split": "train"
+        },
+        {
+          "camera": "camera_0005",
+          "distortion": [
+            0.09706856310367584,
+            -0.017028601840138435,
+            0.0,
+            0.0
+          ],
+          "lens_model": "opencv_fisheye",
+          "max_shift_px": 25.671966552734375,
+          "mean_shift_px": 8.144721984863281,
+          "p50_shift_px": 6.981658458709717,
+          "p95_shift_px": 19.673572540283203,
+          "split": "heldout"
+        }
+      ],
+      "target_size": 128
+    },
+    {
+      "cameras": [
+        {
+          "camera": "camera_0006",
+          "distortion": [
+            0.09857633709907532,
+            -0.01805287040770054,
+            0.0,
+            0.0
+          ],
+          "lens_model": "opencv_fisheye",
+          "max_shift_px": 51.03281784057617,
+          "mean_shift_px": 16.280519485473633,
+          "p50_shift_px": 13.858601570129395,
+          "p95_shift_px": 39.5764045715332,
+          "split": "train"
+        },
+        {
+          "camera": "camera_0014",
+          "distortion": [
+            0.0994812399148941,
+            -0.0182016734033823,
+            0.0,
+            0.0
+          ],
+          "lens_model": "opencv_fisheye",
+          "max_shift_px": 51.66124725341797,
+          "mean_shift_px": 16.369003295898438,
+          "p50_shift_px": 14.050789833068848,
+          "p95_shift_px": 39.61743927001953,
+          "split": "train"
+        },
+        {
+          "camera": "camera_0005",
+          "distortion": [
+            0.09706856310367584,
+            -0.017028601840138435,
+            0.0,
+            0.0
+          ],
+          "lens_model": "opencv_fisheye",
+          "max_shift_px": 51.77930450439453,
+          "mean_shift_px": 16.446109771728516,
+          "p50_shift_px": 14.103225708007812,
+          "p95_shift_px": 39.69977569580078,
+          "split": "heldout"
+        }
+      ],
+      "target_size": 256
+    }
+  ],
+  "train_cameras": [
+    "camera_0006",
+    "camera_0014"
+  ]
+}

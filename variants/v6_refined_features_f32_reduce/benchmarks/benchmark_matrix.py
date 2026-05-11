@@ -18,19 +18,67 @@ THIS_BENCH = HERE / "benchmark_mps.py"
 F32_ACCUM_BENCH = HERE.parents[1] / "v6_refined_features_f32_accum" / "benchmarks" / "benchmark_mps.py"
 F64_ACCUM64_BENCH = HERE.parents[1] / "v6_refined_features_f64_accum64" / "benchmarks" / "benchmark_mps.py"
 F32_GRADCACHE_BENCH = HERE.parents[1] / "v6_refined_features_f32_gradcache" / "benchmarks" / "benchmark_mps.py"
+F32_ZERO_BG_BENCH = HERE.parents[1] / "v6_refined_features_f32_zero_bg" / "benchmarks" / "benchmark_mps.py"
 F32_BLOCK4_BENCH = HERE.parents[1] / "v6_refined_features_f32_block4" / "benchmarks" / "benchmark_mps.py"
 F32_FIXEDBIN_BENCH = HERE.parents[1] / "v6_refined_features_f32_fixedbin" / "benchmarks" / "benchmark_mps.py"
 STABLE_BENCH = HERE.parents[1] / "v6_refined_features" / "benchmarks" / "benchmark_mps.py"
+V9_FEATURES_GRADCACHE_ZERO_BG_BENCH = (
+    HERE.parents[1] / "v9_features_gradcache_zero_bg" / "benchmarks" / "benchmark_mps.py"
+)
+V10_FEATURES_GRADCACHE_ZERO_BG_HOSTMETA_BENCH = (
+    HERE.parents[1] / "v10_features_gradcache_zero_bg_hostmeta" / "benchmarks" / "benchmark_mps.py"
+)
+V11_FEATURES_GRADCACHE_ZERO_BG_HOSTMETA_FIXEDBIN_BENCH = (
+    HERE.parents[1] / "v11_features_gradcache_zero_bg_hostmeta_fixedbin" / "benchmarks" / "benchmark_mps.py"
+)
 BENCHMARKS = {
     "f32_reduce": THIS_BENCH,
+    "v6_refined_features_f32_reduce": THIS_BENCH,
     "f32_accum": F32_ACCUM_BENCH,
+    "v6_refined_features_f32_accum": F32_ACCUM_BENCH,
     "f64_accum64": F64_ACCUM64_BENCH,
+    "v6_refined_features_f64_accum64": F64_ACCUM64_BENCH,
     "f32_gradcache": F32_GRADCACHE_BENCH,
+    "v6_refined_features_f32_gradcache": F32_GRADCACHE_BENCH,
+    "f32_zero_bg": F32_ZERO_BG_BENCH,
+    "v6_refined_features_f32_zero_bg": F32_ZERO_BG_BENCH,
     "f32_block4": F32_BLOCK4_BENCH,
+    "v6_refined_features_f32_block4": F32_BLOCK4_BENCH,
     "f32_fixedbin": F32_FIXEDBIN_BENCH,
+    "v6_refined_features_f32_fixedbin": F32_FIXEDBIN_BENCH,
     "stable_v6_refined_features": STABLE_BENCH,
+    "v6_refined_features": STABLE_BENCH,
 }
-FREEZE_COLOR_VARIANTS = {"f32_reduce", "f32_accum", "f64_accum64", "f32_gradcache", "f32_block4", "f32_fixedbin"}
+if V9_FEATURES_GRADCACHE_ZERO_BG_BENCH.exists():
+    BENCHMARKS["v9_features_gradcache_zero_bg"] = V9_FEATURES_GRADCACHE_ZERO_BG_BENCH
+if V10_FEATURES_GRADCACHE_ZERO_BG_HOSTMETA_BENCH.exists():
+    BENCHMARKS["v10_features_gradcache_zero_bg_hostmeta"] = V10_FEATURES_GRADCACHE_ZERO_BG_HOSTMETA_BENCH
+if V11_FEATURES_GRADCACHE_ZERO_BG_HOSTMETA_FIXEDBIN_BENCH.exists():
+    BENCHMARKS["v11_features_gradcache_zero_bg_hostmeta_fixedbin"] = (
+        V11_FEATURES_GRADCACHE_ZERO_BG_HOSTMETA_FIXEDBIN_BENCH
+    )
+FREEZE_COLOR_VARIANTS = {
+    "f32_reduce",
+    "v6_refined_features_f32_reduce",
+    "f32_accum",
+    "v6_refined_features_f32_accum",
+    "f64_accum64",
+    "v6_refined_features_f64_accum64",
+    "f32_gradcache",
+    "v6_refined_features_f32_gradcache",
+    "f32_zero_bg",
+    "v6_refined_features_f32_zero_bg",
+    "f32_block4",
+    "v6_refined_features_f32_block4",
+    "f32_fixedbin",
+    "v6_refined_features_f32_fixedbin",
+}
+if V9_FEATURES_GRADCACHE_ZERO_BG_BENCH.exists():
+    FREEZE_COLOR_VARIANTS.add("v9_features_gradcache_zero_bg")
+if V10_FEATURES_GRADCACHE_ZERO_BG_HOSTMETA_BENCH.exists():
+    FREEZE_COLOR_VARIANTS.add("v10_features_gradcache_zero_bg_hostmeta")
+if V11_FEATURES_GRADCACHE_ZERO_BG_HOSTMETA_FIXEDBIN_BENCH.exists():
+    FREEZE_COLOR_VARIANTS.add("v11_features_gradcache_zero_bg_hostmeta_fixedbin")
 
 
 def _csv_ints(value: str) -> list[int]:

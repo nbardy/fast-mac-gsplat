@@ -1,0 +1,114 @@
+{
+  "free_dynamic_splats": null,
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "device": "cpu",
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "heldout_lens_models": [
+      "opencv_fisheye"
+    ],
+    "max_frames": 2,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "reference_vjepa_f32_256_16f_alpha1_128": {
+      "heldout_eval_psnr": 13.6248,
+      "source": "dynaworld/BASELINES.md",
+      "train_psnr": 19.4875,
+      "wall_clock": "18m00s train loop; 18m22s W&B runtime"
+    },
+    "seed": 6,
+    "skip_splats": true,
+    "splat_camera_projection": "legacy_pinhole",
+    "target_size": 16,
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "train_lens_models": [
+      "opencv_fisheye",
+      "opencv_fisheye"
+    ],
+    "train_seconds": 2.0,
+    "uvt_camera_projection": "dataset_lens"
+  },
+  "star_uvt": {
+    "camera_projection": "dataset_lens",
+    "checkpoint_curve": null,
+    "checkpoint_every_steps": 0,
+    "depth_margin": 0.05,
+    "depth_margin_reg": 0.0,
+    "depth_slope_reg": 0.0,
+    "depth_velocity_reg": 0.0,
+    "init_frames": "all",
+    "init_lambda_t": 0.35,
+    "init_opacity": 0.35,
+    "init_precision_xy": 30.0,
+    "init_sampling": "grid",
+    "init_views": "all_train",
+    "logs": [
+      {
+        "depth_margin_proxy": 0.2762511372566223,
+        "depth_slope_proxy": 0.0,
+        "elapsed_s": 0.025536084023769945,
+        "loss": 0.29779595136642456,
+        "lr": 0.03,
+        "model_reg": 2.3343245629803278e-06,
+        "projected_reg": 0.0,
+        "recon_loss": 0.2977936267852783,
+        "step": 1,
+        "tile_load_proxy": 12.504624366760254
+      },
+      {
+        "depth_margin_proxy": 0.10236642509698868,
+        "depth_slope_proxy": 0.04771793261170387,
+        "elapsed_s": 0.14788387500448152,
+        "loss": 0.24966199696063995,
+        "lr": 0.015,
+        "model_reg": 3.3968265142902965e-06,
+        "projected_reg": 0.0,
+        "recon_loss": 0.24965859949588776,
+        "step": 10,
+        "tile_load_proxy": 21.76723861694336
+      }
+    ],
+    "loss_scope": "temporal_window",
+    "lr": 0.03,
+    "lr_decay_factor": 0.5,
+    "lr_decay_step": 5,
+    "metal_stats": null,
+    "metrics": {
+      "eval_heldout_render_only_elapsed_s": 0.0017798750195652246,
+      "eval_l1": 0.2447931095957756,
+      "eval_mse": 0.0965866819024086,
+      "eval_psnr": 10.174922943115234,
+      "eval_render_elapsed_s": 0.007077125017531216,
+      "eval_render_max_sequence_s": 0.0023919580271467566,
+      "eval_render_mean_sequence_s": 0.002020930696744472,
+      "eval_render_only_elapsed_s": 0.006062792090233415,
+      "eval_render_sequence_count": 3,
+      "eval_ssim": 0.14708318561315536,
+      "eval_train_render_only_elapsed_s": 0.004282917070668191,
+      "heldout_eval_l1": 0.257802277803421,
+      "heldout_eval_mse": 0.10299286246299744,
+      "heldout_eval_psnr": 9.871929168701172,
+      "heldout_eval_ssim": 0.08630383014678955
+    },
+    "min_lambda_t": 1e-05,
+    "min_precision_xy": 1e-05,
+    "position_reg": 1e-06,
+    "render_backend": "dense",
+    "steps": 10,
+    "tile_capacity": 128,
+    "tile_load_reg": 0.0,
+    "tile_load_target": 0.0,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8,
+    "train_loop_elapsed_s": 0.14789379201829433,
+    "train_schedule": "random",
+    "tube_count": 128,
+    "velocity_reg": 0.0001,
+    "window_frames": 2
+  }
+}

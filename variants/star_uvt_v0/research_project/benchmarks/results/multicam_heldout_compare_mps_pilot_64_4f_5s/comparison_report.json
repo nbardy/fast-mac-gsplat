@@ -1,0 +1,186 @@
+{
+  "free_dynamic_splats": {
+    "logs": [
+      {
+        "elapsed_s": 1.6191671660053544,
+        "loss": 0.540561854839325,
+        "step": 1
+      },
+      {
+        "elapsed_s": 1.7880692500039004,
+        "loss": 0.5350817441940308,
+        "step": 10
+      },
+      {
+        "elapsed_s": 1.9627640410035383,
+        "loss": 0.5760680437088013,
+        "step": 20
+      },
+      {
+        "elapsed_s": 2.1411094999930356,
+        "loss": 0.5316768288612366,
+        "step": 30
+      },
+      {
+        "elapsed_s": 2.316108915983932,
+        "loss": 0.5792633295059204,
+        "step": 40
+      },
+      {
+        "elapsed_s": 2.4862604579830077,
+        "loss": 0.5746850371360779,
+        "step": 50
+      },
+      {
+        "elapsed_s": 2.6570843329827767,
+        "loss": 0.5688062310218811,
+        "step": 60
+      },
+      {
+        "elapsed_s": 2.8290052079828456,
+        "loss": 0.5226870179176331,
+        "step": 70
+      },
+      {
+        "elapsed_s": 2.9947342079831287,
+        "loss": 0.5676298141479492,
+        "step": 80
+      },
+      {
+        "elapsed_s": 3.1756547080003656,
+        "loss": 0.5657549500465393,
+        "step": 90
+      },
+      {
+        "elapsed_s": 3.351959166000597,
+        "loss": 0.5140838623046875,
+        "step": 100
+      },
+      {
+        "elapsed_s": 3.52119987498736,
+        "loss": 0.5646300315856934,
+        "step": 110
+      },
+      {
+        "elapsed_s": 3.697202457988169,
+        "loss": 0.5088931918144226,
+        "step": 120
+      },
+      {
+        "elapsed_s": 3.8726118330087047,
+        "loss": 0.5072752237319946,
+        "step": 130
+      },
+      {
+        "elapsed_s": 4.051418957998976,
+        "loss": 0.5042047500610352,
+        "step": 140
+      },
+      {
+        "elapsed_s": 4.220331541000633,
+        "loss": 0.5021292567253113,
+        "step": 150
+      },
+      {
+        "elapsed_s": 4.3918738329957705,
+        "loss": 0.4966917634010315,
+        "step": 160
+      },
+      {
+        "elapsed_s": 4.561539457994513,
+        "loss": 0.5488406419754028,
+        "step": 170
+      },
+      {
+        "elapsed_s": 4.726216165989172,
+        "loss": 0.5419406294822693,
+        "step": 180
+      },
+      {
+        "elapsed_s": 4.89033120800741,
+        "loss": 0.485291063785553,
+        "step": 190
+      }
+    ],
+    "metrics": {
+      "eval_l1": 0.5081420540809631,
+      "eval_mse": 0.301651194691658,
+      "eval_psnr": 5.227722406387329,
+      "eval_render_elapsed_s": 0.06884004198946059,
+      "eval_ssim": 0.0820638993754983,
+      "heldout_eval_l1": 0.5234775543212891,
+      "heldout_eval_mse": 0.3239707946777344,
+      "heldout_eval_psnr": 4.894941329956055,
+      "heldout_eval_ssim": -0.003638277295976877
+    },
+    "renderer": "fast_mac",
+    "splat_count": 256,
+    "steps": 198,
+    "train_loop_elapsed_s": 5.013484333001543
+  },
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "device": "mps",
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "max_frames": 4,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "reference_vjepa_f32_256_16f_alpha1_128": {
+      "heldout_eval_psnr": 13.6248,
+      "source": "dynaworld/BASELINES.md",
+      "train_psnr": 19.4875,
+      "wall_clock": "18m00s train loop; 18m22s W&B runtime"
+    },
+    "target_size": 64,
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "train_seconds": 5.0
+  },
+  "star_uvt": {
+    "logs": [
+      {
+        "elapsed_s": 1.4449141249933746,
+        "loss": 0.31589242815971375,
+        "step": 1
+      },
+      {
+        "elapsed_s": 2.4087024169857614,
+        "loss": 0.28287675976753235,
+        "step": 10
+      },
+      {
+        "elapsed_s": 3.2134777499886695,
+        "loss": 0.23615171015262604,
+        "step": 20
+      },
+      {
+        "elapsed_s": 4.1051188329875,
+        "loss": 0.18242353200912476,
+        "step": 30
+      },
+      {
+        "elapsed_s": 4.873481916991295,
+        "loss": 0.18246227502822876,
+        "step": 40
+      }
+    ],
+    "metrics": {
+      "eval_l1": 0.16930989176034927,
+      "eval_mse": 0.0570055078715086,
+      "eval_psnr": 12.554058074951172,
+      "eval_render_elapsed_s": 0.18138195801293477,
+      "eval_ssim": 0.21975091099739075,
+      "heldout_eval_l1": 0.18411360681056976,
+      "heldout_eval_mse": 0.06645286083221436,
+      "heldout_eval_psnr": 11.774863243103027,
+      "heldout_eval_ssim": 0.08365985751152039
+    },
+    "render_backend": "metal_tile",
+    "steps": 42,
+    "train_loop_elapsed_s": 5.014684582973132,
+    "tube_count": 64
+  }
+}

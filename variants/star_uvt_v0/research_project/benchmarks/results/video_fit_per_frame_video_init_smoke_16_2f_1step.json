@@ -1,0 +1,80 @@
+{
+  "contact_sheet": "research_project/benchmarks/results/video_fit_per_frame_video_init_smoke_16_2f_1step.png",
+  "device": "cpu",
+  "frames": 2,
+  "height": 16,
+  "lr": 0.04,
+  "per_frame": {
+    "final_l1": 0.4158981740474701,
+    "final_loss": 0.20608997344970703,
+    "final_mse": 0.20608997344970703,
+    "final_psnr": 6.859431266784668,
+    "init_mode": "video_samples",
+    "init_opacity": 0.7,
+    "init_spatial_precision": 0.25,
+    "initial_loss": 0.21285748481750488,
+    "loss_ratio": 0.9682063735104263,
+    "lr": 0.04,
+    "parameter_count": 72,
+    "render_benchmark_ms": {
+      "max": 0.1482920015405398,
+      "median": 0.1482920015405398,
+      "min": 0.1482920015405398,
+      "samples": [
+        0.1482920015405398
+      ]
+    },
+    "render_benchmark_repeats": 1,
+    "render_ms": 0.1482920015405398,
+    "sample_mode": "stratified",
+    "splats_per_frame": 4,
+    "total_splats": 8,
+    "wall_clock_ms": 0.897999998414889
+  },
+  "seed": 5,
+  "steps": 1,
+  "uvt": {
+    "appearance_final_loss": null,
+    "appearance_initial_loss": null,
+    "appearance_lr": 0.04,
+    "appearance_refine_steps": 0,
+    "final_l1": 0.36976245045661926,
+    "final_loss": 0.17704083025455475,
+    "final_lr": null,
+    "final_lr_start_step": null,
+    "final_mse": 0.17704083025455475,
+    "final_psnr": 7.519265413284302,
+    "init_mode": "video_samples",
+    "init_opacity": 0.7,
+    "init_spatial_precision": 0.25,
+    "init_temporal_precision": 0.5,
+    "initial_loss": 0.18632495403289795,
+    "initial_tube_count": 8,
+    "loss_ratio": 0.9501724080570336,
+    "main_final_loss": 0.17704083025455475,
+    "parameter_count": 104,
+    "render_backend": "dense",
+    "render_benchmark_ms": {
+      "max": 0.21624999862979166,
+      "median": 0.21624999862979166,
+      "min": 0.21624999862979166,
+      "samples": [
+        0.21624999862979166
+      ]
+    },
+    "render_benchmark_repeats": 1,
+    "render_ms": 0.21624999862979166,
+    "sample_mode": "random",
+    "temporal_split": null,
+    "tile_capacity": 128,
+    "tile_t": 2,
+    "tube_count": 8,
+    "velocity_init": "zero",
+    "velocity_min_improvement_ratio": 0.9,
+    "velocity_patch_radius": 1,
+    "velocity_search_radius": 4,
+    "wall_clock_ms": 451.05087499905494
+  },
+  "video_path": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/test_data/test_video_small_64_4fps.mp4",
+  "width": 16
+}

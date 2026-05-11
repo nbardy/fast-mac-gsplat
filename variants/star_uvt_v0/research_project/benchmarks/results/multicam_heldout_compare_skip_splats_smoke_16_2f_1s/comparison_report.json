@@ -1,0 +1,131 @@
+{
+  "free_dynamic_splats": null,
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "device": "cpu",
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "heldout_lens_models": [
+      "opencv_fisheye"
+    ],
+    "max_frames": 2,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "reference_vjepa_f32_256_16f_alpha1_128": {
+      "heldout_eval_psnr": 13.6248,
+      "source": "dynaworld/BASELINES.md",
+      "train_psnr": 19.4875,
+      "wall_clock": "18m00s train loop; 18m22s W&B runtime"
+    },
+    "seed": 4,
+    "skip_splats": true,
+    "splat_camera_projection": "legacy_pinhole",
+    "target_size": 16,
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "train_lens_models": [
+      "opencv_fisheye",
+      "opencv_fisheye"
+    ],
+    "train_seconds": 1.0,
+    "uvt_camera_projection": "dataset_lens"
+  },
+  "star_uvt": {
+    "camera_projection": "dataset_lens",
+    "checkpoint_curve": {
+      "best_by_heldout_psnr": {
+        "elapsed_s": 0.03919512499123812,
+        "eval_heldout_render_only_elapsed_s": 0.0028461249894462526,
+        "eval_l1": 0.28180670738220215,
+        "eval_psnr": 9.454089641571045,
+        "eval_render_only_elapsed_s": 0.007368958962615579,
+        "heldout_eval_l1": 0.2912604510784149,
+        "heldout_eval_psnr": 9.157304763793945,
+        "step": 2
+      },
+      "rows": [
+        {
+          "elapsed_s": 0.025545666983816773,
+          "eval_heldout_render_only_elapsed_s": 0.0019435830181464553,
+          "eval_l1": 0.2891814708709717,
+          "eval_psnr": 9.31993579864502,
+          "eval_render_only_elapsed_s": 0.006544583011418581,
+          "heldout_eval_l1": 0.29618892073631287,
+          "heldout_eval_psnr": 9.068671226501465,
+          "step": 1
+        },
+        {
+          "elapsed_s": 0.03919512499123812,
+          "eval_heldout_render_only_elapsed_s": 0.0028461249894462526,
+          "eval_l1": 0.28180670738220215,
+          "eval_psnr": 9.454089641571045,
+          "eval_render_only_elapsed_s": 0.007368958962615579,
+          "heldout_eval_l1": 0.2912604510784149,
+          "heldout_eval_psnr": 9.157304763793945,
+          "step": 2
+        }
+      ]
+    },
+    "checkpoint_every_steps": 1,
+    "depth_margin": 0.05,
+    "depth_margin_reg": 0.0,
+    "depth_slope_reg": 0.0,
+    "depth_velocity_reg": 0.0,
+    "init_frames": "all",
+    "init_lambda_t": 0.35,
+    "init_opacity": 0.35,
+    "init_precision_xy": 30.0,
+    "init_sampling": "grid",
+    "init_views": "all_train",
+    "logs": [
+      {
+        "depth_margin_proxy": 0.2762511372566223,
+        "depth_slope_proxy": 0.0,
+        "elapsed_s": 0.025545666983816773,
+        "loss": 0.29779595136642456,
+        "model_reg": 2.3343245629803278e-06,
+        "projected_reg": 0.0,
+        "recon_loss": 0.2977936267852783,
+        "step": 1,
+        "tile_load_proxy": 12.504624366760254
+      }
+    ],
+    "loss_scope": "temporal_window",
+    "metal_stats": null,
+    "metrics": {
+      "eval_heldout_render_only_elapsed_s": 0.002282499975990504,
+      "eval_l1": 0.28180670738220215,
+      "eval_mse": 0.11378689110279083,
+      "eval_psnr": 9.454089641571045,
+      "eval_render_elapsed_s": 0.007437416992615908,
+      "eval_render_max_sequence_s": 0.0024730409495532513,
+      "eval_render_mean_sequence_s": 0.002173083310481161,
+      "eval_render_only_elapsed_s": 0.006519249931443483,
+      "eval_render_sequence_count": 3,
+      "eval_ssim": 0.1000700481235981,
+      "eval_train_render_only_elapsed_s": 0.004236749955452979,
+      "heldout_eval_l1": 0.2912604510784149,
+      "heldout_eval_mse": 0.12141420692205429,
+      "heldout_eval_psnr": 9.157304763793945,
+      "heldout_eval_ssim": 0.03593580424785614
+    },
+    "min_lambda_t": 1e-05,
+    "min_precision_xy": 1e-05,
+    "position_reg": 1e-06,
+    "render_backend": "dense",
+    "steps": 2,
+    "tile_capacity": 128,
+    "tile_load_reg": 0.0,
+    "tile_load_target": 0.0,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8,
+    "train_loop_elapsed_s": 0.03921887499745935,
+    "train_schedule": "random",
+    "tube_count": 128,
+    "velocity_reg": 0.0001,
+    "window_frames": 2
+  }
+}

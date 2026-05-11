@@ -1,0 +1,123 @@
+{
+  "free_dynamic_splats": {
+    "camera_projection": "dataset_lens",
+    "logs": [
+      {
+        "elapsed_s": 0.004065999994054437,
+        "loss": 0.6182557344436646,
+        "step": 1
+      }
+    ],
+    "metrics": {
+      "eval_heldout_render_only_elapsed_s": 0.0006617080071009696,
+      "eval_l1": 0.6108624637126923,
+      "eval_mse": 0.40563490986824036,
+      "eval_psnr": 3.9204845428466797,
+      "eval_render_elapsed_s": 0.002773374959360808,
+      "eval_render_max_sequence_s": 0.0007059579947963357,
+      "eval_render_mean_sequence_s": 0.0006626943359151483,
+      "eval_render_only_elapsed_s": 0.0019880830077454448,
+      "eval_render_sequence_count": 3,
+      "eval_ssim": 0.04482186585664749,
+      "eval_train_render_only_elapsed_s": 0.0013263750006444752,
+      "heldout_eval_l1": 0.6029232144355774,
+      "heldout_eval_mse": 0.39795854687690735,
+      "heldout_eval_psnr": 4.001621723175049,
+      "heldout_eval_ssim": 0.02395308017730713
+    },
+    "render_camera_projection": "camera_model",
+    "renderer": "dense",
+    "splat_count": 8,
+    "steps": 2,
+    "train_loop_elapsed_s": 0.005496874975506216
+  },
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "device": "cpu",
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "heldout_lens_models": [
+      "opencv_fisheye"
+    ],
+    "max_frames": 2,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "reference_vjepa_f32_256_16f_alpha1_128": {
+      "heldout_eval_psnr": 13.6248,
+      "source": "dynaworld/BASELINES.md",
+      "train_psnr": 19.4875,
+      "wall_clock": "18m00s train loop; 18m22s W&B runtime"
+    },
+    "seed": 1,
+    "splat_camera_projection": "dataset_lens",
+    "target_size": 16,
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "train_lens_models": [
+      "opencv_fisheye",
+      "opencv_fisheye"
+    ],
+    "train_seconds": 1.0,
+    "uvt_camera_projection": "dataset_lens"
+  },
+  "star_uvt": {
+    "camera_projection": "dataset_lens",
+    "depth_margin": 0.05,
+    "depth_margin_reg": 0.0,
+    "depth_slope_reg": 0.0,
+    "depth_velocity_reg": 0.0,
+    "init_lambda_t": 0.35,
+    "init_opacity": 0.35,
+    "init_precision_xy": 30.0,
+    "init_views": "first",
+    "logs": [
+      {
+        "depth_margin_proxy": 0.045824117958545685,
+        "depth_slope_proxy": 0.0,
+        "elapsed_s": 0.018019333016127348,
+        "loss": 0.3620913028717041,
+        "model_reg": 2.5415847630938515e-06,
+        "projected_reg": 0.0,
+        "recon_loss": 0.36208876967430115,
+        "step": 1,
+        "tile_load_proxy": 12.820050239562988
+      }
+    ],
+    "loss_scope": "temporal_window",
+    "metal_stats": null,
+    "metrics": {
+      "eval_heldout_render_only_elapsed_s": 0.00041387497913092375,
+      "eval_l1": 0.3663433790206909,
+      "eval_mse": 0.16722546517848969,
+      "eval_psnr": 7.767161846160889,
+      "eval_render_elapsed_s": 0.003268166969064623,
+      "eval_render_max_sequence_s": 0.0008781670476309955,
+      "eval_render_mean_sequence_s": 0.0005820696824230254,
+      "eval_render_only_elapsed_s": 0.0017462090472690761,
+      "eval_render_sequence_count": 3,
+      "eval_ssim": 0.002879118430428207,
+      "eval_train_render_only_elapsed_s": 0.0013323340681381524,
+      "heldout_eval_l1": 0.3749783933162689,
+      "heldout_eval_mse": 0.17390267550945282,
+      "heldout_eval_psnr": 7.59693717956543,
+      "heldout_eval_ssim": 0.0022531594149768353
+    },
+    "min_lambda_t": 1e-05,
+    "min_precision_xy": 1e-05,
+    "position_reg": 1e-06,
+    "render_backend": "dense",
+    "steps": 2,
+    "tile_capacity": 128,
+    "tile_load_reg": 0.0,
+    "tile_load_target": 0.0,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8,
+    "train_loop_elapsed_s": 0.019873582990840077,
+    "tube_count": 8,
+    "velocity_reg": 0.0001,
+    "window_frames": 2
+  }
+}

@@ -1,0 +1,198 @@
+{
+  "free_dynamic_splats": {
+    "full_sequence_render_summary": {
+      "max_sequence_s": 0.09497243067016825,
+      "mean_sequence_s": 0.09247338410932571,
+      "sequence_count": 3,
+      "total_sequence_mean_s": 0.2774201523279771
+    },
+    "renderer": "fast_mac",
+    "rows": [
+      {
+        "camera": "camera_0006",
+        "full_sequence_render": {
+          "iterations": 3,
+          "max_s": 0.09851541701937094,
+          "mean_s": 0.09497243067016825,
+          "min_s": 0.09025066700996831,
+          "total_s": 0.28491729201050475,
+          "warmup_iterations": 1
+        },
+        "split": "train"
+      },
+      {
+        "camera": "camera_0014",
+        "full_sequence_render": {
+          "iterations": 3,
+          "max_s": 0.09153591599897482,
+          "mean_s": 0.09067213866122377,
+          "min_s": 0.08985887499875389,
+          "total_s": 0.2720164159836713,
+          "warmup_iterations": 1
+        },
+        "split": "train"
+      },
+      {
+        "camera": "camera_0005",
+        "full_sequence_render": {
+          "iterations": 3,
+          "max_s": 0.09382412501145154,
+          "mean_s": 0.0917755829965851,
+          "min_s": 0.08995066597708501,
+          "total_s": 0.2753267489897553,
+          "warmup_iterations": 1
+        },
+        "split": "heldout"
+      }
+    ],
+    "splat_count": 2048
+  },
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "config_data": {
+      "frame_indices": null,
+      "frame_source": "multicam_val",
+      "frames_dir": null,
+      "max_frames": 16,
+      "multicam_anchor_camera": "camera_0006",
+      "multicam_condition_camera": "camera_0006",
+      "multicam_heldout_camera": "camera_0005",
+      "multicam_manifest": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/data/multicam_val/clip_sets/multicam_val_v1_128_4fps_16f/manifest.jsonl",
+      "multicam_sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+      "multicam_sample_index": 0,
+      "multicam_split": "val",
+      "multicam_train_cameras": [
+        "camera_0006",
+        "camera_0014"
+      ],
+      "sequence_dir": "test_data",
+      "video_path": null
+    },
+    "device": "mps",
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "iterations": 3,
+    "max_frames": 16,
+    "note": "Initialized-model render timing probe; not trained-model quality evidence.",
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "target_size": 256,
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "warmup_iterations": 1
+  },
+  "star_uvt": {
+    "full_project_render_summary": {
+      "max_sequence_s": 0.08807237498695031,
+      "mean_sequence_s": 0.07592224532790068,
+      "sequence_count": 3,
+      "total_sequence_mean_s": 0.22776673598370203
+    },
+    "init_lambda_t": 0.35,
+    "init_opacity": 0.35,
+    "init_precision_xy": 30.0,
+    "init_views": "first",
+    "project_only_summary": {
+      "max_sequence_s": 0.06541681967792101,
+      "mean_sequence_s": 0.06233362500077217,
+      "sequence_count": 3,
+      "total_sequence_mean_s": 0.18700087500231652
+    },
+    "render_backend": "metal_tile",
+    "render_only_summary": {
+      "max_sequence_s": 0.019259861330889787,
+      "mean_sequence_s": 0.01004613900052694,
+      "sequence_count": 3,
+      "total_sequence_mean_s": 0.03013841700158082
+    },
+    "rows": [
+      {
+        "camera": "camera_0006",
+        "full_project_render": {
+          "iterations": 3,
+          "max_s": 0.10435670797596686,
+          "mean_s": 0.08807237498695031,
+          "min_s": 0.07408749999012798,
+          "total_s": 0.2642171249608509,
+          "warmup_iterations": 1
+        },
+        "project_only": {
+          "iterations": 3,
+          "max_s": 0.06815770798129961,
+          "mean_s": 0.06433972166269086,
+          "min_s": 0.057679165998706594,
+          "total_s": 0.1930191649880726,
+          "warmup_iterations": 1
+        },
+        "render_only": {
+          "iterations": 3,
+          "max_s": 0.020255458017345518,
+          "mean_s": 0.019259861330889787,
+          "min_s": 0.018494833988370374,
+          "total_s": 0.05777958399266936,
+          "warmup_iterations": 1
+        },
+        "split": "train"
+      },
+      {
+        "camera": "camera_0014",
+        "full_project_render": {
+          "iterations": 3,
+          "max_s": 0.086611582984915,
+          "mean_s": 0.07419913866518375,
+          "min_s": 0.06541437501437031,
+          "total_s": 0.22259741599555127,
+          "warmup_iterations": 1
+        },
+        "project_only": {
+          "iterations": 3,
+          "max_s": 0.07526679200236686,
+          "mean_s": 0.06541681967792101,
+          "min_s": 0.052876458008540794,
+          "total_s": 0.19625045903376304,
+          "warmup_iterations": 1
+        },
+        "render_only": {
+          "iterations": 3,
+          "max_s": 0.0040796670073177665,
+          "mean_s": 0.003757750334140534,
+          "min_s": 0.0032896249904297292,
+          "total_s": 0.011273251002421603,
+          "warmup_iterations": 1
+        },
+        "split": "train"
+      },
+      {
+        "camera": "camera_0005",
+        "full_project_render": {
+          "iterations": 3,
+          "max_s": 0.07980783301172778,
+          "mean_s": 0.06549522233156797,
+          "min_s": 0.05365970899583772,
+          "total_s": 0.19648566699470393,
+          "warmup_iterations": 1
+        },
+        "project_only": {
+          "iterations": 3,
+          "max_s": 0.06391716698999517,
+          "mean_s": 0.05724433366170464,
+          "min_s": 0.051350958994589746,
+          "total_s": 0.1717330009851139,
+          "warmup_iterations": 1
+        },
+        "render_only": {
+          "iterations": 3,
+          "max_s": 0.007132250000722706,
+          "mean_s": 0.007120805336550499,
+          "min_s": 0.007112582999980077,
+          "total_s": 0.021362416009651497,
+          "warmup_iterations": 1
+        },
+        "split": "heldout"
+      }
+    ],
+    "tube_count": 256
+  }
+}

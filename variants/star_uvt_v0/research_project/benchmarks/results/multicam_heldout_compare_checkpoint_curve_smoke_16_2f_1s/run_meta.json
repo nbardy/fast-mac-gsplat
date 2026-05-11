@@ -1,0 +1,50 @@
+{
+  "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+  "config_data": {
+    "frame_indices": null,
+    "frame_source": "multicam_val",
+    "frames_dir": null,
+    "max_frames": 2,
+    "multicam_anchor_camera": "camera_0006",
+    "multicam_condition_camera": "camera_0006",
+    "multicam_heldout_camera": "camera_0005",
+    "multicam_manifest": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/data/multicam_val/clip_sets/multicam_val_v1_128_4fps_16f/manifest.jsonl",
+    "multicam_sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+    "multicam_sample_index": 0,
+    "multicam_split": "val",
+    "multicam_train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "sequence_dir": "test_data",
+    "video_path": null
+  },
+  "device": "cpu",
+  "heldout_cameras": [
+    "camera_0005"
+  ],
+  "heldout_lens_models": [
+    "opencv_fisheye"
+  ],
+  "max_frames": 2,
+  "pose_source": "deepview_models_relative_opencv_fisheye",
+  "reference_vjepa_f32_256_16f_alpha1_128": {
+    "heldout_eval_psnr": 13.6248,
+    "source": "dynaworld/BASELINES.md",
+    "train_psnr": 19.4875,
+    "wall_clock": "18m00s train loop; 18m22s W&B runtime"
+  },
+  "seed": 3,
+  "splat_camera_projection": "dataset_lens",
+  "target_size": 16,
+  "train_cameras": [
+    "camera_0006",
+    "camera_0014"
+  ],
+  "train_lens_models": [
+    "opencv_fisheye",
+    "opencv_fisheye"
+  ],
+  "train_seconds": 1.0,
+  "uvt_camera_projection": "dataset_lens"
+}

@@ -1,0 +1,292 @@
+{
+  "free_dynamic_splats": null,
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "device": "cpu",
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "heldout_lens_models": [
+      "opencv_fisheye"
+    ],
+    "max_frames": 2,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "reference_vjepa_f32_256_16f_alpha1_128": {
+      "heldout_eval_psnr": 13.6248,
+      "source": "dynaworld/BASELINES.md",
+      "train_psnr": 19.4875,
+      "wall_clock": "18m00s train loop; 18m22s W&B runtime"
+    },
+    "seed": 15,
+    "skip_splats": true,
+    "splat_camera_projection": "legacy_pinhole",
+    "target_size": 16,
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "train_lens_models": [
+      "opencv_fisheye",
+      "opencv_fisheye"
+    ],
+    "train_seconds": 1.0,
+    "uvt_camera_projection": "legacy_pinhole"
+  },
+  "star_uvt": {
+    "camera_projection": "legacy_pinhole",
+    "checkpoint_curve": {
+      "best_by_heldout_psnr": {
+        "elapsed_s": 0.02916758299943467,
+        "eval_heldout_render_only_elapsed_s": 0.0003002499997819541,
+        "eval_l1": 0.3624420762062073,
+        "eval_psnr": 7.852325677871704,
+        "eval_render_only_elapsed_s": 0.000951375001022825,
+        "heldout_eval_l1": 0.3695814609527588,
+        "heldout_eval_psnr": 7.659857273101807,
+        "step": 2,
+        "train_dev_frame_eval_l1": null,
+        "train_dev_frame_eval_psnr": null,
+        "train_fit_frame_eval_l1": null,
+        "train_fit_frame_eval_psnr": null,
+        "train_min_view_eval_psnr": 7.782618999481201,
+        "train_view_eval_l1": [
+          0.3649101257324219,
+          0.3599740266799927
+        ],
+        "train_view_eval_psnr": [
+          7.922032356262207,
+          7.782618999481201
+        ],
+        "train_view_eval_psnr_gap": 0.13941335678100586
+      },
+      "best_by_min_train_view_psnr": {
+        "elapsed_s": 0.02916758299943467,
+        "eval_heldout_render_only_elapsed_s": 0.0003002499997819541,
+        "eval_l1": 0.3624420762062073,
+        "eval_psnr": 7.852325677871704,
+        "eval_render_only_elapsed_s": 0.000951375001022825,
+        "heldout_eval_l1": 0.3695814609527588,
+        "heldout_eval_psnr": 7.659857273101807,
+        "step": 2,
+        "train_dev_frame_eval_l1": null,
+        "train_dev_frame_eval_psnr": null,
+        "train_fit_frame_eval_l1": null,
+        "train_fit_frame_eval_psnr": null,
+        "train_min_view_eval_psnr": 7.782618999481201,
+        "train_view_eval_l1": [
+          0.3649101257324219,
+          0.3599740266799927
+        ],
+        "train_view_eval_psnr": [
+          7.922032356262207,
+          7.782618999481201
+        ],
+        "train_view_eval_psnr_gap": 0.13941335678100586
+      },
+      "best_by_train_dev_frame_psnr": null,
+      "best_by_train_psnr": {
+        "elapsed_s": 0.02916758299943467,
+        "eval_heldout_render_only_elapsed_s": 0.0003002499997819541,
+        "eval_l1": 0.3624420762062073,
+        "eval_psnr": 7.852325677871704,
+        "eval_render_only_elapsed_s": 0.000951375001022825,
+        "heldout_eval_l1": 0.3695814609527588,
+        "heldout_eval_psnr": 7.659857273101807,
+        "step": 2,
+        "train_dev_frame_eval_l1": null,
+        "train_dev_frame_eval_psnr": null,
+        "train_fit_frame_eval_l1": null,
+        "train_fit_frame_eval_psnr": null,
+        "train_min_view_eval_psnr": 7.782618999481201,
+        "train_view_eval_l1": [
+          0.3649101257324219,
+          0.3599740266799927
+        ],
+        "train_view_eval_psnr": [
+          7.922032356262207,
+          7.782618999481201
+        ],
+        "train_view_eval_psnr_gap": 0.13941335678100586
+      },
+      "rows": [
+        {
+          "elapsed_s": 0.02691762500035111,
+          "eval_heldout_render_only_elapsed_s": 0.00031154099997365847,
+          "eval_l1": 0.3632698655128479,
+          "eval_psnr": 7.839380979537964,
+          "eval_render_only_elapsed_s": 0.0009762919999047881,
+          "heldout_eval_l1": 0.37067803740501404,
+          "heldout_eval_psnr": 7.643454551696777,
+          "step": 1,
+          "train_dev_frame_eval_l1": null,
+          "train_dev_frame_eval_psnr": null,
+          "train_fit_frame_eval_l1": null,
+          "train_fit_frame_eval_psnr": null,
+          "train_min_view_eval_psnr": 7.768827438354492,
+          "train_view_eval_l1": [
+            0.36571481823921204,
+            0.36082491278648376
+          ],
+          "train_view_eval_psnr": [
+            7.9099345207214355,
+            7.768827438354492
+          ],
+          "train_view_eval_psnr_gap": 0.14110708236694336
+        },
+        {
+          "elapsed_s": 0.02916758299943467,
+          "eval_heldout_render_only_elapsed_s": 0.0003002499997819541,
+          "eval_l1": 0.3624420762062073,
+          "eval_psnr": 7.852325677871704,
+          "eval_render_only_elapsed_s": 0.000951375001022825,
+          "heldout_eval_l1": 0.3695814609527588,
+          "heldout_eval_psnr": 7.659857273101807,
+          "step": 2,
+          "train_dev_frame_eval_l1": null,
+          "train_dev_frame_eval_psnr": null,
+          "train_fit_frame_eval_l1": null,
+          "train_fit_frame_eval_psnr": null,
+          "train_min_view_eval_psnr": 7.782618999481201,
+          "train_view_eval_l1": [
+            0.3649101257324219,
+            0.3599740266799927
+          ],
+          "train_view_eval_psnr": [
+            7.922032356262207,
+            7.782618999481201
+          ],
+          "train_view_eval_psnr_gap": 0.13941335678100586
+        }
+      ]
+    },
+    "checkpoint_every_steps": 1,
+    "crop_loss_size": 128,
+    "crop_loss_weight": 0.0,
+    "depth_margin": 0.05,
+    "depth_margin_reg": 0.0,
+    "depth_slope_reg": 0.0,
+    "depth_velocity_reg": 0.0,
+    "init_frames": "first",
+    "init_lambda_t": 0.35,
+    "init_opacity": 0.35,
+    "init_precision_xy": 30.0,
+    "init_sampling": "random",
+    "init_views": "first",
+    "logs": [
+      {
+        "crop_loss": 0.0,
+        "crop_term": 0.0,
+        "depth_margin_proxy": 0.999997615814209,
+        "depth_slope_proxy": 0.0,
+        "elapsed_s": 0.02691762500035111,
+        "grad_norm": 0.00808920431882143,
+        "loss": 0.36705926060676575,
+        "lr": 0.03,
+        "model_reg": 2.1922814994468354e-06,
+        "multiscale_loss": 0.0,
+        "multiscale_term": 0.0,
+        "projected_reg": 0.0,
+        "recon_loss": 0.36705705523490906,
+        "sequence_consistency_loss": 0.0,
+        "sequence_consistency_term": 0.0,
+        "step": 1,
+        "tile_load_proxy": 14.608311653137207
+      }
+    ],
+    "loss_scope": "sampled_frame",
+    "lr": 0.03,
+    "lr_decay_factor": 1.0,
+    "lr_decay_step": 0,
+    "metal_stats": null,
+    "metrics": {
+      "eval_heldout_render_only_elapsed_s": 0.0003379579993634252,
+      "eval_l1": 0.3624420762062073,
+      "eval_mse": 0.1639922633767128,
+      "eval_psnr": 7.852325677871704,
+      "eval_render_elapsed_s": 0.003340875000503729,
+      "eval_render_max_sequence_s": 0.00037187499947322067,
+      "eval_render_mean_sequence_s": 0.0003574859996054632,
+      "eval_render_only_elapsed_s": 0.0010724579988163896,
+      "eval_render_sequence_count": 3,
+      "eval_ssim": 0.008208972634747624,
+      "eval_train_render_only_elapsed_s": 0.0007344999994529644,
+      "heldout_eval_l1": 0.3695814609527588,
+      "heldout_eval_mse": 0.17140136659145355,
+      "heldout_eval_psnr": 7.659857273101807,
+      "heldout_eval_ssim": 0.003291564527899027
+    },
+    "min_lambda_t": 1e-05,
+    "min_precision_xy": 1e-05,
+    "multiscale_loss_factor": 4,
+    "multiscale_loss_weight": 0.0,
+    "optimizer_frame_indices": [
+      0,
+      1
+    ],
+    "optimizer_train_view_indices": [
+      0,
+      1
+    ],
+    "optimizer_train_views": "all",
+    "optimizer_train_views_arg": "all",
+    "position_reg": 1e-06,
+    "render_backend": "dense",
+    "select_checkpoint": "first_train_psnr_gain_drop",
+    "select_train_psnr_gain_drop": 0.02,
+    "select_train_psnr_plateau_delta": 0.5,
+    "select_train_psnr_plateau_patience": 1,
+    "select_train_view_gap_collapse": 0.7,
+    "select_train_view_gap_max": 1.2,
+    "select_train_view_index": 1,
+    "sequence_consistency_every_steps": 0,
+    "sequence_consistency_frames": 0,
+    "sequence_consistency_weight": 0.0,
+    "steps": 2,
+    "stopped_reason": null,
+    "stopped_step": null,
+    "tile_capacity": 128,
+    "tile_load_reg": 0.0,
+    "tile_load_target": 0.0,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8,
+    "train_loop_elapsed_s": 0.029182958000092185,
+    "train_schedule": "shuffled_cycle",
+    "tube_count": 8,
+    "validation_frame_indices": [],
+    "validation_frame_offset": 1,
+    "validation_frame_stride": 0,
+    "velocity_reg": 0.0001,
+    "window_frames": null
+  },
+  "star_uvt_selected": {
+    "metal_stats": null,
+    "metrics": {
+      "eval_heldout_render_only_elapsed_s": 0.0003001669992954703,
+      "eval_l1": 0.3624420762062073,
+      "eval_mse": 0.1639922633767128,
+      "eval_psnr": 7.852325677871704,
+      "eval_render_elapsed_s": 0.0016362499991373625,
+      "eval_render_max_sequence_s": 0.00031504199978371616,
+      "eval_render_mean_sequence_s": 0.0003046393327773937,
+      "eval_render_only_elapsed_s": 0.000913917998332181,
+      "eval_render_sequence_count": 3,
+      "eval_ssim": 0.008208972634747624,
+      "eval_train_render_only_elapsed_s": 0.0006137509990367107,
+      "heldout_eval_l1": 0.3695814609527588,
+      "heldout_eval_mse": 0.17140136659145355,
+      "heldout_eval_psnr": 7.659857273101807,
+      "heldout_eval_ssim": 0.003291564527899027
+    },
+    "selected_elapsed_s": 0.02916758299943467,
+    "selected_step": 2,
+    "selection_detail": {
+      "fallback": "no_gain_drop_after_low_gain_before_final_checkpoint",
+      "train_psnr_gain_drop": 0.02,
+      "train_psnr_low_gain_delta": 0.5
+    },
+    "selection_metric": "eval_psnr_gain_drop_after_low_gain",
+    "selector": "first_train_psnr_gain_drop",
+    "uses_heldout_for_selection": false
+  }
+}

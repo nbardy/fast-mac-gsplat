@@ -1,0 +1,36 @@
+{
+  "contact_sheet": "research_project/benchmarks/results/video_fit_single_overfit_32_16f_200steps_32cap.png",
+  "device": "mps",
+  "frames": 16,
+  "height": 32,
+  "lr": 0.04,
+  "per_frame": {
+    "final_l1": 0.04985393211245537,
+    "final_loss": 0.004741365555673838,
+    "final_mse": 0.004741365555673838,
+    "final_psnr": 23.24096441268921,
+    "initial_loss": 0.23798120021820068,
+    "loss_ratio": 0.019923277768691666,
+    "parameter_count": 4608,
+    "render_ms": 29.452292015776038,
+    "splats_per_frame": 32,
+    "total_splats": 512,
+    "wall_clock_ms": 26972.653915989213
+  },
+  "seed": 7,
+  "steps": 200,
+  "uvt": {
+    "final_l1": 0.0646185576915741,
+    "final_loss": 0.008302286267280579,
+    "final_mse": 0.008302286267280579,
+    "final_psnr": 20.808022022247314,
+    "initial_loss": 0.30354833602905273,
+    "loss_ratio": 0.027350788266175714,
+    "parameter_count": 416,
+    "render_ms": 5.274666997138411,
+    "tube_count": 32,
+    "wall_clock_ms": 4196.840165997855
+  },
+  "video_path": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/test_data/test_video_small_128_4fps.mp4",
+  "width": 32
+}

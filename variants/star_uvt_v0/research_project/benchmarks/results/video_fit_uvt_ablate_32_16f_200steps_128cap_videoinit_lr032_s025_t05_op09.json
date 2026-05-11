@@ -1,0 +1,28 @@
+{
+  "contact_sheet": null,
+  "device": "mps",
+  "frames": 16,
+  "height": 32,
+  "lr": 0.32,
+  "per_frame": null,
+  "seed": 7,
+  "steps": 200,
+  "uvt": {
+    "final_l1": 0.03894108161330223,
+    "final_loss": 0.003503616899251938,
+    "final_mse": 0.003503616899251938,
+    "final_psnr": 24.554834365844727,
+    "init_mode": "video_samples",
+    "init_opacity": 0.9,
+    "init_spatial_precision": 0.25,
+    "init_temporal_precision": 0.5,
+    "initial_loss": 0.15176604688167572,
+    "loss_ratio": 0.02308564380004923,
+    "parameter_count": 1664,
+    "render_ms": 18.633542000316083,
+    "tube_count": 128,
+    "wall_clock_ms": 30241.919499996584
+  },
+  "video_path": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/test_data/test_video_small_128_4fps.mp4",
+  "width": 32
+}

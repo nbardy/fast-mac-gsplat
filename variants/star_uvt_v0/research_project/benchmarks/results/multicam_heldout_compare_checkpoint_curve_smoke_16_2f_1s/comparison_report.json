@@ -1,0 +1,161 @@
+{
+  "free_dynamic_splats": {
+    "camera_projection": "dataset_lens",
+    "logs": [
+      {
+        "elapsed_s": 0.0017162080039270222,
+        "loss": 0.6179704070091248,
+        "step": 1
+      }
+    ],
+    "metrics": {
+      "eval_heldout_render_only_elapsed_s": 0.0006326669827103615,
+      "eval_l1": 0.6108634173870087,
+      "eval_mse": 0.405619740486145,
+      "eval_psnr": 3.920642614364624,
+      "eval_render_elapsed_s": 0.002783375035505742,
+      "eval_render_max_sequence_s": 0.0007414159481413662,
+      "eval_render_mean_sequence_s": 0.0006689719933395585,
+      "eval_render_only_elapsed_s": 0.0020069159800186753,
+      "eval_render_sequence_count": 3,
+      "eval_ssim": 0.04509865865111351,
+      "eval_train_render_only_elapsed_s": 0.0013742489973083138,
+      "heldout_eval_l1": 0.6029147505760193,
+      "heldout_eval_mse": 0.397950679063797,
+      "heldout_eval_psnr": 4.001707553863525,
+      "heldout_eval_ssim": 0.023886224254965782
+    },
+    "render_camera_projection": "camera_model",
+    "renderer": "dense",
+    "splat_count": 8,
+    "steps": 2,
+    "train_loop_elapsed_s": 0.0031058749882504344
+  },
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "device": "cpu",
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "heldout_lens_models": [
+      "opencv_fisheye"
+    ],
+    "max_frames": 2,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "reference_vjepa_f32_256_16f_alpha1_128": {
+      "heldout_eval_psnr": 13.6248,
+      "source": "dynaworld/BASELINES.md",
+      "train_psnr": 19.4875,
+      "wall_clock": "18m00s train loop; 18m22s W&B runtime"
+    },
+    "seed": 3,
+    "splat_camera_projection": "dataset_lens",
+    "target_size": 16,
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "train_lens_models": [
+      "opencv_fisheye",
+      "opencv_fisheye"
+    ],
+    "train_seconds": 1.0,
+    "uvt_camera_projection": "dataset_lens"
+  },
+  "star_uvt": {
+    "camera_projection": "dataset_lens",
+    "checkpoint_curve": {
+      "best_by_heldout_psnr": {
+        "elapsed_s": 0.03962445899378508,
+        "eval_heldout_render_only_elapsed_s": 0.00164583302102983,
+        "eval_l1": 0.28180670738220215,
+        "eval_psnr": 9.454089641571045,
+        "eval_render_only_elapsed_s": 0.005059374962002039,
+        "heldout_eval_l1": 0.2912604510784149,
+        "heldout_eval_psnr": 9.157304763793945,
+        "step": 2
+      },
+      "rows": [
+        {
+          "elapsed_s": 0.024182333960197866,
+          "eval_heldout_render_only_elapsed_s": 0.0022327500046230853,
+          "eval_l1": 0.2891814708709717,
+          "eval_psnr": 9.31993579864502,
+          "eval_render_only_elapsed_s": 0.006134457944426686,
+          "heldout_eval_l1": 0.29618892073631287,
+          "heldout_eval_psnr": 9.068671226501465,
+          "step": 1
+        },
+        {
+          "elapsed_s": 0.03962445899378508,
+          "eval_heldout_render_only_elapsed_s": 0.00164583302102983,
+          "eval_l1": 0.28180670738220215,
+          "eval_psnr": 9.454089641571045,
+          "eval_render_only_elapsed_s": 0.005059374962002039,
+          "heldout_eval_l1": 0.2912604510784149,
+          "heldout_eval_psnr": 9.157304763793945,
+          "step": 2
+        }
+      ]
+    },
+    "checkpoint_every_steps": 1,
+    "depth_margin": 0.05,
+    "depth_margin_reg": 0.0,
+    "depth_slope_reg": 0.0,
+    "depth_velocity_reg": 0.0,
+    "init_frames": "all",
+    "init_lambda_t": 0.35,
+    "init_opacity": 0.35,
+    "init_precision_xy": 30.0,
+    "init_sampling": "grid",
+    "init_views": "all_train",
+    "logs": [
+      {
+        "depth_margin_proxy": 0.2762511372566223,
+        "depth_slope_proxy": 0.0,
+        "elapsed_s": 0.024182333960197866,
+        "loss": 0.29779595136642456,
+        "model_reg": 2.3343245629803278e-06,
+        "projected_reg": 0.0,
+        "recon_loss": 0.2977936267852783,
+        "step": 1,
+        "tile_load_proxy": 12.504624366760254
+      }
+    ],
+    "loss_scope": "temporal_window",
+    "metal_stats": null,
+    "metrics": {
+      "eval_heldout_render_only_elapsed_s": 0.002093791961669922,
+      "eval_l1": 0.28180670738220215,
+      "eval_mse": 0.11378689110279083,
+      "eval_psnr": 9.454089641571045,
+      "eval_render_elapsed_s": 0.007011416018940508,
+      "eval_render_max_sequence_s": 0.002093791961669922,
+      "eval_render_mean_sequence_s": 0.0019787363319968185,
+      "eval_render_only_elapsed_s": 0.005936208995990455,
+      "eval_render_sequence_count": 3,
+      "eval_ssim": 0.1000700481235981,
+      "eval_train_render_only_elapsed_s": 0.0038424170343205333,
+      "heldout_eval_l1": 0.2912604510784149,
+      "heldout_eval_mse": 0.12141420692205429,
+      "heldout_eval_psnr": 9.157304763793945,
+      "heldout_eval_ssim": 0.03593580424785614
+    },
+    "min_lambda_t": 1e-05,
+    "min_precision_xy": 1e-05,
+    "position_reg": 1e-06,
+    "render_backend": "dense",
+    "steps": 2,
+    "tile_capacity": 128,
+    "tile_load_reg": 0.0,
+    "tile_load_target": 0.0,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8,
+    "train_loop_elapsed_s": 0.03964425000594929,
+    "train_schedule": "random",
+    "tube_count": 128,
+    "velocity_reg": 0.0001,
+    "window_frames": 2
+  }
+}

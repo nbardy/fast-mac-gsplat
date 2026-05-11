@@ -1,0 +1,53 @@
+{
+  "frames": 16,
+  "height": 128,
+  "post_metal_stats": {
+    "effective_pair_ratio_after_unstable_fallback": 0.6644086368360957,
+    "forward_wall_clock_ms": 110.73370899975998,
+    "max_rgb_error": null,
+    "max_tile_count": 398,
+    "mean_rgb_error": null,
+    "mean_tile_count": 217.94140625,
+    "metal_buffer_memory": 2121728,
+    "overflow_tile_count": 1898,
+    "pair_ratio": 0.6644086368360957,
+    "stable_tile_fraction": 0.0,
+    "summed_per_frame_tile_splat_pairs": 390606,
+    "unstable_tile_fraction": 1.0,
+    "uvt_tile_tube_pairs": 259522
+  },
+  "post_minus_pre_loss": 0.014921389985829592,
+  "post_split_psnr": 17.03884720802307,
+  "post_split_render_loss": 0.019774947315454483,
+  "post_split_tube_count": 3584,
+  "post_vs_pre_l1": 0.0706338882446289,
+  "post_vs_pre_mse": 0.014726083725690842,
+  "pre_metal_stats": {
+    "effective_pair_ratio_after_unstable_fallback": 1.0642427012739233,
+    "forward_wall_clock_ms": 9.447625001484994,
+    "max_rgb_error": null,
+    "max_tile_count": 207,
+    "mean_rgb_error": null,
+    "mean_tile_count": 112.4912109375,
+    "metal_buffer_memory": 2121728,
+    "overflow_tile_count": 598,
+    "pair_ratio": 1.0642427012739233,
+    "stable_tile_fraction": 1.0,
+    "summed_per_frame_tile_splat_pairs": 201268,
+    "unstable_tile_fraction": 0.0,
+    "uvt_tile_tube_pairs": 214198
+  },
+  "pre_split_psnr": 23.139398097991943,
+  "pre_split_render_loss": 0.004853557329624891,
+  "pre_split_train_loss": 0.004882733337581158,
+  "pre_split_tube_count": 1792,
+  "split": {
+    "depth_offset": 0.0,
+    "offset_frames": 0.0,
+    "opacity_scale": 1.0,
+    "temporal_precision_scale": 1.0
+  },
+  "steps_before_split": 200,
+  "video_path": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/test_data/test_video_small_128_4fps.mp4",
+  "width": 128
+}

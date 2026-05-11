@@ -1,0 +1,243 @@
+{
+  "free_dynamic_splats": {
+    "full_sequence_render_summary": {
+      "max_sequence_s": 0.08434641599887982,
+      "mean_sequence_s": 0.07622656933381222,
+      "sequence_count": 3,
+      "total_sequence_mean_s": 0.22867970800143667
+    },
+    "renderer": "fast_mac",
+    "rows": [
+      {
+        "camera": "camera_0006",
+        "full_sequence_render": {
+          "iterations": 1,
+          "max_s": 0.0820987919869367,
+          "mean_s": 0.0820987919869367,
+          "min_s": 0.0820987919869367,
+          "total_s": 0.0820987919869367,
+          "warmup_iterations": 1
+        },
+        "split": "train"
+      },
+      {
+        "camera": "camera_0014",
+        "full_sequence_render": {
+          "iterations": 1,
+          "max_s": 0.08434641599887982,
+          "mean_s": 0.08434641599887982,
+          "min_s": 0.08434641599887982,
+          "total_s": 0.08434641599887982,
+          "warmup_iterations": 1
+        },
+        "split": "train"
+      },
+      {
+        "camera": "camera_0005",
+        "full_sequence_render": {
+          "iterations": 1,
+          "max_s": 0.06223450001562014,
+          "mean_s": 0.06223450001562014,
+          "min_s": 0.06223450001562014,
+          "total_s": 0.06223450001562014,
+          "warmup_iterations": 1
+        },
+        "split": "heldout"
+      }
+    ],
+    "splat_count": 2048
+  },
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "config_data": {
+      "frame_indices": null,
+      "frame_source": "multicam_val",
+      "frames_dir": null,
+      "max_frames": 16,
+      "multicam_anchor_camera": "camera_0006",
+      "multicam_condition_camera": "camera_0006",
+      "multicam_heldout_camera": "camera_0005",
+      "multicam_manifest": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/data/multicam_val/clip_sets/multicam_val_v1_128_4fps_16f/manifest.jsonl",
+      "multicam_sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+      "multicam_sample_index": 0,
+      "multicam_split": "val",
+      "multicam_train_cameras": [
+        "camera_0006",
+        "camera_0014"
+      ],
+      "sequence_dir": "test_data",
+      "video_path": null
+    },
+    "device": "mps",
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "iterations": 1,
+    "max_frames": 16,
+    "note": "Initialized-model render timing probe; not trained-model quality evidence.",
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "target_size": 256,
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "warmup_iterations": 1
+  },
+  "star_uvt": {
+    "full_project_render_summary": {
+      "max_sequence_s": 0.06340158300008625,
+      "mean_sequence_s": 0.060279194343214236,
+      "sequence_count": 3,
+      "total_sequence_mean_s": 0.1808375830296427
+    },
+    "init_lambda_t": 0.35,
+    "init_opacity": 0.35,
+    "init_precision_xy": 30.0,
+    "init_views": "first",
+    "project_only_summary": {
+      "max_sequence_s": 0.06686049999552779,
+      "mean_sequence_s": 0.05178830533016784,
+      "sequence_count": 3,
+      "total_sequence_mean_s": 0.1553649159905035
+    },
+    "render_backend": "metal_tile",
+    "render_only_summary": {
+      "max_sequence_s": 0.017203082999913022,
+      "mean_sequence_s": 0.009022763658625385,
+      "sequence_count": 3,
+      "total_sequence_mean_s": 0.027068290975876153
+    },
+    "rows": [
+      {
+        "camera": "camera_0006",
+        "full_project_render": {
+          "iterations": 1,
+          "max_s": 0.06340158300008625,
+          "mean_s": 0.06340158300008625,
+          "min_s": 0.06340158300008625,
+          "total_s": 0.06340158300008625,
+          "warmup_iterations": 1
+        },
+        "metal_stats": {
+          "effective_pair_ratio_after_unstable_fallback": 0.8325742535715676,
+          "forward_wall_clock_ms": 28.735708008753136,
+          "max_rgb_error": null,
+          "max_tile_count": 33,
+          "mean_rgb_error": null,
+          "mean_tile_count": 15.6650390625,
+          "metal_buffer_memory": 8486912,
+          "overflow_tile_count": 0,
+          "pair_ratio": 0.8325742535715676,
+          "stable_tile_fraction": 0.0,
+          "summed_per_frame_tile_splat_pairs": 154134,
+          "unstable_tile_fraction": 1.0,
+          "uvt_tile_tube_pairs": 128328
+        },
+        "project_only": {
+          "iterations": 1,
+          "max_s": 0.045150791003834456,
+          "mean_s": 0.045150791003834456,
+          "min_s": 0.045150791003834456,
+          "total_s": 0.045150791003834456,
+          "warmup_iterations": 1
+        },
+        "render_only": {
+          "iterations": 1,
+          "max_s": 0.017203082999913022,
+          "mean_s": 0.017203082999913022,
+          "min_s": 0.017203082999913022,
+          "total_s": 0.017203082999913022,
+          "warmup_iterations": 1
+        },
+        "split": "train"
+      },
+      {
+        "camera": "camera_0014",
+        "full_project_render": {
+          "iterations": 1,
+          "max_s": 0.0600087920029182,
+          "mean_s": 0.0600087920029182,
+          "min_s": 0.0600087920029182,
+          "total_s": 0.0600087920029182,
+          "warmup_iterations": 1
+        },
+        "metal_stats": {
+          "effective_pair_ratio_after_unstable_fallback": 0.8573695625341632,
+          "forward_wall_clock_ms": 3.066167002543807,
+          "max_rgb_error": null,
+          "max_tile_count": 35,
+          "mean_rgb_error": null,
+          "mean_tile_count": 11.87109375,
+          "metal_buffer_memory": 8486912,
+          "overflow_tile_count": 0,
+          "pair_ratio": 0.8573695625341632,
+          "stable_tile_fraction": 1.0,
+          "summed_per_frame_tile_splat_pairs": 113426,
+          "unstable_tile_fraction": 0.0,
+          "uvt_tile_tube_pairs": 97248
+        },
+        "project_only": {
+          "iterations": 1,
+          "max_s": 0.06686049999552779,
+          "mean_s": 0.06686049999552779,
+          "min_s": 0.06686049999552779,
+          "total_s": 0.06686049999552779,
+          "warmup_iterations": 1
+        },
+        "render_only": {
+          "iterations": 1,
+          "max_s": 0.006485666992375627,
+          "mean_s": 0.006485666992375627,
+          "min_s": 0.006485666992375627,
+          "total_s": 0.006485666992375627,
+          "warmup_iterations": 1
+        },
+        "split": "train"
+      },
+      {
+        "camera": "camera_0005",
+        "full_project_render": {
+          "iterations": 1,
+          "max_s": 0.057427208026638255,
+          "mean_s": 0.057427208026638255,
+          "min_s": 0.057427208026638255,
+          "total_s": 0.057427208026638255,
+          "warmup_iterations": 1
+        },
+        "metal_stats": {
+          "effective_pair_ratio_after_unstable_fallback": 0.8526480180056037,
+          "forward_wall_clock_ms": 6.677208992186934,
+          "max_rgb_error": null,
+          "max_tile_count": 34,
+          "mean_rgb_error": null,
+          "mean_tile_count": 13.595947265625,
+          "metal_buffer_memory": 8486912,
+          "overflow_tile_count": 0,
+          "pair_ratio": 0.8526480180056037,
+          "stable_tile_fraction": 1.0,
+          "summed_per_frame_tile_splat_pairs": 130626,
+          "unstable_tile_fraction": 0.0,
+          "uvt_tile_tube_pairs": 111378
+        },
+        "project_only": {
+          "iterations": 1,
+          "max_s": 0.04335362499114126,
+          "mean_s": 0.04335362499114126,
+          "min_s": 0.04335362499114126,
+          "total_s": 0.04335362499114126,
+          "warmup_iterations": 1
+        },
+        "render_only": {
+          "iterations": 1,
+          "max_s": 0.0033795409835875034,
+          "mean_s": 0.0033795409835875034,
+          "min_s": 0.0033795409835875034,
+          "total_s": 0.0033795409835875034,
+          "warmup_iterations": 1
+        },
+        "split": "heldout"
+      }
+    ],
+    "tube_count": 256
+  }
+}
