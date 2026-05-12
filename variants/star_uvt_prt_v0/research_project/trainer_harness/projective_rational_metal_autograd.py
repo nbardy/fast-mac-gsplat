@@ -1,0 +1,124 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import Literal
+
+import torch
+from torch import Tensor
+
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from torch_gsplat_bridge_star_uvt_prt import (  # noqa: E402
+    UVTRenderConfig,
+    projective_rational_direct_serial_backward,
+    render_projective_rational_tubes_direct,
+    render_projective_rational_tubes_tiled,
+)
+
+
+ForwardMode = Literal["direct", "tiled"]
+
+
+def _render_forward(
+    h_coeff: Tensor,
+    lambda_uv: Tensor,
+    lambda_t: Tensor,
+    center_t: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    config: UVTRenderConfig,
+    forward_mode: ForwardMode,
+) -> Tensor:
+    if forward_mode == "direct":
+        return render_projective_rational_tubes_direct(
+            h_coeff,
+            lambda_uv,
+            lambda_t,
+            center_t,
+            opacity,
+            color,
+            config,
+        )
+    if forward_mode == "tiled":
+        return render_projective_rational_tubes_tiled(
+            h_coeff,
+            lambda_uv,
+            lambda_t,
+            center_t,
+            opacity,
+            color,
+            config,
+        )
+    raise ValueError("forward_mode must be 'direct' or 'tiled'")
+
+
+class _ProjectiveRationalDirectSerialBackward(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx,
+        h_coeff: Tensor,
+        lambda_uv: Tensor,
+        lambda_t: Tensor,
+        center_t: Tensor,
+        opacity: Tensor,
+        color: Tensor,
+        config: UVTRenderConfig,
+        forward_mode: ForwardMode,
+    ) -> Tensor:
+        ctx.config = config
+        ctx.forward_mode = forward_mode
+        ctx.save_for_backward(h_coeff, lambda_uv, lambda_t, center_t, opacity, color)
+        return _render_forward(
+            h_coeff,
+            lambda_uv,
+            lambda_t,
+            center_t,
+            opacity,
+            color,
+            config,
+            forward_mode,
+        )
+
+    @staticmethod
+    def backward(ctx, grad_output: Tensor) -> tuple[Tensor | None, ...]:
+        h_coeff, lambda_uv, lambda_t, center_t, opacity, color = ctx.saved_tensors
+        grads = projective_rational_direct_serial_backward(
+            h_coeff.detach(),
+            lambda_uv.detach(),
+            lambda_t.detach(),
+            center_t.detach(),
+            opacity.detach(),
+            color.detach(),
+            grad_output.contiguous(),
+            ctx.config,
+        )
+        return (*grads, None, None)
+
+
+def render_projective_rational_tubes_metal_direct_serial_backward(
+    h_coeff: Tensor,
+    lambda_uv: Tensor,
+    lambda_t: Tensor,
+    center_t: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    config: UVTRenderConfig,
+    *,
+    forward_mode: ForwardMode = "tiled",
+) -> Tensor:
+    """Use Metal PRT forward with the direct-serial Metal backward reference."""
+
+    return _ProjectiveRationalDirectSerialBackward.apply(
+        h_coeff,
+        lambda_uv,
+        lambda_t,
+        center_t,
+        opacity,
+        color,
+        config,
+        forward_mode,
+    )

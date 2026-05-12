@@ -20,9 +20,10 @@ Last updated: 2026-05-13
 - [x] Gate B4: support tightening and tile-shape sweep.
 - [x] Gate B5a: production PRT tile config selector and process-static env contract.
 - [x] Gate B5b: timing launch integration applies selector before first Metal shader call.
-- [ ] Gate B5c: training integration applies selector after a real PRT train-step path exists.
+- [x] Gate B5c: train-step smoke applies selector before first PRT Metal render.
 - [x] Gate C0: CPU PRT autograd-vs-finite-difference gradient reference.
 - [x] Gate C1: direct-serial Metal PRT backward parity against C0.
+- [x] Gate C1b: tiled-forward PRT autograd train-step smoke using direct-serial backward.
 - [ ] Gate C2: tiled/sample-level PRT backward path suitable for training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -218,9 +219,10 @@ max tile count: 13
 overflow tiles: 0
 ```
 
-There is not yet a real PRT train-step entrypoint in this fork. B5c is therefore
-blocked on Gate C and a train-step path that actually calls PRT forward/backward;
-the selector contract is ready, but there is no honest training hook to wire yet.
+Gate B5c now has a tiny train-step smoke that applies the selector before the
+first PRT Metal render. It selects `8x8x2:128` for the two-tube smoke and passes
+that config into `UVTRenderConfig`, so the selector contract is exercised on an
+actual autograd path, not just timing probes.
 
 Gate C0 establishes the gradient target before writing Metal backward kernels:
 
@@ -245,7 +247,23 @@ checked params: h_coeff, lambda_uv, lambda_t, center_t, opacity, color
 This is a direct-serial Metal reference kernel. It proves the PRT gradient math
 and binding boundary against the C0 CPU target, but it is intentionally not the
 fast tiled training path. Gate C2 still has to move these derivatives into the
-tile/sample path before B5c can honestly wire training.
+tile/sample path before we can call PRT training a speed path.
+
+Gate C1b adds the first train-step autograd bridge:
+
+```text
+python3 research_project/trainer_harness/projective_rational_metal_autograd_smoke.py --out-json research_project/benchmarks/results/projective_rational_metal_autograd_smoke.json
+pass: true
+forward_mode: tiled
+tile_config_key: 8x8x2:128
+initial_loss: 0.0008642825414426625
+final_loss: 0.0008352987351827323
+```
+
+This uses tiled Metal PRT forward and direct-serial Metal PRT backward. It proves
+the PRT parameters can flow through a real optimizer step with finite gradients,
+but it is still not the fast train path: backward remains the direct-serial
+reference kernel.
 
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
@@ -260,7 +278,7 @@ should be measured before splitting a camera window.
 ## Next Gates
 
 1. Move PRT backward from direct-serial parity into the tiled/sample-level training path.
-2. Wire the selector into the real training path once a PRT train-step path exists.
+2. Add a non-tiny train-step timing probe once tiled/sample-level PRT backward exists.
 3. Add tile-load scaling scenes that stress moving-camera curvature.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
