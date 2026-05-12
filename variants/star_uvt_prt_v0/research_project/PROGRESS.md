@@ -40,6 +40,7 @@ Last updated: 2026-05-13
 - [x] Gate D2: real multicam PRT world-tube compare against direct dynamic splats.
 - [x] Gate D2b: corrected-depth fast-mac direct-splat and same-wall rows.
 - [x] Gate D2c: repeated render timing probe for PRT tile sizes.
+- [x] Gate D2d: PRT forward phase profile separates camera-compiler cost from Metal raster cost.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -777,6 +778,44 @@ and it slows training. This points away from a pure tile-size fix. The next
 rasterizer question is kernel-level: separate tile assignment, sort/fill,
 shade/blend, and backward timing instead of only sweeping tile geometry.
 
+Gate D2d adds a profile-only op,
+`profile_projective_rational_tubes_tiled`, and
+`research_project/benchmarks/projective_rational_multicam_phase_profile.py`.
+The production render op is unchanged. The profile op returns normal image and
+tile diagnostics plus phase timings for allocation, clear, bin, render, and
+total. The benchmark also times `_compile_detached_footprint` separately, since
+the earlier D2 "render" timers included camera-path coefficient compilation on
+every measured call.
+
+Commands:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_phase_profile.py --target-size 32 --max-frames 2 --steps 1 --prt-tubes 16 --init-depth 0.5 --render-warmups 0 --render-repeats 1 --out-json research_project/benchmarks/results/projective_rational_multicam_phase_profile_32_2f_16t_1step_smoke.json
+python3 research_project/benchmarks/projective_rational_multicam_phase_profile.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --init-depth 0.5 --tile-config 8x8x2:128 --render-warmups 1 --render-repeats 5 --out-json research_project/benchmarks/results/projective_rational_multicam_phase_profile_64_4f_128t_20step_depth0p5_tile8x8x2_cap128_repeat5.json
+python3 research_project/benchmarks/projective_rational_multicam_phase_profile.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --init-depth 0.5 --tile-config 16x16x2:128 --render-warmups 1 --render-repeats 5 --out-json research_project/benchmarks/results/projective_rational_multicam_phase_profile_64_4f_128t_20step_depth0p5_tile16x16x2_cap128_repeat5.json
+python3 research_project/benchmarks/projective_rational_multicam_phase_profile.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 128 --init-depth 0.5 --tile-config 8x8x2:128 --render-warmups 1 --render-repeats 5 --out-json research_project/benchmarks/results/projective_rational_multicam_phase_profile_64_4f_128t_72step_depth0p5_tile8x8x2_cap128_repeat5.json
+python3 research_project/benchmarks/projective_rational_multicam_phase_profile.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 128 --init-depth 0.5 --tile-config 16x16x2:128 --render-warmups 1 --render-repeats 5 --out-json research_project/benchmarks/results/projective_rational_multicam_phase_profile_64_4f_128t_72step_depth0p5_tile16x16x2_cap128_repeat5.json
+```
+
+Result:
+
+```text
+20-step 8x8x2: compile median 29.523/35.872 ms train/heldout; profiled Metal total 8.677/14.457 ms; render_tiles share 94.0%/95.1%; max tile count 96/95; overflow 0
+20-step 16x16x2: compile median 37.290/42.546 ms; profiled Metal total 16.184/8.493 ms; render_tiles share 97.4%/95.7%; max tile count 99/99; overflow 0
+72-step 8x8x2: compile median 45.928/40.542 ms; profiled Metal total 9.455/10.302 ms; render_tiles share 93.5%/93.9%; max tile count 69/78; overflow 0
+72-step 16x16x2: compile median 39.154/32.989 ms; profiled Metal total 5.693/13.272 ms; render_tiles share 92.8%/96.3%; max tile count 74/79; overflow 0
+```
+
+Read: the D2 render slowdown is not primarily tile assignment. Clear plus bin is
+sub-millisecond in the 64px/4-frame/128-tube rows, while the tiled Metal op is
+dominated by the render/shade kernel. More importantly, the full D2 eval timing
+was paying tens of milliseconds to compile world tubes into camera-space PRT
+coefficients for each camera render. The next speed pass should therefore split
+the problem: cache or fuse the camera compiler where the camera path is fixed,
+and optimize `render_projective_rational_tiles` if working inside the Metal
+rasterizer. More tile-size sweeping alone is unlikely to close the direct-splat
+render gap.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -797,4 +836,5 @@ should be measured before splitting a camera window.
 2. Add tile-load scaling scenes that stress moving-camera curvature beyond the synthetic `camera_motion_scale` knob.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
-5. Add kernel-phase timing for PRT tile assignment, sort/fill, shade/blend, and backward.
+5. Add backward phase timing for PRT training.
+6. Prototype a cached or fused camera-compiler path so D2 eval render timing no longer pays `_compile_detached_footprint` every call.

@@ -5,6 +5,7 @@
 #include <torch/extension.h>
 #include <torch/mps.h>
 
+#include <chrono>
 #include <climits>
 #include <cstdlib>
 #include <mutex>
@@ -17,6 +18,7 @@ namespace {
 
 using at::native::mps::DynamicMetalShaderLibrary;
 using at::native::mps::MetalKernelFunction;
+using Clock = std::chrono::steady_clock;
 
 struct ShaderConfig {
   int tile_x;
@@ -175,6 +177,10 @@ void launch(std::shared_ptr<MetalKernelFunction> fn, Fn&& body) {
     fn->startEncoding();
     body(*fn);
   });
+}
+
+double elapsed_ms(Clock::time_point start, Clock::time_point end) {
+  return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
 void check_float_mps_2d(const torch::Tensor& t, const char* name, int64_t cols) {
@@ -421,6 +427,108 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_ren
   });
 
   return std::make_tuple(out, tile_counts, tile_overflow, tile_unstable);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+metal_profile_projective_rational_tiled(
+    const torch::Tensor& h_coeff,
+    const torch::Tensor& lambda_uv,
+    const torch::Tensor& lambda_t,
+    const torch::Tensor& center_t,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32) {
+  check_float_mps_3d(h_coeff, "h_coeff", 3);
+  check_float_mps_2d(lambda_uv, "lambda_uv", 3);
+  check_float_mps_1d(lambda_t, "lambda_t");
+  check_float_mps_1d(center_t, "center_t");
+  check_float_mps_1d(opacity, "opacity");
+  check_float_mps_2d(color, "color", 3);
+  TORCH_CHECK(h_coeff.size(0) == lambda_uv.size(0) && h_coeff.size(0) == lambda_t.size(0) &&
+                  h_coeff.size(0) == center_t.size(0) && h_coeff.size(0) == opacity.size(0) &&
+                  h_coeff.size(0) == color.size(0),
+              "all PRT inputs must agree on N");
+
+  auto meta = parse_meta(meta_i32, meta_f32);
+  auto& sc = shader_config();
+  check_meta(meta, h_coeff.size(0), sc);
+  TORCH_CHECK(meta.reserved0 == h_coeff.size(1), "meta reserved0 must equal h_coeff term count");
+  TORCH_CHECK(meta.reserved0 > 0, "h_coeff term count must be positive");
+  auto& k = kernels();
+
+  auto timings = torch::empty({5}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+  auto timing_ptr = timings.data_ptr<double>();
+  auto total_start = Clock::now();
+
+  auto opts_f = h_coeff.options().dtype(torch::kFloat32);
+  auto opts_i32 = h_coeff.options().dtype(torch::kInt32);
+
+  auto alloc_start = Clock::now();
+  auto out = torch::empty({meta.frames, meta.height, meta.width, 3}, opts_f);
+  auto tile_counts = torch::empty({meta.tile_count}, opts_i32);
+  auto tile_overflow = torch::empty({meta.tile_count}, opts_i32);
+  auto tile_unstable = torch::empty({meta.tile_count}, opts_i32);
+  auto tile_tube_ids = torch::empty({meta.tile_count * meta.tile_capacity}, opts_i32);
+  auto tile_depths = torch::empty({meta.tile_count * meta.tile_capacity}, opts_f);
+  auto alloc_end = Clock::now();
+
+  auto clear_start = Clock::now();
+  launch(k.clear_tiles, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, tile_counts);
+    fn.setArg(1, tile_overflow);
+    fn.setArg(2, tile_unstable);
+    fn.setArg(3, meta_i32);
+    fn.dispatch((uint64_t)meta.tile_count, 256);
+  });
+  torch::mps::synchronize();
+  auto clear_end = Clock::now();
+
+  auto bin_start = Clock::now();
+  launch(k.bin_projective_rational_tubes, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, h_coeff);
+    fn.setArg(1, lambda_uv);
+    fn.setArg(2, lambda_t);
+    fn.setArg(3, center_t);
+    fn.setArg(4, opacity);
+    fn.setArg(5, meta_i32);
+    fn.setArg(6, meta_f32);
+    fn.setArg(7, tile_counts);
+    fn.setArg(8, tile_tube_ids);
+    fn.setArg(9, tile_depths);
+    fn.setArg(10, tile_overflow);
+    fn.dispatch((uint64_t)meta.tube_count, 256);
+  });
+  torch::mps::synchronize();
+  auto bin_end = Clock::now();
+
+  auto render_start = Clock::now();
+  launch(k.render_projective_rational_tiles, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, h_coeff);
+    fn.setArg(1, lambda_uv);
+    fn.setArg(2, lambda_t);
+    fn.setArg(3, center_t);
+    fn.setArg(4, opacity);
+    fn.setArg(5, color);
+    fn.setArg(6, meta_i32);
+    fn.setArg(7, meta_f32);
+    fn.setArg(8, tile_counts);
+    fn.setArg(9, tile_tube_ids);
+    fn.setArg(10, tile_depths);
+    fn.setArg(11, tile_unstable);
+    fn.setArg(12, out);
+    fn.dispatch((uint64_t)meta.tile_count * (uint64_t)sc.threads, (uint64_t)sc.threads);
+  });
+  torch::mps::synchronize();
+  auto render_end = Clock::now();
+
+  timing_ptr[0] = elapsed_ms(alloc_start, alloc_end);
+  timing_ptr[1] = elapsed_ms(clear_start, clear_end);
+  timing_ptr[2] = elapsed_ms(bin_start, bin_end);
+  timing_ptr[3] = elapsed_ms(render_start, render_end);
+  timing_ptr[4] = elapsed_ms(total_start, render_end);
+
+  return std::make_tuple(out, tile_counts, tile_overflow, tile_unstable, timings);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>

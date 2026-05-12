@@ -1,0 +1,397 @@
+{
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "camera_poly_degree": 1,
+    "device": "mps",
+    "frames": 4,
+    "height": 64,
+    "heldout_camera_fit_errors": [
+      0.0
+    ],
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "heldout_profile_view": 0,
+    "max_frames": 4,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "profile_phase_compile_excluded": true,
+    "render_repeats": 5,
+    "render_warmups": 1,
+    "sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+    "seed": 31,
+    "steps": 20,
+    "target_size": 64,
+    "train_camera_fit_errors": [
+      0.0,
+      0.0
+    ],
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "train_profile_view": 0,
+    "width": 64
+  },
+  "name": "projective_rational_multicam_phase_profile",
+  "note": "Profiles the PRT tiled Metal forward op phases after training a small real-multicam PRT model. The phase op synchronizes after clear, bin, and render, so these numbers are diagnostic wall timings.",
+  "pass": true,
+  "projective_rational": {
+    "heldout_profile": {
+      "compile_ms": {
+        "max_ms": 43.46062500553671,
+        "median_ms": 42.546291995677166,
+        "min_ms": 34.35137499764096,
+        "samples_ms": [
+          34.35137499764096,
+          37.63654100475833,
+          42.546291995677166,
+          43.46062500553671,
+          43.18395900190808
+        ]
+      },
+      "max_tile_count": 99,
+      "metrics": {
+        "l1": 0.15158839523792267,
+        "mse": 0.036506377160549164,
+        "psnr": 14.376312636607809
+      },
+      "overflow_tile_count": 0,
+      "phase_ms": {
+        "alloc_ms": {
+          "max_ms": 0.002708,
+          "median_ms": 0.0025,
+          "min_ms": 0.00175,
+          "samples_ms": [
+            0.002083,
+            0.002708,
+            0.00175,
+            0.002584,
+            0.0025
+          ]
+        },
+        "bin_tubes_ms": {
+          "max_ms": 0.253083,
+          "median_ms": 0.225584,
+          "min_ms": 0.203417,
+          "samples_ms": [
+            0.238625,
+            0.203417,
+            0.211334,
+            0.225584,
+            0.253083
+          ]
+        },
+        "clear_tiles_ms": {
+          "max_ms": 0.356375,
+          "median_ms": 0.165209,
+          "min_ms": 0.155459,
+          "samples_ms": [
+            0.356375,
+            0.155459,
+            0.157791,
+            0.165209,
+            0.174916
+          ]
+        },
+        "median_share_of_total": {
+          "alloc_ms": 0.0002943643936829401,
+          "bin_tubes_ms": 0.026561558953828945,
+          "clear_tiles_ms": 0.01945265884638594,
+          "render_tiles_ms": 0.957415245131949,
+          "total_ms": 1.0
+        },
+        "render_tiles_ms": {
+          "max_ms": 8.783542,
+          "median_ms": 8.131208,
+          "min_ms": 7.2435,
+          "samples_ms": [
+            7.693584,
+            8.131208,
+            7.2435,
+            8.240166,
+            8.783542
+          ]
+        },
+        "total_ms": {
+          "max_ms": 9.214167,
+          "median_ms": 8.492875,
+          "min_ms": 7.614417,
+          "samples_ms": [
+            8.290792,
+            8.492875,
+            7.614417,
+            8.633625,
+            9.214167
+          ]
+        }
+      },
+      "unstable_tile_count": 32,
+      "wall_ms": {
+        "max_ms": 9.967750011128373,
+        "median_ms": 9.255292010493577,
+        "min_ms": 8.339250009157695,
+        "samples_ms": [
+          9.04408300993964,
+          9.255292010493577,
+          8.339250009157695,
+          9.385166005813517,
+          9.967750011128373
+        ]
+      }
+    },
+    "init_depth": 0.5,
+    "init_lambda_t": 0.25,
+    "init_opacity": 0.35,
+    "init_precision_xy": 36.0,
+    "loss_mode": "sampled_frame",
+    "lr": 0.02,
+    "parameter_count": 1408,
+    "tile_config": {
+      "tile_capacity": 128,
+      "tile_t": 2,
+      "tile_x": 16,
+      "tile_y": 16
+    },
+    "tile_config_key": "16x16x2:128",
+    "train": {
+      "final_loss": 0.027872681617736816,
+      "initial_loss": 0.05268415808677673,
+      "loss_mode": "sampled_frame",
+      "losses": [
+        {
+          "frame": 3,
+          "loss": 0.05268415808677673,
+          "step": 0,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.04766406863927841,
+          "step": 1,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.046514373272657394,
+          "step": 2,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.03897560387849808,
+          "step": 3,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.041074540466070175,
+          "step": 4,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.043859776109457016,
+          "step": 5,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.03882214054465294,
+          "step": 6,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.03446878492832184,
+          "step": 7,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.04390759393572807,
+          "step": 8,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.04167098551988602,
+          "step": 9,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.04139110445976257,
+          "step": 10,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.039734289050102234,
+          "step": 11,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.03541430085897446,
+          "step": 12,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.03574489802122116,
+          "step": 13,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.03200080618262291,
+          "step": 14,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.03047965094447136,
+          "step": 15,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.02940823696553707,
+          "step": 16,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.03221739083528519,
+          "step": 17,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.03110099956393242,
+          "step": 18,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.033051252365112305,
+          "step": 19,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.027872681617736816,
+          "step": 20,
+          "view": 0
+        }
+      ],
+      "sampled_loss_decreased": true,
+      "steps": 20,
+      "train_loop_elapsed_s": 1.8503519579971908
+    },
+    "train_profile": {
+      "compile_ms": {
+        "max_ms": 38.02633300074376,
+        "median_ms": 37.2896250046324,
+        "min_ms": 35.94058299495373,
+        "samples_ms": [
+          38.02633300074376,
+          35.94058299495373,
+          37.7112499991199,
+          37.045207995106466,
+          37.2896250046324
+        ]
+      },
+      "max_tile_count": 99,
+      "metrics": {
+        "l1": 0.14655981957912445,
+        "mse": 0.032317496836185455,
+        "psnr": 14.90562285036441
+      },
+      "overflow_tile_count": 0,
+      "phase_ms": {
+        "alloc_ms": {
+          "max_ms": 0.002791,
+          "median_ms": 0.001958,
+          "min_ms": 0.001834,
+          "samples_ms": [
+            0.001875,
+            0.002791,
+            0.002583,
+            0.001834,
+            0.001958
+          ]
+        },
+        "bin_tubes_ms": {
+          "max_ms": 0.292541,
+          "median_ms": 0.252459,
+          "min_ms": 0.23225,
+          "samples_ms": [
+            0.292541,
+            0.23225,
+            0.25175,
+            0.254833,
+            0.252459
+          ]
+        },
+        "clear_tiles_ms": {
+          "max_ms": 0.174292,
+          "median_ms": 0.165625,
+          "min_ms": 0.157542,
+          "samples_ms": [
+            0.174292,
+            0.157542,
+            0.164792,
+            0.165625,
+            0.170375
+          ]
+        },
+        "median_share_of_total": {
+          "alloc_ms": 0.00012098649097467348,
+          "bin_tubes_ms": 0.015599657060763581,
+          "clear_tiles_ms": 0.010234110095853061,
+          "render_tiles_ms": 0.9740941847083086,
+          "total_ms": 1.0
+        },
+        "render_tiles_ms": {
+          "max_ms": 17.828292,
+          "median_ms": 15.764375,
+          "min_ms": 13.651417,
+          "samples_ms": [
+            17.828292,
+            16.059917,
+            15.764375,
+            14.13775,
+            13.651417
+          ]
+        },
+        "total_ms": {
+          "max_ms": 18.297084,
+          "median_ms": 16.183625,
+          "min_ms": 14.076375,
+          "samples_ms": [
+            18.297084,
+            16.452667,
+            16.183625,
+            14.560042,
+            14.076375
+          ]
+        }
+      },
+      "unstable_tile_count": 32,
+      "wall_ms": {
+        "max_ms": 19.194499996956438,
+        "median_ms": 16.948500007856637,
+        "min_ms": 14.848375009023584,
+        "samples_ms": [
+          19.194499996956438,
+          17.215458006830886,
+          16.948500007856637,
+          15.323042011004873,
+          14.848375009023584
+        ]
+      }
+    },
+    "tube_count": 128
+  }
+}

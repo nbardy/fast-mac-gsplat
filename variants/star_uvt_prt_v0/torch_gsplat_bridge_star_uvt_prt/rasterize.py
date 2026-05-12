@@ -61,6 +61,18 @@ class UVTRenderResult:
     stats: Gate0Stats | None = None
 
 
+@dataclass(frozen=True)
+class ProjectiveRationalProfileResult:
+    image: Tensor
+    tile_counts: Tensor
+    tile_overflow: Tensor
+    tile_unstable: Tensor
+    timings_ms: dict[str, float]
+
+
+_PRT_PROFILE_TIMING_KEYS = ("alloc_ms", "clear_tiles_ms", "bin_tubes_ms", "render_tiles_ms", "total_ms")
+
+
 def _runtime_validate(config: UVTRenderConfig) -> None:
     if config.height <= 0 or config.width <= 0 or config.frames <= 0:
         raise ValueError("height, width, and frames must be positive")
@@ -403,6 +415,46 @@ def render_projective_rational_tubes_tiled(
         tile_overflow=tile_overflow,
         tile_unstable=tile_unstable,
         stats=None,
+    )
+
+
+def profile_projective_rational_tubes_tiled(
+    h_coeff: Tensor,
+    lambda_uv: Tensor,
+    lambda_t: Tensor,
+    center_t: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    config: UVTRenderConfig,
+) -> ProjectiveRationalProfileResult:
+    _runtime_validate(config)
+    h_coeff = h_coeff.contiguous()
+    lambda_uv = lambda_uv.contiguous()
+    lambda_t = lambda_t.contiguous()
+    center_t = center_t.contiguous()
+    opacity = opacity.contiguous()
+    color = color.contiguous()
+    _check_prt_inputs(h_coeff, lambda_uv, lambda_t, center_t, opacity, color, require_mps=True)
+    if not hasattr(torch.ops, "star_uvt_prt_v0"):
+        raise RuntimeError("star_uvt_prt_v0 custom ops not found. Build the extension first.")
+    meta_i32, meta_f32 = _make_meta(config, h_coeff.device, h_coeff.shape[0], reserved0=h_coeff.shape[1])
+    image, tile_counts, tile_overflow, tile_unstable, timings = torch.ops.star_uvt_prt_v0.profile_projective_rational_tiled(
+        h_coeff,
+        lambda_uv,
+        lambda_t,
+        center_t,
+        opacity,
+        color,
+        meta_i32,
+        meta_f32,
+    )
+    values = timings.detach().cpu().tolist()
+    return ProjectiveRationalProfileResult(
+        image=image,
+        tile_counts=tile_counts,
+        tile_overflow=tile_overflow,
+        tile_unstable=tile_unstable,
+        timings_ms={key: float(value) for key, value in zip(_PRT_PROFILE_TIMING_KEYS, values, strict=True)},
     )
 
 

@@ -1,0 +1,709 @@
+{
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "camera_poly_degree": 1,
+    "device": "mps",
+    "frames": 4,
+    "height": 64,
+    "heldout_camera_fit_errors": [
+      0.0
+    ],
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "heldout_profile_view": 0,
+    "max_frames": 4,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "profile_phase_compile_excluded": true,
+    "render_repeats": 5,
+    "render_warmups": 1,
+    "sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+    "seed": 31,
+    "steps": 72,
+    "target_size": 64,
+    "train_camera_fit_errors": [
+      0.0,
+      0.0
+    ],
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "train_profile_view": 0,
+    "width": 64
+  },
+  "name": "projective_rational_multicam_phase_profile",
+  "note": "Profiles the PRT tiled Metal forward op phases after training a small real-multicam PRT model. The phase op synchronizes after clear, bin, and render, so these numbers are diagnostic wall timings.",
+  "pass": true,
+  "projective_rational": {
+    "heldout_profile": {
+      "compile_ms": {
+        "max_ms": 43.48312500223983,
+        "median_ms": 40.54195799108129,
+        "min_ms": 38.32908299227711,
+        "samples_ms": [
+          43.48312500223983,
+          38.32908299227711,
+          43.38133300188929,
+          39.810709000448696,
+          40.54195799108129
+        ]
+      },
+      "max_tile_count": 78,
+      "metrics": {
+        "l1": 0.15198539197444916,
+        "mse": 0.038037851452827454,
+        "psnr": 14.197840219274084
+      },
+      "overflow_tile_count": 0,
+      "phase_ms": {
+        "alloc_ms": {
+          "max_ms": 0.003042,
+          "median_ms": 0.002,
+          "min_ms": 0.001875,
+          "samples_ms": [
+            0.002,
+            0.003042,
+            0.002875,
+            0.001959,
+            0.001875
+          ]
+        },
+        "bin_tubes_ms": {
+          "max_ms": 0.575542,
+          "median_ms": 0.503458,
+          "min_ms": 0.402459,
+          "samples_ms": [
+            0.503458,
+            0.575542,
+            0.561292,
+            0.402459,
+            0.407708
+          ]
+        },
+        "clear_tiles_ms": {
+          "max_ms": 0.209167,
+          "median_ms": 0.157208,
+          "min_ms": 0.140125,
+          "samples_ms": [
+            0.160667,
+            0.209167,
+            0.157208,
+            0.140125,
+            0.156333
+          ]
+        },
+        "median_share_of_total": {
+          "alloc_ms": 0.00019414333621927402,
+          "bin_tubes_ms": 0.048871507883141624,
+          "clear_tiles_ms": 0.015260442800179814,
+          "render_tiles_ms": 0.938634494786135,
+          "total_ms": 1.0
+        },
+        "render_tiles_ms": {
+          "max_ms": 9.739,
+          "median_ms": 9.6695,
+          "min_ms": 9.378375,
+          "samples_ms": [
+            9.6355,
+            9.6945,
+            9.6695,
+            9.739,
+            9.378375
+          ]
+        },
+        "total_ms": {
+          "max_ms": 10.482375,
+          "median_ms": 10.301667,
+          "min_ms": 9.944333,
+          "samples_ms": [
+            10.301667,
+            10.482375,
+            10.390959,
+            10.283584,
+            9.944333
+          ]
+        }
+      },
+      "unstable_tile_count": 128,
+      "wall_ms": {
+        "max_ms": 11.395749999792315,
+        "median_ms": 11.038416007068008,
+        "min_ms": 10.674624994862825,
+        "samples_ms": [
+          11.038416007068008,
+          11.395749999792315,
+          11.099209004896693,
+          11.022209000657313,
+          10.674624994862825
+        ]
+      }
+    },
+    "init_depth": 0.5,
+    "init_lambda_t": 0.25,
+    "init_opacity": 0.35,
+    "init_precision_xy": 36.0,
+    "loss_mode": "sampled_frame",
+    "lr": 0.02,
+    "parameter_count": 1408,
+    "tile_config": {
+      "tile_capacity": 128,
+      "tile_t": 2,
+      "tile_x": 8,
+      "tile_y": 8
+    },
+    "tile_config_key": "8x8x2:128",
+    "train": {
+      "final_loss": 0.021433254703879356,
+      "initial_loss": 0.05268415808677673,
+      "loss_mode": "sampled_frame",
+      "losses": [
+        {
+          "frame": 3,
+          "loss": 0.05268415808677673,
+          "step": 0,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.04766406863927841,
+          "step": 1,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.046514369547367096,
+          "step": 2,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.03897476941347122,
+          "step": 3,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.04107438772916794,
+          "step": 4,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.04385986179113388,
+          "step": 5,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.03882356733083725,
+          "step": 6,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.03447069972753525,
+          "step": 7,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.04391130432486534,
+          "step": 8,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.04167180508375168,
+          "step": 9,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.04139096289873123,
+          "step": 10,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.03973304480314255,
+          "step": 11,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.03541530296206474,
+          "step": 12,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.035745877772569656,
+          "step": 13,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.03199928253889084,
+          "step": 14,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.030482176691293716,
+          "step": 15,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.029410839080810547,
+          "step": 16,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.0322183221578598,
+          "step": 17,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.031100613996386528,
+          "step": 18,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.03305536136031151,
+          "step": 19,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.027871955186128616,
+          "step": 20,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.028165370225906372,
+          "step": 21,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.026306595653295517,
+          "step": 22,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.036530882120132446,
+          "step": 23,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.02509303390979767,
+          "step": 24,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.04048043116927147,
+          "step": 25,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.02746417745947838,
+          "step": 26,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.034361373633146286,
+          "step": 27,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.029228394851088524,
+          "step": 28,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.02618478238582611,
+          "step": 29,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.03498340770602226,
+          "step": 30,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.023237474262714386,
+          "step": 31,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.03311216086149216,
+          "step": 32,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.030223775655031204,
+          "step": 33,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.03161018341779709,
+          "step": 34,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.025287117809057236,
+          "step": 35,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.02651377022266388,
+          "step": 36,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.03742029890418053,
+          "step": 37,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.02842504344880581,
+          "step": 38,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.030082106590270996,
+          "step": 39,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.03308414667844772,
+          "step": 40,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.028294414281845093,
+          "step": 41,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.0256514735519886,
+          "step": 42,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.023846950381994247,
+          "step": 43,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.023766925558447838,
+          "step": 44,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.029397178441286087,
+          "step": 45,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.02181694470345974,
+          "step": 46,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.030213408172130585,
+          "step": 47,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.02155022881925106,
+          "step": 48,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.024702822789549828,
+          "step": 49,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.03639297932386398,
+          "step": 50,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.026789680123329163,
+          "step": 51,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.026804214343428612,
+          "step": 52,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.022532563656568527,
+          "step": 53,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.03006262145936489,
+          "step": 54,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.03156573697924614,
+          "step": 55,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.02387993410229683,
+          "step": 56,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.03152075409889221,
+          "step": 57,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.026031330227851868,
+          "step": 58,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.02092686854302883,
+          "step": 59,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.02834823727607727,
+          "step": 60,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.02738247811794281,
+          "step": 61,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.027021540328860283,
+          "step": 62,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.025999099016189575,
+          "step": 63,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.023425979539752007,
+          "step": 64,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.029068898409605026,
+          "step": 65,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.025404056534171104,
+          "step": 66,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.02768714539706707,
+          "step": 67,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.024563318118453026,
+          "step": 68,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.026873085647821426,
+          "step": 69,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.02847716212272644,
+          "step": 70,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.02234225533902645,
+          "step": 71,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.021433254703879356,
+          "step": 72,
+          "view": 0
+        }
+      ],
+      "sampled_loss_decreased": true,
+      "steps": 72,
+      "train_loop_elapsed_s": 5.507100000002538
+    },
+    "train_profile": {
+      "compile_ms": {
+        "max_ms": 58.13870900601614,
+        "median_ms": 45.928417006507516,
+        "min_ms": 38.407500003813766,
+        "samples_ms": [
+          58.13870900601614,
+          48.99004199251067,
+          45.928417006507516,
+          38.407500003813766,
+          39.212375006172806
+        ]
+      },
+      "max_tile_count": 69,
+      "metrics": {
+        "l1": 0.12050046026706696,
+        "mse": 0.02319926582276821,
+        "psnr": 16.345257588231387
+      },
+      "overflow_tile_count": 0,
+      "phase_ms": {
+        "alloc_ms": {
+          "max_ms": 0.004125,
+          "median_ms": 0.003167,
+          "min_ms": 0.001959,
+          "samples_ms": [
+            0.003708,
+            0.004125,
+            0.002584,
+            0.003167,
+            0.001959
+          ]
+        },
+        "bin_tubes_ms": {
+          "max_ms": 0.585958,
+          "median_ms": 0.49925,
+          "min_ms": 0.448666,
+          "samples_ms": [
+            0.482125,
+            0.49925,
+            0.525958,
+            0.585958,
+            0.448666
+          ]
+        },
+        "clear_tiles_ms": {
+          "max_ms": 0.3045,
+          "median_ms": 0.186042,
+          "min_ms": 0.166875,
+          "samples_ms": [
+            0.202,
+            0.3045,
+            0.179541,
+            0.186042,
+            0.166875
+          ]
+        },
+        "median_share_of_total": {
+          "alloc_ms": 0.0003349713116691757,
+          "bin_tubes_ms": 0.052805313340964936,
+          "clear_tiles_ms": 0.019677528501912466,
+          "render_tiles_ms": 0.9346831326872451,
+          "total_ms": 1.0
+        },
+        "render_tiles_ms": {
+          "max_ms": 10.010625,
+          "median_ms": 8.837,
+          "min_ms": 8.534125,
+          "samples_ms": [
+            8.544333,
+            10.010625,
+            8.534125,
+            8.991458,
+            8.837
+          ]
+        },
+        "total_ms": {
+          "max_ms": 10.818583,
+          "median_ms": 9.454541,
+          "min_ms": 9.232292,
+          "samples_ms": [
+            9.232292,
+            10.818583,
+            9.242333,
+            9.766708,
+            9.454541
+          ]
+        }
+      },
+      "unstable_tile_count": 128,
+      "wall_ms": {
+        "max_ms": 11.766291005187668,
+        "median_ms": 10.231832988210954,
+        "min_ms": 10.047416013549082,
+        "samples_ms": [
+          10.140208003576845,
+          11.766291005187668,
+          10.047416013549082,
+          10.607584001263604,
+          10.231832988210954
+        ]
+      }
+    },
+    "tube_count": 128
+  }
+}

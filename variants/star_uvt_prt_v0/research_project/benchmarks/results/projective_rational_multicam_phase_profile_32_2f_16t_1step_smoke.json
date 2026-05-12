@@ -1,0 +1,227 @@
+{
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "camera_poly_degree": 1,
+    "device": "mps",
+    "frames": 2,
+    "height": 32,
+    "heldout_camera_fit_errors": [
+      0.0
+    ],
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "heldout_profile_view": 0,
+    "max_frames": 2,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "profile_phase_compile_excluded": true,
+    "render_repeats": 1,
+    "render_warmups": 0,
+    "sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+    "seed": 31,
+    "steps": 1,
+    "target_size": 32,
+    "train_camera_fit_errors": [
+      0.0,
+      0.0
+    ],
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "train_profile_view": 0,
+    "width": 32
+  },
+  "name": "projective_rational_multicam_phase_profile",
+  "note": "Profiles the PRT tiled Metal forward op phases after training a small real-multicam PRT model. The phase op synchronizes after clear, bin, and render, so these numbers are diagnostic wall timings.",
+  "pass": true,
+  "projective_rational": {
+    "heldout_profile": {
+      "compile_ms": {
+        "max_ms": 9.116750006796792,
+        "median_ms": 9.116750006796792,
+        "min_ms": 9.116750006796792,
+        "samples_ms": [
+          9.116750006796792
+        ]
+      },
+      "max_tile_count": 16,
+      "metrics": {
+        "l1": 0.3239738643169403,
+        "mse": 0.1398806869983673,
+        "psnr": 8.542422433997721
+      },
+      "overflow_tile_count": 0,
+      "phase_ms": {
+        "alloc_ms": {
+          "max_ms": 0.002875,
+          "median_ms": 0.002875,
+          "min_ms": 0.002875,
+          "samples_ms": [
+            0.002875
+          ]
+        },
+        "bin_tubes_ms": {
+          "max_ms": 0.289666,
+          "median_ms": 0.289666,
+          "min_ms": 0.289666,
+          "samples_ms": [
+            0.289666
+          ]
+        },
+        "clear_tiles_ms": {
+          "max_ms": 0.268833,
+          "median_ms": 0.268833,
+          "min_ms": 0.268833,
+          "samples_ms": [
+            0.268833
+          ]
+        },
+        "median_share_of_total": {
+          "alloc_ms": 0.0021854110321069186,
+          "bin_tubes_ms": 0.22018757287870702,
+          "clear_tiles_ms": 0.20435151443283453,
+          "render_tiles_ms": 0.5731797236424226,
+          "total_ms": 1.0
+        },
+        "render_tiles_ms": {
+          "max_ms": 0.754042,
+          "median_ms": 0.754042,
+          "min_ms": 0.754042,
+          "samples_ms": [
+            0.754042
+          ]
+        },
+        "total_ms": {
+          "max_ms": 1.315542,
+          "median_ms": 1.315542,
+          "min_ms": 1.315542,
+          "samples_ms": [
+            1.315542
+          ]
+        }
+      },
+      "unstable_tile_count": 16,
+      "wall_ms": {
+        "max_ms": 2.1335839992389083,
+        "median_ms": 2.1335839992389083,
+        "min_ms": 2.1335839992389083,
+        "samples_ms": [
+          2.1335839992389083
+        ]
+      }
+    },
+    "init_depth": 0.5,
+    "init_lambda_t": 0.25,
+    "init_opacity": 0.35,
+    "init_precision_xy": 36.0,
+    "loss_mode": "sampled_frame",
+    "lr": 0.02,
+    "parameter_count": 176,
+    "tile_config": {
+      "tile_capacity": 128,
+      "tile_t": 2,
+      "tile_x": 8,
+      "tile_y": 8
+    },
+    "tile_config_key": "8x8x2:128",
+    "train": {
+      "final_loss": 0.13740544021129608,
+      "initial_loss": 0.16378700733184814,
+      "loss_mode": "sampled_frame",
+      "losses": [
+        {
+          "frame": 1,
+          "loss": 0.16378700733184814,
+          "step": 0,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.13740544021129608,
+          "step": 1,
+          "view": 1
+        }
+      ],
+      "sampled_loss_decreased": true,
+      "steps": 1,
+      "train_loop_elapsed_s": 0.3952963329938939
+    },
+    "train_profile": {
+      "compile_ms": {
+        "max_ms": 10.729916000855155,
+        "median_ms": 10.729916000855155,
+        "min_ms": 10.729916000855155,
+        "samples_ms": [
+          10.729916000855155
+        ]
+      },
+      "max_tile_count": 16,
+      "metrics": {
+        "l1": 0.32384708523750305,
+        "mse": 0.14402541518211365,
+        "psnr": 8.415608641587797
+      },
+      "overflow_tile_count": 0,
+      "phase_ms": {
+        "alloc_ms": {
+          "max_ms": 0.001833,
+          "median_ms": 0.001833,
+          "min_ms": 0.001833,
+          "samples_ms": [
+            0.001833
+          ]
+        },
+        "bin_tubes_ms": {
+          "max_ms": 0.330459,
+          "median_ms": 0.330459,
+          "min_ms": 0.330459,
+          "samples_ms": [
+            0.330459
+          ]
+        },
+        "clear_tiles_ms": {
+          "max_ms": 0.212791,
+          "median_ms": 0.212791,
+          "min_ms": 0.212791,
+          "samples_ms": [
+            0.212791
+          ]
+        },
+        "median_share_of_total": {
+          "alloc_ms": 0.0014588629305555775,
+          "bin_tubes_ms": 0.26300839343615146,
+          "clear_tiles_ms": 0.16935782970859353,
+          "render_tiles_ms": 0.5661080593223171,
+          "total_ms": 1.0
+        },
+        "render_tiles_ms": {
+          "max_ms": 0.711291,
+          "median_ms": 0.711291,
+          "min_ms": 0.711291,
+          "samples_ms": [
+            0.711291
+          ]
+        },
+        "total_ms": {
+          "max_ms": 1.256458,
+          "median_ms": 1.256458,
+          "min_ms": 1.256458,
+          "samples_ms": [
+            1.256458
+          ]
+        }
+      },
+      "unstable_tile_count": 16,
+      "wall_ms": {
+        "max_ms": 2.20604200148955,
+        "median_ms": 2.20604200148955,
+        "min_ms": 2.20604200148955,
+        "samples_ms": [
+          2.20604200148955
+        ]
+      }
+    },
+    "tube_count": 16
+  }
+}
