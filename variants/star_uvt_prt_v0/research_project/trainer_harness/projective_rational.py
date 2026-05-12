@@ -154,8 +154,16 @@ def _lambda_uv_from_reference_jacobian(batch: WorldTubeBatch, p_ref: Tensor, *, 
         + jac[:, :, 1:] * jac[:, :, 1:].transpose(1, 2) * var[:, 1].view(-1, 1, 1)
     )
     cov = cov + torch.eye(2, dtype=torch.float32, device=batch.x0.device).view(1, 2, 2) * 1.0e-6
-    precision = torch.linalg.inv(cov)
-    return torch.stack((precision[:, 0, 0], precision[:, 0, 1], precision[:, 1, 1]), dim=-1)
+    det = (cov[:, 0, 0] * cov[:, 1, 1] - cov[:, 0, 1] * cov[:, 1, 0]).clamp_min(1.0e-20)
+    inv_det = 1.0 / det
+    return torch.stack(
+        (
+            cov[:, 1, 1] * inv_det,
+            -cov[:, 0, 1] * inv_det,
+            cov[:, 0, 0] * inv_det,
+        ),
+        dim=-1,
+    )
 
 
 def compile_projective_rational_tubes(

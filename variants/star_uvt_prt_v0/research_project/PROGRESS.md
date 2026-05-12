@@ -42,6 +42,7 @@ Last updated: 2026-05-13
 - [x] Gate D2c: repeated render timing probe for PRT tile sizes.
 - [x] Gate D2d: PRT forward phase profile separates camera-compiler cost from Metal raster cost.
 - [x] Gate D2e: cached-compiled PRT eval timing in the direct-splat compare harness.
+- [x] Gate D2f: analytic 2x2 compiler inverse removes the tiny-matrix `torch.linalg.inv` bottleneck.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -835,9 +836,9 @@ python3 research_project/benchmarks/projective_rational_multicam_splat_compare.p
 Result:
 
 ```text
-20 steps cached PRT: train/heldout PSNR 14.9275/14.3763 dB, train wall 1.303 s, raster render 10.038/10.708 ms, compile median 39.079 ms, max tile 99, overflow 0; fast-mac direct splats 8.6144/7.9594 dB, train wall 0.604 s, render 20.490/21.080 ms.
-72 steps cached PRT: 16.1283/14.1625 dB, train wall 4.816 s, raster render 4.474/4.972 ms, compile median 35.419 ms, max tile 77, overflow 0; same-run 72-step fast-mac direct splats 9.8891/8.9967 dB, train wall 1.719 s, render 22.934/30.506 ms.
-200 steps cached PRT: 16.7678/14.1060 dB, train wall 14.329 s, raster render 6.987/8.300 ms, compile median 67.059 ms, max tile 56, overflow 0; fast-mac direct splats 13.2900/11.2843 dB, train wall 4.511 s, render 22.337/22.597 ms.
+20 steps cached PRT before D2f: train/heldout PSNR 14.9275/14.3763 dB, train wall 1.303 s, raster render 10.038/10.708 ms, compile median 39.079 ms, max tile 99, overflow 0; fast-mac direct splats 8.6144/7.9594 dB, train wall 0.604 s, render 20.490/21.080 ms.
+72 steps cached PRT before D2f: 16.1283/14.1625 dB, train wall 4.816 s, raster render 4.474/4.972 ms, compile median 35.419 ms, max tile 77, overflow 0; same-run 72-step fast-mac direct splats 9.8891/8.9967 dB, train wall 1.719 s, render 22.934/30.506 ms.
+200 steps cached PRT before D2f: 16.7678/14.1060 dB, train wall 14.329 s, raster render 6.987/8.300 ms, compile median 67.059 ms, max tile 56, overflow 0; fast-mac direct splats 13.2900/11.2843 dB, train wall 4.511 s, render 22.337/22.597 ms.
 ```
 
 Read: when the camera-space PRT footprint is cached, the actual tiled PRT
@@ -848,6 +849,39 @@ world tubes for every timed render call. The next practical speed task is to
 make this cache/fuse boundary first-class for camera-path playback and for
 camera-edit bake, then decide whether `render_projective_rational_tiles` itself
 needs optimization.
+
+Gate D2f replaces the compiler's batched `torch.linalg.inv` over tiny 2x2
+covariance matrices with the explicit 2x2 inverse formula. The old and new
+lambda-UV compiler outputs matched exactly in a CPU and MPS parity check on the
+projection-audit scene:
+
+```text
+cpu max abs lambda_uv diff vs old torch.linalg.inv path: 0.0
+mps max abs lambda_uv diff vs old torch.linalg.inv path: 0.0
+```
+
+Validation:
+
+```text
+python3 tests/projective_rational_gate_check.py
+python3 tests/projective_rational_tiled_render_check.py
+```
+
+Result after rerunning the same cached D2e JSONs:
+
+```text
+20 steps cached PRT after D2f: train/heldout PSNR 14.9276/14.3762 dB, train wall 0.631 s, raster render 5.027/5.400 ms, compile median 2.153 ms, max tile 99, overflow 0; fast-mac direct splats 8.6144/7.9594 dB, train wall 0.612 s, render 24.310/24.930 ms.
+72 steps cached PRT after D2f: 16.0546/14.1108 dB, train wall 2.259 s, raster render 10.349/11.802 ms, compile median 3.322 ms, max tile 79, overflow 0; same-run fast-mac direct splats 9.8891/8.9967 dB, train wall 1.980 s, render 29.472/32.655 ms.
+200 steps cached PRT after D2f: 17.0640/13.8394 dB, train wall 5.755 s, raster render 6.421/7.333 ms, compile median 3.195 ms, max tile 55, overflow 0; fast-mac direct splats 13.2901/11.2841 dB, train wall 4.526 s, render 20.627/20.103 ms.
+```
+
+Read: the compiler bottleneck was mostly a bad primitive choice, not an
+unavoidable camera-compiler cost. With the analytic inverse, cached PRT eval
+still renders faster than fast-mac direct splats, and PRT training wall-clock is
+now close to the direct-splat baseline while keeping materially higher train and
+heldout PSNR in the D2 rows. The next speed question moves back to training:
+whether compile can be reused or simplified inside repeated train steps, and
+whether backward phase timing shows another tiny-kernel bottleneck.
 
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
