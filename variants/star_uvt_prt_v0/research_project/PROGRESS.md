@@ -206,6 +206,16 @@ and records `tile_config` / `tile_config_key` in the output JSON. Manual
 `--tile-x/y/t/capacity` flags still work and are also mirrored into env by the
 probe, so timing launches no longer need separate shell env flags.
 
+Tiny Metal smoke for the auto path:
+
+```text
+python3 research_project/benchmarks/projective_rational_metal_forward_timing_probe.py --tube-counts 16 --tile-config auto --warmups 0 --repeats 1 --out-json research_project/benchmarks/results/projective_rational_metal_forward_timing_probe_auto_smoke_16t.json
+tile_config_key: 8x8x2:128
+max abs error vs direct: 5.960464477539062e-07
+max tile count: 13
+overflow tiles: 0
+```
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path

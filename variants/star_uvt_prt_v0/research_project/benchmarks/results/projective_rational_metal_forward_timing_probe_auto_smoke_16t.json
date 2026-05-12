@@ -1,0 +1,48 @@
+{
+  "camera_motion_scale": 1.0,
+  "name": "projective_rational_metal_forward_timing_probe",
+  "note": "Metal timing is diagnostic. B2 does not by itself prove training speed.",
+  "pass": true,
+  "rows": [
+    {
+      "active_tile_count": 67,
+      "camera_fit_error": 5.984424689131629e-08,
+      "camera_motion_scale": 1.0,
+      "direct": {
+        "max_ms": 2.3809160047676414,
+        "median_ms": 2.3809160047676414,
+        "min_ms": 2.3809160047676414,
+        "repeats": 1,
+        "warmups": 0
+      },
+      "frames": 8,
+      "height": 48,
+      "max_abs_error_vs_direct": 5.960464477539062e-07,
+      "max_tile_count": 13,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "tile_capacity": 128,
+      "tile_t": 2,
+      "tile_x": 8,
+      "tile_y": 8,
+      "tiled": {
+        "max_ms": 1.485749991843477,
+        "median_ms": 1.485749991843477,
+        "min_ms": 1.485749991843477,
+        "repeats": 1,
+        "warmups": 0
+      },
+      "tiled_to_direct_median_ratio": 0.6240245304195325,
+      "total_tile_pairs": 335,
+      "tube_count": 16,
+      "width": 64
+    }
+  ],
+  "tile_config": {
+    "tile_capacity": 128,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8
+  },
+  "tile_config_key": "8x8x2:128"
+}
