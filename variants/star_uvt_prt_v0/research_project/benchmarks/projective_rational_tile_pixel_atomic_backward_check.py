@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -53,7 +54,15 @@ def _profile_gradients(config: UVTRenderConfig) -> tuple[dict[str, torch.Tensor]
 
 
 def run_check(*, abs_tol: float, rel_tol: float) -> dict[str, Any]:
-    config = UVTRenderConfig(height=5, width=6, frames=3)
+    config = UVTRenderConfig(
+        height=5,
+        width=6,
+        frames=3,
+        tile_x=int(os.environ.get("STAR_UVT_TILE_X", "8")),
+        tile_y=int(os.environ.get("STAR_UVT_TILE_Y", "8")),
+        tile_t=int(os.environ.get("STAR_UVT_TILE_T", "2")),
+        tile_capacity=int(os.environ.get("STAR_UVT_TILE_CAPACITY", "128")),
+    )
     if not torch.backends.mps.is_available():
         return {
             "name": "projective_rational_tile_pixel_atomic_backward_check",

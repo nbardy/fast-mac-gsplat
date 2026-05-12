@@ -2126,26 +2126,33 @@ kernel void projective_rational_tile_pixel_atomic_backward(
   bool differentiable_alpha[STAR_TILE_CAPACITY];
 
   uint ordered_count = 0u;
-  float last_depth = -INFINITY;
-  uint last_id = 0xFFFFFFFFu;
-  for (uint rank = 0u; rank < count; ++rank) {
-    float selected_depth;
-    uint tube_id = select_prt_sample_order_id_thread(
-        local_ids,
-        count,
-        h_coeff,
-        center_t,
-        h_terms,
-        t,
-        last_depth,
-        last_id,
-        mf,
-        selected_depth);
-    if (tube_id == 0xFFFFFFFFu) break;
-    ordered_ids[ordered_count] = tube_id;
-    ordered_count += 1u;
-    last_depth = selected_depth;
-    last_id = tube_id;
+  if (uint(STAR_TILE_T) == 1u) {
+    ordered_count = count;
+    for (uint i = 0u; i < count; ++i) {
+      ordered_ids[i] = local_ids[i];
+    }
+  } else {
+    float last_depth = -INFINITY;
+    uint last_id = 0xFFFFFFFFu;
+    for (uint rank = 0u; rank < count; ++rank) {
+      float selected_depth;
+      uint tube_id = select_prt_sample_order_id_thread(
+          local_ids,
+          count,
+          h_coeff,
+          center_t,
+          h_terms,
+          t,
+          last_depth,
+          last_id,
+          mf,
+          selected_depth);
+      if (tube_id == 0xFFFFFFFFu) break;
+      ordered_ids[ordered_count] = tube_id;
+      ordered_count += 1u;
+      last_depth = selected_depth;
+      last_id = tube_id;
+    }
   }
 
   for (uint i = 0u; i < ordered_count; ++i) {

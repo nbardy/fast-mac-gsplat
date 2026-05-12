@@ -45,6 +45,7 @@ Last updated: 2026-05-13
 - [x] Gate D2f: analytic 2x2 compiler inverse removes the tiny-matrix `torch.linalg.inv` bottleneck.
 - [x] Gate D2g: real-multicam PRT train-step breakdown after compiler inverse fix.
 - [x] Gate D2h: internal phase timing for `projective_rational_tile_pixel_atomic_backward`.
+- [x] Gate D2i: exact `tile_t=1` presorted backward shortcut and D2 timing rows.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -950,6 +951,54 @@ inside `projective_rational_tile_pixel_atomic_backward`: reduce per-pixel
 sample ordering/recomputation, or test a different accumulation structure, not
 more host-side phase splitting.
 
+Gate D2i adds the first inner-kernel shortcut: when `STAR_TILE_T == 1`, each
+tile covers exactly one frame, and PRT depth is independent of pixel position.
+The binned tile-depth sort is therefore already the exact per-pixel sample
+order, so `projective_rational_tile_pixel_atomic_backward` can skip the
+O(count^2) per-pixel reselect loop and replay the sorted tile IDs directly.
+
+Validation:
+
+```text
+python3 tests/projective_rational_tile_pixel_atomic_backward_check.py
+STAR_UVT_TILE_T=1 python3 tests/projective_rational_tile_pixel_atomic_backward_check.py
+python3 tests/projective_rational_metal_autograd_smoke.py
+```
+
+Commands:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 128 --init-depth 0.5 --tile-config 8x8x1:128 --profile-warmups 1 --profile-repeats 3 --out-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_64_4f_128t_72step_depth0p5_tile8x8x1_before_presort.json
+python3 research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --init-depth 0.5 --tile-config 8x8x1:128 --profile-warmups 1 --profile-repeats 3 --out-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_64_4f_128t_20step_depth0p5_tile8x8x1_presorted.json
+python3 research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 128 --init-depth 0.5 --tile-config 8x8x1:128 --profile-warmups 1 --profile-repeats 3 --out-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_64_4f_128t_72step_depth0p5_tile8x8x1_presorted.json
+python3 research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 128 --init-depth 0.5 --tile-config 8x8x1:128 --profile-warmups 1 --profile-repeats 3 --out-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_64_4f_128t_200step_depth0p5_tile8x8x1_presorted.json
+python3 research_project/benchmarks/projective_rational_multicam_train_breakdown.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --init-depth 0.5 --tile-config 8x8x1:128 --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_multicam_train_breakdown_64_4f_128t_20step_depth0p5_tile8x8x1_presorted.json
+python3 research_project/benchmarks/projective_rational_multicam_train_breakdown.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 128 --init-depth 0.5 --tile-config 8x8x1:128 --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_multicam_train_breakdown_64_4f_128t_72step_depth0p5_tile8x8x1_presorted.json
+python3 research_project/benchmarks/projective_rational_multicam_train_breakdown.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 128 --init-depth 0.5 --tile-config 8x8x1:128 --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_multicam_train_breakdown_64_4f_128t_200step_depth0p5_tile8x8x1_presorted.json
+```
+
+Result:
+
+```text
+72-step tile8x8x1 before shortcut: profiled backward total 14.669 ms, backward kernel 12.692 ms, bin 0.960 ms, max tile 62, overflow 0.
+20-step tile8x8x1 after shortcut: profiled backward total 13.743 ms, backward kernel 12.168 ms, bin 0.882 ms; train step 25.416 ms, backward 10.991 ms, forward 10.086 ms, PSNR 14.9277/14.3763 dB.
+72-step tile8x8x1 after shortcut: profiled backward total 8.148 ms, backward kernel 6.896 ms, bin 0.764 ms; train step 30.107 ms, backward 13.116 ms, forward 8.987 ms, PSNR 16.1678/14.1779 dB.
+200-step tile8x8x1 after shortcut: profiled backward total 5.926 ms, backward kernel 4.423 ms, bin 0.851 ms; train step 23.841 ms, backward 10.609 ms, forward 6.871 ms, PSNR 16.5397/14.0461 dB.
+```
+
+Read: the presorted `tile_t=1` path is a real inner-kernel win once supports
+shrink. Against the default D2g `8x8x2:128` rows, it improves the 72-step median
+train step from 32.353 ms to 30.107 ms and the 200-step median train step from
+25.792 ms to 23.841 ms. It is still worse at 20 steps because `tile_t=1`
+doubles tile/bin and forward work while early supports are broad. Do not replace
+the default recommendation globally yet; the next useful policy is support- or
+schedule-aware, for example train early with `tile_t=2` and switch eval or later
+training to `tile_t=1`.
+
+Tried and rejected in this gate: extending the fast path to all `count == 1`
+tiles under `tile_t=2`. It remained numerically valid but made the default D2
+train-breakdown rows slower, so that change was dropped before commit.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -970,6 +1019,7 @@ should be measured before splitting a camera window.
 2. Add tile-load scaling scenes that stress moving-camera curvature beyond the synthetic `camera_motion_scale` knob.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
-5. Profile the inner loops of `projective_rational_tile_pixel_atomic_backward`: sample ordering, alpha replay, and atomic accumulation.
-6. Test a lower-atomic or two-pass backward accumulation structure for PRT.
-7. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
+5. Add a support- or schedule-aware tile policy: early `tile_t=2`, later/eval `tile_t=1`.
+6. Profile the remaining inner loops of `projective_rational_tile_pixel_atomic_backward`: alpha replay and atomic accumulation.
+7. Test a lower-atomic or two-pass backward accumulation structure for PRT.
+8. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
