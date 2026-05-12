@@ -74,7 +74,13 @@ def _target_params(device: torch.device | str) -> dict[str, torch.Tensor]:
     return params
 
 
-def _loss(params: dict[str, torch.Tensor], target: torch.Tensor, config: UVTRenderConfig, forward_mode: str) -> torch.Tensor:
+def _loss(
+    params: dict[str, torch.Tensor],
+    target: torch.Tensor,
+    config: UVTRenderConfig,
+    forward_mode: str,
+    backward_mode: str,
+) -> torch.Tensor:
     image = render_projective_rational_tubes_metal_direct_serial_backward(
         params["h_coeff"],
         params["lambda_uv"],
@@ -84,6 +90,7 @@ def _loss(params: dict[str, torch.Tensor], target: torch.Tensor, config: UVTRend
         params["color"],
         config,
         forward_mode=forward_mode,
+        backward_mode=backward_mode,
     )
     return (image - target).square().mean()
 
@@ -94,7 +101,7 @@ def _norm(tensor: torch.Tensor | None) -> float:
     return float(torch.linalg.vector_norm(tensor.detach()).cpu())
 
 
-def run_smoke(*, steps: int, lr: float, forward_mode: str) -> dict[str, Any]:
+def run_smoke(*, steps: int, lr: float, forward_mode: str, backward_mode: str = "direct_serial") -> dict[str, Any]:
     if not torch.backends.mps.is_available():
         return {
             "name": "projective_rational_metal_autograd_smoke",
@@ -135,7 +142,7 @@ def run_smoke(*, steps: int, lr: float, forward_mode: str) -> dict[str, Any]:
     first_grad_norms: dict[str, float] | None = None
     for step in range(steps):
         optimizer.zero_grad(set_to_none=True)
-        loss = _loss(params, target, config, forward_mode)
+        loss = _loss(params, target, config, forward_mode, backward_mode)
         losses.append(float(loss.detach().cpu()))
         loss.backward()
         if step == 0:
@@ -143,17 +150,18 @@ def run_smoke(*, steps: int, lr: float, forward_mode: str) -> dict[str, Any]:
         optimizer.step()
 
     with torch.no_grad():
-        final_loss = float(_loss(params, target, config, forward_mode).detach().cpu())
+        final_loss = float(_loss(params, target, config, forward_mode, backward_mode).detach().cpu())
     losses.append(final_loss)
     grad_norms = {} if first_grad_norms is None else first_grad_norms
     finite_grads = all(math.isfinite(value) and value > 0.0 for value in grad_norms.values())
     loss_decreased = final_loss < losses[0]
     return {
         "name": "projective_rational_metal_autograd_smoke",
-        "note": "Tiled Metal PRT train-step smoke using direct-serial Metal PRT backward.",
+        "note": f"Metal PRT train-step smoke using {forward_mode} forward and {backward_mode} backward.",
         "metal_checked": True,
         "pass": bool(loss_decreased and finite_grads),
         "forward_mode": forward_mode,
+        "backward_mode": backward_mode,
         "steps": steps,
         "lr": lr,
         "tile_config_key": tile_config.key,
@@ -176,10 +184,11 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=4)
     parser.add_argument("--lr", type=float, default=0.1)
     parser.add_argument("--forward-mode", choices=("direct", "tiled"), default="tiled")
+    parser.add_argument("--backward-mode", choices=("direct_serial", "tile_pair_atomic"), default="direct_serial")
     parser.add_argument("--out-json", type=Path)
     args = parser.parse_args()
 
-    summary = run_smoke(steps=args.steps, lr=args.lr, forward_mode=args.forward_mode)
+    summary = run_smoke(steps=args.steps, lr=args.lr, forward_mode=args.forward_mode, backward_mode=args.backward_mode)
     if args.out_json is not None:
         args.out_json.parent.mkdir(parents=True, exist_ok=True)
         args.out_json.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")

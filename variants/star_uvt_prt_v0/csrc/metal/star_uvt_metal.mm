@@ -86,6 +86,7 @@ std::string load_shader_source() {
 struct MetalKernels {
   std::shared_ptr<MetalKernelFunction> clear_tiles;
   std::shared_ptr<MetalKernelFunction> clear_direct_gradients;
+  std::shared_ptr<MetalKernelFunction> clear_prt_gradients;
   std::shared_ptr<MetalKernelFunction> clear_direct_gradients_i32;
   std::shared_ptr<MetalKernelFunction> fixedpoint_gradients_to_float;
   std::shared_ptr<MetalKernelFunction> split_fixedpoint_gradients_to_float;
@@ -95,6 +96,7 @@ struct MetalKernels {
   std::shared_ptr<MetalKernelFunction> bin_projective_rational_tubes;
   std::shared_ptr<MetalKernelFunction> render_projective_rational_tiles;
   std::shared_ptr<MetalKernelFunction> projective_rational_direct_serial_backward;
+  std::shared_ptr<MetalKernelFunction> projective_rational_tile_pair_atomic_backward;
   std::shared_ptr<MetalKernelFunction> simple_backward_samples;
   std::shared_ptr<MetalKernelFunction> stable_backward_samples;
   std::shared_ptr<MetalKernelFunction> direct_atomic_backward;
@@ -126,6 +128,7 @@ MetalKernels& kernels() {
     lib = std::make_unique<DynamicMetalShaderLibrary>(load_shader_source());
     out.clear_tiles = lib->getKernelFunction("clear_tiles");
     out.clear_direct_gradients = lib->getKernelFunction("clear_direct_gradients");
+    out.clear_prt_gradients = lib->getKernelFunction("clear_prt_gradients");
     out.clear_direct_gradients_i32 = lib->getKernelFunction("clear_direct_gradients_i32");
     out.fixedpoint_gradients_to_float = lib->getKernelFunction("fixedpoint_gradients_to_float");
     out.split_fixedpoint_gradients_to_float = lib->getKernelFunction("split_fixedpoint_gradients_to_float");
@@ -136,6 +139,8 @@ MetalKernels& kernels() {
     out.render_projective_rational_tiles = lib->getKernelFunction("render_projective_rational_tiles");
     out.projective_rational_direct_serial_backward =
         lib->getKernelFunction("projective_rational_direct_serial_backward");
+    out.projective_rational_tile_pair_atomic_backward =
+        lib->getKernelFunction("projective_rational_tile_pair_atomic_backward");
     out.simple_backward_samples = lib->getKernelFunction("simple_backward_samples");
     out.stable_backward_samples = lib->getKernelFunction("stable_backward_samples");
     out.direct_atomic_backward = lib->getKernelFunction("direct_atomic_backward");
@@ -479,6 +484,119 @@ metal_projective_rational_direct_serial_backward(
   });
 
   return std::make_tuple(grad_h_coeff, grad_lambda_uv, grad_lambda_t, grad_center_t, grad_opacity, grad_color);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+metal_projective_rational_tile_pair_atomic_backward(
+    const torch::Tensor& h_coeff,
+    const torch::Tensor& lambda_uv,
+    const torch::Tensor& lambda_t,
+    const torch::Tensor& center_t,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32) {
+  check_float_mps_3d(h_coeff, "h_coeff", 3);
+  check_float_mps_2d(lambda_uv, "lambda_uv", 3);
+  check_float_mps_1d(lambda_t, "lambda_t");
+  check_float_mps_1d(center_t, "center_t");
+  check_float_mps_1d(opacity, "opacity");
+  check_float_mps_2d(color, "color", 3);
+  TORCH_CHECK(grad_image.device().is_mps(), "grad_image must be on MPS");
+  TORCH_CHECK(grad_image.scalar_type() == torch::kFloat32, "grad_image must be float32");
+  TORCH_CHECK(grad_image.dim() == 4 && grad_image.size(3) == 3, "grad_image must have shape [F,H,W,3]");
+  TORCH_CHECK(grad_image.is_contiguous(), "grad_image must be contiguous");
+  TORCH_CHECK(h_coeff.size(0) == lambda_uv.size(0) && h_coeff.size(0) == lambda_t.size(0) &&
+                  h_coeff.size(0) == center_t.size(0) && h_coeff.size(0) == opacity.size(0) &&
+                  h_coeff.size(0) == color.size(0),
+              "all PRT inputs must agree on N");
+
+  auto meta = parse_meta(meta_i32, meta_f32);
+  auto& sc = shader_config();
+  check_meta(meta, h_coeff.size(0), sc);
+  TORCH_CHECK(meta.reserved0 == h_coeff.size(1), "meta reserved0 must equal h_coeff term count");
+  TORCH_CHECK(meta.reserved0 > 0, "h_coeff term count must be positive");
+  TORCH_CHECK(meta.reserved0 <= 8, "tile-pair atomic PRT backward currently supports at most 8 h_coeff terms");
+  TORCH_CHECK(grad_image.size(0) == meta.frames && grad_image.size(1) == meta.height && grad_image.size(2) == meta.width,
+              "grad_image shape must match meta");
+  auto& k = kernels();
+
+  auto opts_f = h_coeff.options().dtype(torch::kFloat32);
+  auto opts_i32 = h_coeff.options().dtype(torch::kInt32);
+  auto tile_counts = torch::empty({meta.tile_count}, opts_i32);
+  auto tile_overflow = torch::empty({meta.tile_count}, opts_i32);
+  auto tile_unstable = torch::empty({meta.tile_count}, opts_i32);
+  auto tile_tube_ids = torch::empty({meta.tile_count * meta.tile_capacity}, opts_i32);
+  auto tile_depths = torch::empty({meta.tile_count * meta.tile_capacity}, opts_f);
+
+  launch(k.clear_tiles, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, tile_counts);
+    fn.setArg(1, tile_overflow);
+    fn.setArg(2, tile_unstable);
+    fn.setArg(3, meta_i32);
+    fn.dispatch((uint64_t)meta.tile_count, 256);
+  });
+
+  launch(k.bin_projective_rational_tubes, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, h_coeff);
+    fn.setArg(1, lambda_uv);
+    fn.setArg(2, lambda_t);
+    fn.setArg(3, center_t);
+    fn.setArg(4, opacity);
+    fn.setArg(5, meta_i32);
+    fn.setArg(6, meta_f32);
+    fn.setArg(7, tile_counts);
+    fn.setArg(8, tile_tube_ids);
+    fn.setArg(9, tile_depths);
+    fn.setArg(10, tile_overflow);
+    fn.dispatch((uint64_t)meta.tube_count, 256);
+  });
+
+  auto grad_h_coeff = torch::empty({meta.tube_count, meta.reserved0, 3}, opts_f);
+  auto grad_lambda_uv = torch::empty({meta.tube_count, 3}, opts_f);
+  auto grad_lambda_t = torch::empty({meta.tube_count}, opts_f);
+  auto grad_center_t = torch::empty({meta.tube_count}, opts_f);
+  auto grad_opacity = torch::empty({meta.tube_count}, opts_f);
+  auto grad_color = torch::empty({meta.tube_count, 3}, opts_f);
+
+  launch(k.clear_prt_gradients, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, grad_h_coeff);
+    fn.setArg(1, grad_lambda_uv);
+    fn.setArg(2, grad_lambda_t);
+    fn.setArg(3, grad_center_t);
+    fn.setArg(4, grad_opacity);
+    fn.setArg(5, grad_color);
+    fn.setArg(6, meta_i32);
+    fn.dispatch((uint64_t)meta.tube_count, 256);
+  });
+
+  int64_t entry_count = (int64_t)meta.tile_count * (int64_t)meta.tile_capacity;
+  launch(k.projective_rational_tile_pair_atomic_backward, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, h_coeff);
+    fn.setArg(1, lambda_uv);
+    fn.setArg(2, lambda_t);
+    fn.setArg(3, center_t);
+    fn.setArg(4, opacity);
+    fn.setArg(5, color);
+    fn.setArg(6, grad_image);
+    fn.setArg(7, meta_i32);
+    fn.setArg(8, meta_f32);
+    fn.setArg(9, tile_counts);
+    fn.setArg(10, tile_tube_ids);
+    fn.setArg(11, tile_depths);
+    fn.setArg(12, tile_unstable);
+    fn.setArg(13, grad_h_coeff);
+    fn.setArg(14, grad_lambda_uv);
+    fn.setArg(15, grad_lambda_t);
+    fn.setArg(16, grad_center_t);
+    fn.setArg(17, grad_opacity);
+    fn.setArg(18, grad_color);
+    fn.dispatch((uint64_t)entry_count, 256);
+  });
+
+  return std::make_tuple(
+      grad_h_coeff, grad_lambda_uv, grad_lambda_t, grad_center_t, grad_opacity, grad_color, tile_unstable);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_simple_backward_samples(

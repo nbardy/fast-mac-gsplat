@@ -9,14 +9,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from research_project.trainer_harness.projective_rational_metal_autograd_smoke import run_smoke  # noqa: E402
+from research_project.benchmarks.projective_rational_tile_pair_atomic_backward_check import run_check  # noqa: E402
 
 
 def main() -> None:
-    summary = run_smoke(steps=4, lr=0.1, forward_mode="tiled", backward_mode="tile_pair_atomic")
+    summary = run_check(abs_tol=5.0e-4, rel_tol=5.0e-2)
     print(json.dumps(summary, indent=2, sort_keys=True))
     if not summary["pass"]:
-        raise AssertionError("projective rational Metal autograd smoke failed")
+        raise AssertionError("projective rational tile-pair atomic backward check failed")
 
 
 if __name__ == "__main__":

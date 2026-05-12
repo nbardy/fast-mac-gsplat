@@ -450,6 +450,50 @@ def projective_rational_direct_serial_backward(
     return result
 
 
+def projective_rational_tile_pair_atomic_backward(
+    h_coeff: Tensor,
+    lambda_uv: Tensor,
+    lambda_t: Tensor,
+    center_t: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    _runtime_validate(config)
+    h_coeff = h_coeff.contiguous()
+    lambda_uv = lambda_uv.contiguous()
+    lambda_t = lambda_t.contiguous()
+    center_t = center_t.contiguous()
+    opacity = opacity.contiguous()
+    color = color.contiguous()
+    grad_image = grad_image.contiguous()
+    _check_prt_inputs(h_coeff, lambda_uv, lambda_t, center_t, opacity, color, require_mps=True)
+    if h_coeff.shape[1] > 8:
+        raise ValueError("tile-pair atomic PRT backward currently supports at most 8 h_coeff terms")
+    if grad_image.shape != (config.frames, config.height, config.width, 3):
+        raise ValueError("grad_image must have shape [frames,height,width,3]")
+    if grad_image.dtype != torch.float32 or grad_image.device != h_coeff.device:
+        raise ValueError("grad_image must be float32 and on the same device as h_coeff")
+    if not hasattr(torch.ops, "star_uvt_prt_v0"):
+        raise RuntimeError("star_uvt_prt_v0 custom ops not found. Build the extension first.")
+    meta_i32, meta_f32 = _make_meta(config, h_coeff.device, h_coeff.shape[0], reserved0=h_coeff.shape[1])
+    result = torch.ops.star_uvt_prt_v0.projective_rational_tile_pair_atomic_backward(
+        h_coeff,
+        lambda_uv,
+        lambda_t,
+        center_t,
+        opacity,
+        color,
+        grad_image,
+        meta_i32,
+        meta_f32,
+    )
+    if h_coeff.device.type == "mps":
+        torch.mps.synchronize()
+    return result
+
+
 def _support_tau(opacity_value: float, config: UVTRenderConfig) -> float | None:
     if opacity_value <= config.alpha_threshold:
         return None

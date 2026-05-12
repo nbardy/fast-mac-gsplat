@@ -15,12 +15,14 @@ if str(ROOT) not in sys.path:
 from torch_gsplat_bridge_star_uvt_prt import (  # noqa: E402
     UVTRenderConfig,
     projective_rational_direct_serial_backward,
+    projective_rational_tile_pair_atomic_backward,
     render_projective_rational_tubes_direct,
     render_projective_rational_tubes_tiled,
 )
 
 
 ForwardMode = Literal["direct", "tiled"]
+BackwardMode = Literal["direct_serial", "tile_pair_atomic"]
 
 
 def _render_forward(
@@ -68,9 +70,11 @@ class _ProjectiveRationalDirectSerialBackward(torch.autograd.Function):
         color: Tensor,
         config: UVTRenderConfig,
         forward_mode: ForwardMode,
+        backward_mode: BackwardMode,
     ) -> Tensor:
         ctx.config = config
         ctx.forward_mode = forward_mode
+        ctx.backward_mode = backward_mode
         ctx.save_for_backward(h_coeff, lambda_uv, lambda_t, center_t, opacity, color)
         return _render_forward(
             h_coeff,
@@ -86,7 +90,11 @@ class _ProjectiveRationalDirectSerialBackward(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: Tensor) -> tuple[Tensor | None, ...]:
         h_coeff, lambda_uv, lambda_t, center_t, opacity, color = ctx.saved_tensors
-        grads = projective_rational_direct_serial_backward(
+        backward_fn = {
+            "direct_serial": projective_rational_direct_serial_backward,
+            "tile_pair_atomic": projective_rational_tile_pair_atomic_backward,
+        }[ctx.backward_mode]
+        result = backward_fn(
             h_coeff.detach(),
             lambda_uv.detach(),
             lambda_t.detach(),
@@ -96,7 +104,8 @@ class _ProjectiveRationalDirectSerialBackward(torch.autograd.Function):
             grad_output.contiguous(),
             ctx.config,
         )
-        return (*grads, None, None)
+        grads = result[:6]
+        return (*grads, None, None, None)
 
 
 def render_projective_rational_tubes_metal_direct_serial_backward(
@@ -109,8 +118,9 @@ def render_projective_rational_tubes_metal_direct_serial_backward(
     config: UVTRenderConfig,
     *,
     forward_mode: ForwardMode = "tiled",
+    backward_mode: BackwardMode = "direct_serial",
 ) -> Tensor:
-    """Use Metal PRT forward with the direct-serial Metal backward reference."""
+    """Use Metal PRT forward with an explicit Metal backward mode."""
 
     return _ProjectiveRationalDirectSerialBackward.apply(
         h_coeff,
@@ -121,4 +131,5 @@ def render_projective_rational_tubes_metal_direct_serial_backward(
         color,
         config,
         forward_mode,
+        backward_mode,
     )

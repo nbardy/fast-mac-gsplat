@@ -979,6 +979,35 @@ inline uint select_prt_sample_order_id(
   return best_id;
 }
 
+inline uint select_prt_sample_order_id_thread(
+    thread uint* ids,
+    uint count,
+    const device float* h_coeff,
+    const device float* center_t,
+    uint h_terms,
+    float t,
+    float last_depth,
+    uint last_id,
+    constant MetaF32& mf,
+    thread float& out_depth) {
+  uint best_id = 0xFFFFFFFFu;
+  float best_depth = INFINITY;
+  for (uint i = 0u; i < count; ++i) {
+    uint tube_id = ids[i];
+    float tau = t - center_t[tube_id];
+    float3 h = eval_prt_h(h_coeff, tube_id, h_terms, tau);
+    float d = max(h.z, mf.eps);
+    bool after_last = (last_id == 0xFFFFFFFFu) || (d > last_depth) || (d == last_depth && tube_id > last_id);
+    bool better = (d < best_depth) || (d == best_depth && tube_id < best_id);
+    if (after_last && better) {
+      best_depth = d;
+      best_id = tube_id;
+    }
+  }
+  out_depth = best_depth;
+  return best_id;
+}
+
 inline uint select_prt_direct_order_id(
     const device float* h_coeff,
     const device float* lambda_uv,
@@ -1091,6 +1120,36 @@ kernel void clear_direct_gradients(
   grad_q[q_base + 3u] = 0.0f;
   grad_q[q_base + 4u] = 0.0f;
   grad_q[q_base + 5u] = 0.0f;
+  grad_opacity[tube_id] = 0.0f;
+  uint color_base = tube_id * 3u;
+  grad_color[color_base + 0u] = 0.0f;
+  grad_color[color_base + 1u] = 0.0f;
+  grad_color[color_base + 2u] = 0.0f;
+}
+
+kernel void clear_prt_gradients(
+    device float* grad_h_coeff [[buffer(0)]],
+    device float* grad_lambda_uv [[buffer(1)]],
+    device float* grad_lambda_t [[buffer(2)]],
+    device float* grad_center_t [[buffer(3)]],
+    device float* grad_opacity [[buffer(4)]],
+    device float* grad_color [[buffer(5)]],
+    constant MetaI32& mi [[buffer(6)]],
+    uint tube_id [[thread_position_in_grid]]) {
+  if (tube_id >= uint(mi.tube_count)) return;
+  uint h_terms = uint(mi.reserved0);
+  for (uint p = 0u; p < h_terms; ++p) {
+    uint h_base = (tube_id * h_terms + p) * 3u;
+    grad_h_coeff[h_base + 0u] = 0.0f;
+    grad_h_coeff[h_base + 1u] = 0.0f;
+    grad_h_coeff[h_base + 2u] = 0.0f;
+  }
+  uint q_base = tube_id * 3u;
+  grad_lambda_uv[q_base + 0u] = 0.0f;
+  grad_lambda_uv[q_base + 1u] = 0.0f;
+  grad_lambda_uv[q_base + 2u] = 0.0f;
+  grad_lambda_t[tube_id] = 0.0f;
+  grad_center_t[tube_id] = 0.0f;
   grad_opacity[tube_id] = 0.0f;
   uint color_base = tube_id * 3u;
   grad_color[color_base + 0u] = 0.0f;
@@ -1789,6 +1848,219 @@ kernel void projective_rational_direct_serial_backward(
   grad_color[c_base + 0u] = color_sum.x;
   grad_color[c_base + 1u] = color_sum.y;
   grad_color[c_base + 2u] = color_sum.z;
+}
+
+kernel void projective_rational_tile_pair_atomic_backward(
+    const device float* h_coeff [[buffer(0)]],
+    const device float* lambda_uv [[buffer(1)]],
+    const device float* lambda_t [[buffer(2)]],
+    const device float* center_t [[buffer(3)]],
+    const device float* opacity [[buffer(4)]],
+    const device float* color [[buffer(5)]],
+    const device float* grad_image [[buffer(6)]],
+    constant MetaI32& mi [[buffer(7)]],
+    constant MetaF32& mf [[buffer(8)]],
+    const device atomic_uint* tile_counts [[buffer(9)]],
+    const device uint* tile_tube_ids [[buffer(10)]],
+    const device float* tile_depths [[buffer(11)]],
+    device atomic_uint* tile_unstable [[buffer(12)]],
+    device atomic_float* grad_h_coeff [[buffer(13)]],
+    device atomic_float* grad_lambda_uv [[buffer(14)]],
+    device atomic_float* grad_lambda_t [[buffer(15)]],
+    device atomic_float* grad_center_t [[buffer(16)]],
+    device atomic_float* grad_opacity [[buffer(17)]],
+    device atomic_float* grad_color [[buffer(18)]],
+    uint gid [[thread_position_in_grid]]) {
+  uint tile_id = gid / STAR_TILE_CAPACITY;
+  uint slot = gid - tile_id * STAR_TILE_CAPACITY;
+  if (tile_id >= uint(mi.tile_count)) return;
+  uint h_terms = uint(mi.reserved0);
+
+  uint raw_count = atomic_load_explicit(tile_counts + tile_id, memory_order_relaxed);
+  uint count = min(raw_count, STAR_TILE_CAPACITY);
+  if (slot >= count) return;
+
+  uint tx, ty, tz;
+  decode_tile(tile_id, mi, tx, ty, tz);
+
+  uint local_ids[STAR_TILE_CAPACITY];
+  float local_depths[STAR_TILE_CAPACITY];
+  for (uint i = 0u; i < count; ++i) {
+    uint idx = tile_id * STAR_TILE_CAPACITY + i;
+    local_ids[i] = tile_tube_ids[idx];
+    local_depths[i] = tile_depths[idx];
+  }
+  sort_by_depth_thread(local_ids, local_depths, count);
+  uint target_id = local_ids[slot];
+  if (slot == 0u && count > 1u) {
+    atomic_store_explicit(tile_unstable + tile_id, 1u, memory_order_relaxed);
+  }
+
+  float3 h_coeff_sum[8];
+  for (uint p = 0u; p < 8u; ++p) {
+    h_coeff_sum[p] = float3(0.0f);
+  }
+  float3 lambda_uv_sum = float3(0.0f);
+  float lambda_t_sum = 0.0f;
+  float center_t_sum = 0.0f;
+  float opacity_sum = 0.0f;
+  float3 color_sum = float3(0.0f);
+
+  uint ordered_ids[STAR_TILE_CAPACITY];
+  float t_before[STAR_TILE_CAPACITY];
+  float alpha_values[STAR_TILE_CAPACITY];
+  bool processed[STAR_TILE_CAPACITY];
+  bool differentiable_alpha[STAR_TILE_CAPACITY];
+
+  for (uint lt = 0u; lt < STAR_TILE_T; ++lt) {
+    uint f = tz * STAR_TILE_T + lt;
+    if (f >= uint(mi.frames)) continue;
+    float t = frame_time(f, mi);
+    for (uint ly = 0u; ly < STAR_TILE_Y; ++ly) {
+      uint y = ty * STAR_TILE_Y + ly;
+      if (y >= uint(mi.height)) continue;
+      for (uint lx = 0u; lx < STAR_TILE_X; ++lx) {
+        uint x = tx * STAR_TILE_X + lx;
+        if (x >= uint(mi.width)) continue;
+        float2 pixel = float2(float(x) + 0.5f, float(y) + 0.5f);
+
+        uint ordered_count = 0u;
+        float last_depth = -INFINITY;
+        uint last_id = 0xFFFFFFFFu;
+        for (uint rank = 0u; rank < count; ++rank) {
+          float selected_depth;
+          uint tube_id = select_prt_sample_order_id_thread(
+              local_ids,
+              count,
+              h_coeff,
+              center_t,
+              h_terms,
+              t,
+              last_depth,
+              last_id,
+              mf,
+              selected_depth);
+          if (tube_id == 0xFFFFFFFFu) break;
+          ordered_ids[ordered_count] = tube_id;
+          ordered_count += 1u;
+          last_depth = selected_depth;
+          last_id = tube_id;
+        }
+
+        for (uint i = 0u; i < ordered_count; ++i) {
+          t_before[i] = 0.0f;
+          alpha_values[i] = 0.0f;
+          processed[i] = false;
+          differentiable_alpha[i] = false;
+        }
+
+        float T = 1.0f;
+        for (uint i = 0u; i < ordered_count; ++i) {
+          uint tube_id = ordered_ids[i];
+          float tau = t - center_t[tube_id];
+          float3 h = eval_prt_h(h_coeff, tube_id, h_terms, tau);
+          float depth = max(h.z, mf.eps);
+          float2 center = h.xy / depth;
+          float2 d = pixel - center;
+          uint qbase = tube_id * 3u;
+          float spatial = lambda_uv[qbase + 0u] * d.x * d.x +
+                          2.0f * lambda_uv[qbase + 1u] * d.x * d.y +
+                          lambda_uv[qbase + 2u] * d.y * d.y;
+          float temporal = lambda_t[tube_id] * tau * tau;
+          float qv = spatial + temporal;
+          if (!isfinite(qv)) continue;
+          float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+          float alpha = min(mf.max_alpha, alpha_raw);
+          if (!(alpha >= mf.alpha_threshold)) continue;
+          t_before[i] = T;
+          alpha_values[i] = alpha;
+          processed[i] = true;
+          differentiable_alpha[i] = alpha_raw < mf.max_alpha;
+          T *= (1.0f - alpha);
+          if (T <= mf.transmittance_threshold) break;
+        }
+
+        uint image_base = ((f * uint(mi.height) + y) * uint(mi.width) + x) * 3u;
+        float3 grad_rgb = float3(grad_image[image_base + 0u], grad_image[image_base + 1u], grad_image[image_base + 2u]);
+        float dT_next = dot(grad_rgb, float3(mf.bg_r, mf.bg_g, mf.bg_b));
+        for (int si = int(ordered_count) - 1; si >= 0; --si) {
+          uint i = uint(si);
+          if (!processed[i]) continue;
+          uint tube_id = ordered_ids[i];
+          float alpha = alpha_values[i];
+          float t_i = t_before[i];
+          float3 c = load3(color, tube_id);
+          float d_alpha = dot(grad_rgb, t_i * c) - dT_next * t_i;
+          float3 d_color = grad_rgb * (t_i * alpha);
+          float dT_i = dot(grad_rgb, alpha * c) + dT_next * (1.0f - alpha);
+          dT_next = dT_i;
+          if (tube_id != target_id) continue;
+
+          color_sum += d_color;
+          if (differentiable_alpha[i]) {
+            float tau = t - center_t[target_id];
+            float3 h = eval_prt_h(h_coeff, target_id, h_terms, tau);
+            float depth = max(h.z, mf.eps);
+            float inv_depth = 1.0f / depth;
+            float2 center = h.xy * inv_depth;
+            float2 d = pixel - center;
+            uint qbase = target_id * 3u;
+            float luu = lambda_uv[qbase + 0u];
+            float luv = lambda_uv[qbase + 1u];
+            float lvv = lambda_uv[qbase + 2u];
+            float spatial = luu * d.x * d.x + 2.0f * luv * d.x * d.y + lvv * d.y * d.y;
+            float temporal = lambda_t[target_id] * tau * tau;
+            float qv = spatial + temporal;
+            float exp_term = exp(-0.5f * qv);
+            float grad_qv = -0.5f * alpha * d_alpha;
+            float2 qd = float2(luu * d.x + luv * d.y, luv * d.x + lvv * d.y);
+            float2 grad_center = -2.0f * grad_qv * qd;
+            float3 grad_h = float3(
+                grad_center.x * inv_depth,
+                grad_center.y * inv_depth,
+                h.z > mf.eps ? -(grad_center.x * h.x + grad_center.y * h.y) * inv_depth * inv_depth : 0.0f);
+
+            float power = 1.0f;
+            for (uint p = 0u; p < h_terms && p < 8u; ++p) {
+              h_coeff_sum[p] += grad_h * power;
+              power *= tau;
+            }
+            float3 dh_dtau = eval_prt_h_dtau(h_coeff, target_id, h_terms, tau);
+            float grad_tau = dot(grad_h, dh_dtau) + grad_qv * 2.0f * lambda_t[target_id] * tau;
+            center_t_sum += -grad_tau;
+            lambda_t_sum += grad_qv * tau * tau;
+            lambda_uv_sum += float3(grad_qv * d.x * d.x, grad_qv * 2.0f * d.x * d.y, grad_qv * d.y * d.y);
+            opacity_sum += d_alpha * exp_term;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  bool has_gradient =
+      lambda_uv_sum.x != 0.0f || lambda_uv_sum.y != 0.0f || lambda_uv_sum.z != 0.0f ||
+      lambda_t_sum != 0.0f || center_t_sum != 0.0f || opacity_sum != 0.0f ||
+      color_sum.x != 0.0f || color_sum.y != 0.0f || color_sum.z != 0.0f;
+  for (uint p = 0u; p < h_terms && p < 8u; ++p) {
+    has_gradient = has_gradient ||
+        h_coeff_sum[p].x != 0.0f || h_coeff_sum[p].y != 0.0f || h_coeff_sum[p].z != 0.0f;
+  }
+  if (!has_gradient) return;
+
+  for (uint p = 0u; p < h_terms && p < 8u; ++p) {
+    uint h_base = (target_id * h_terms + p) * 3u;
+    atomic_add3(grad_h_coeff, h_base, h_coeff_sum[p]);
+  }
+  uint q_base = target_id * 3u;
+  atomic_fetch_add_explicit(&grad_lambda_uv[q_base + 0u], lambda_uv_sum.x, memory_order_relaxed);
+  atomic_fetch_add_explicit(&grad_lambda_uv[q_base + 1u], lambda_uv_sum.y, memory_order_relaxed);
+  atomic_fetch_add_explicit(&grad_lambda_uv[q_base + 2u], lambda_uv_sum.z, memory_order_relaxed);
+  atomic_fetch_add_explicit(&grad_lambda_t[target_id], lambda_t_sum, memory_order_relaxed);
+  atomic_fetch_add_explicit(&grad_center_t[target_id], center_t_sum, memory_order_relaxed);
+  atomic_fetch_add_explicit(&grad_opacity[target_id], opacity_sum, memory_order_relaxed);
+  uint color_base = target_id * 3u;
+  atomic_add3(grad_color, color_base, color_sum);
 }
 
 kernel void simple_backward_samples(

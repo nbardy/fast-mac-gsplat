@@ -105,6 +105,18 @@ metal_projective_rational_direct_serial_backward(
     const torch::Tensor& meta_i32,
     const torch::Tensor& meta_f32);
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+metal_projective_rational_tile_pair_atomic_backward(
+    const torch::Tensor& h_coeff,
+    const torch::Tensor& lambda_uv,
+    const torch::Tensor& lambda_t,
+    const torch::Tensor& center_t,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_simple_backward_samples(
     const torch::Tensor& ma,
     const torch::Tensor& q_uvt,

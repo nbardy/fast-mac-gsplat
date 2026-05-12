@@ -24,7 +24,8 @@ Last updated: 2026-05-13
 - [x] Gate C0: CPU PRT autograd-vs-finite-difference gradient reference.
 - [x] Gate C1: direct-serial Metal PRT backward parity against C0.
 - [x] Gate C1b: tiled-forward PRT autograd train-step smoke using direct-serial backward.
-- [ ] Gate C2: tiled/sample-level PRT backward path suitable for training.
+- [x] Gate C2: tiled tile-pair atomic PRT backward parity and train-step smoke.
+- [ ] Gate C3: non-tiny PRT train-step timing and deterministic-gradient check.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
 
@@ -274,10 +275,32 @@ initial_loss: 0.0008642825414426625
 final_loss: 0.0008352987351827323
 ```
 
-This uses tiled Metal PRT forward and direct-serial Metal PRT backward. It proves
-the PRT parameters can flow through a real optimizer step with finite gradients,
-but it is still not the fast train path: backward remains the direct-serial
-reference kernel.
+This originally used tiled Metal PRT forward and direct-serial Metal PRT
+backward. Gate C2 replaces that smoke with the tiled tile-pair atomic backward.
+
+Gate C2 adds the first tiled PRT backward kernel:
+
+```text
+python3 research_project/benchmarks/projective_rational_tile_pair_atomic_backward_check.py --out-json research_project/benchmarks/results/projective_rational_tile_pair_atomic_backward_check.json
+pass: true
+max abs error: 5.4016709327697754e-08
+max rel error: 4.970375357515877e-06
+tile_unstable_count: 2
+```
+
+The autograd train-step smoke now runs `forward_mode=tiled` and
+`backward_mode=tile_pair_atomic`:
+
+```text
+python3 research_project/trainer_harness/projective_rational_metal_autograd_smoke.py --backward-mode tile_pair_atomic --out-json research_project/benchmarks/results/projective_rational_metal_autograd_smoke.json
+pass: true
+initial_loss: 0.0008642825414426625
+final_loss: 0.0008352987351827323
+```
+
+Read: PRT now has a tiled backward path wired through autograd. It is still an
+atomic tile-pair path and only checked on the tiny smoke, so the next gate is
+non-tiny train-step timing and repeatability, not more direct-serial parity.
 
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
@@ -291,8 +314,8 @@ should be measured before splitting a camera window.
 
 ## Next Gates
 
-1. Move PRT backward from direct-serial parity into the tiled/sample-level training path.
-2. Add a non-tiny train-step timing probe once tiled/sample-level PRT backward exists.
+1. Add a non-tiny PRT train-step timing probe using `backward_mode=tile_pair_atomic`.
+2. Add a deterministic-gradient/repeatability check for tiled atomic PRT backward.
 3. Add tile-load scaling scenes that stress moving-camera curvature.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
