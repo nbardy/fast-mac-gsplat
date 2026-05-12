@@ -1,0 +1,227 @@
+{
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "camera_poly_degree": 1,
+    "device": "mps",
+    "frames": 2,
+    "height": 32,
+    "heldout_camera_fit_errors": [
+      0.0
+    ],
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "max_frames": 2,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "render_repeats": 1,
+    "render_warmups": 0,
+    "sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+    "seed": 31,
+    "steps": 1,
+    "target_size": 32,
+    "train_camera_fit_errors": [
+      0.0,
+      0.0
+    ],
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "width": 32
+  },
+  "name": "projective_rational_multicam_train_breakdown",
+  "note": "Diagnostic sync-boundary PRT train-step breakdown on the real D2 multicam bundle. Timing rows are slower than normal training because each segment synchronizes.",
+  "pass": true,
+  "projective_rational": {
+    "eval": {
+      "cache_compiled": true,
+      "compile_seconds": {
+        "max_s": 0.0025725830055307597,
+        "median_s": 0.0019490419945213944,
+        "min_s": 0.0017762500065146014,
+        "samples_s": [
+          0.0025725830055307597,
+          0.0017762500065146014,
+          0.0019490419945213944
+        ]
+      },
+      "heldout_render_seconds": {
+        "max_s": 0.0027750829904107377,
+        "median_s": 0.0027750829904107377,
+        "min_s": 0.0027750829904107377,
+        "samples_s": [
+          0.0027750829904107377
+        ]
+      },
+      "max_tile_count": 16,
+      "metrics": {
+        "heldout_l1": 0.3239753246307373,
+        "heldout_mse": 0.13988187909126282,
+        "heldout_psnr": 8.542385422658166,
+        "l1": 0.32713136076927185,
+        "mse": 0.1410617083311081,
+        "psnr": 8.506867352681471
+      },
+      "overflow_tile_count": 0,
+      "train_render_seconds": {
+        "max_s": 0.0024880419950932264,
+        "median_s": 0.0020264170016162097,
+        "min_s": 0.001564792008139193,
+        "samples_s": [
+          0.0024880419950932264,
+          0.001564792008139193
+        ]
+      }
+    },
+    "init_depth": 0.5,
+    "init_lambda_t": 0.25,
+    "init_opacity": 0.35,
+    "init_precision_xy": 36.0,
+    "loss_mode": "sampled_frame",
+    "lr": 0.02,
+    "parameter_count": 176,
+    "tile_config": {
+      "tile_capacity": 128,
+      "tile_t": 2,
+      "tile_x": 8,
+      "tile_y": 8
+    },
+    "tile_config_key": "8x8x2:128",
+    "train": {
+      "diagnostic_sync_boundaries": true,
+      "final_loss": 0.13740544021129608,
+      "initial_loss": 0.16378700733184814,
+      "loss_mode": "sampled_frame",
+      "losses": [
+        {
+          "frame": 1,
+          "loss": 0.16378700733184814,
+          "step": 0,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.13740544021129608,
+          "step": 1,
+          "view": 1
+        }
+      ],
+      "sampled_loss_decreased": true,
+      "steps": 1,
+      "timing_rows": [
+        {
+          "backward_s": 0.0403610409994144,
+          "compile_s": 0.023984250001376495,
+          "forward_s": 0.010568166995653883,
+          "frame": 1,
+          "loss_s": 0.004863167006988078,
+          "optimizer_s": 0.01525487499020528,
+          "sample_s": 0.010658667000825517,
+          "step": 0,
+          "step_total_s": 0.10617945800186135,
+          "view": 0,
+          "zero_grad_s": 0.00042716600000858307
+        },
+        {
+          "backward_s": 0.0,
+          "compile_s": 0.0025941670028259978,
+          "forward_s": 0.0023159169941209257,
+          "frame": 1,
+          "loss_s": 0.0005912499909754843,
+          "optimizer_s": 0.0,
+          "sample_s": 0.0016707080067135394,
+          "step": 1,
+          "step_total_s": 0.007334624999202788,
+          "view": 1,
+          "zero_grad_s": 7.850000110920519e-05
+        }
+      ],
+      "timing_summary_s": {
+        "backward_s": {
+          "max_s": 0.0403610409994144,
+          "median_s": 0.0201805204997072,
+          "min_s": 0.0,
+          "samples_s": [
+            0.0403610409994144,
+            0.0
+          ]
+        },
+        "compile_s": {
+          "max_s": 0.023984250001376495,
+          "median_s": 0.013289208502101246,
+          "min_s": 0.0025941670028259978,
+          "samples_s": [
+            0.023984250001376495,
+            0.0025941670028259978
+          ]
+        },
+        "forward_s": {
+          "max_s": 0.010568166995653883,
+          "median_s": 0.006442041994887404,
+          "min_s": 0.0023159169941209257,
+          "samples_s": [
+            0.010568166995653883,
+            0.0023159169941209257
+          ]
+        },
+        "loss_s": {
+          "max_s": 0.004863167006988078,
+          "median_s": 0.0027272084989817813,
+          "min_s": 0.0005912499909754843,
+          "samples_s": [
+            0.004863167006988078,
+            0.0005912499909754843
+          ]
+        },
+        "median_share_of_step": {
+          "backward_s": 0.35555976784868215,
+          "compile_s": 0.23414202274755047,
+          "forward_s": 0.1135020752416599,
+          "loss_s": 0.04805057534502067,
+          "optimizer_s": 0.13438751022692288,
+          "sample_s": 0.10861537777143894,
+          "step_total_s": 1.0,
+          "zero_grad_s": 0.0044546543278955785
+        },
+        "optimizer_s": {
+          "max_s": 0.01525487499020528,
+          "median_s": 0.00762743749510264,
+          "min_s": 0.0,
+          "samples_s": [
+            0.01525487499020528,
+            0.0
+          ]
+        },
+        "sample_s": {
+          "max_s": 0.010658667000825517,
+          "median_s": 0.006164687503769528,
+          "min_s": 0.0016707080067135394,
+          "samples_s": [
+            0.010658667000825517,
+            0.0016707080067135394
+          ]
+        },
+        "step_total_s": {
+          "max_s": 0.10617945800186135,
+          "median_s": 0.05675704150053207,
+          "min_s": 0.007334624999202788,
+          "samples_s": [
+            0.10617945800186135,
+            0.007334624999202788
+          ]
+        },
+        "zero_grad_s": {
+          "max_s": 0.00042716600000858307,
+          "median_s": 0.00025283300055889413,
+          "min_s": 7.850000110920519e-05,
+          "samples_s": [
+            0.00042716600000858307,
+            7.850000110920519e-05
+          ]
+        }
+      },
+      "train_loop_elapsed_s": 0.11473570800444577
+    },
+    "tube_count": 16
+  }
+}

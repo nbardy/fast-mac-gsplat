@@ -43,6 +43,7 @@ Last updated: 2026-05-13
 - [x] Gate D2d: PRT forward phase profile separates camera-compiler cost from Metal raster cost.
 - [x] Gate D2e: cached-compiled PRT eval timing in the direct-splat compare harness.
 - [x] Gate D2f: analytic 2x2 compiler inverse removes the tiny-matrix `torch.linalg.inv` bottleneck.
+- [x] Gate D2g: real-multicam PRT train-step breakdown after compiler inverse fix.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -883,6 +884,34 @@ heldout PSNR in the D2 rows. The next speed question moves back to training:
 whether compile can be reused or simplified inside repeated train steps, and
 whether backward phase timing shows another tiny-kernel bottleneck.
 
+Gate D2g adds `projective_rational_multicam_train_breakdown.py`, a diagnostic
+sync-boundary train-step profiler for the same real multicam D2 PRT path. It
+times sampling, zero-grad, PRT compile, tiled forward, loss, backward, optimizer,
+and full step wall time. These rows are diagnostic because each segment
+synchronizes; they are not a replacement for the normal unsplit train wall.
+
+Commands:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_train_breakdown.py --target-size 32 --max-frames 2 --steps 1 --prt-tubes 16 --init-depth 0.5 --render-warmups 0 --render-repeats 1 --out-json research_project/benchmarks/results/projective_rational_multicam_train_breakdown_32_2f_16t_1step_smoke.json
+python3 research_project/benchmarks/projective_rational_multicam_train_breakdown.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --init-depth 0.5 --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_multicam_train_breakdown_64_4f_128t_20step_depth0p5.json
+python3 research_project/benchmarks/projective_rational_multicam_train_breakdown.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 128 --init-depth 0.5 --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_multicam_train_breakdown_64_4f_128t_72step_depth0p5.json
+python3 research_project/benchmarks/projective_rational_multicam_train_breakdown.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 128 --init-depth 0.5 --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_multicam_train_breakdown_64_4f_128t_200step_depth0p5.json
+```
+
+Result:
+
+```text
+20-step median diagnostic step: total 21.768 ms, backward 12.659 ms (58.2%), forward 5.229 ms (24.0%), compile 1.753 ms (8.1%); eval PSNR 14.9276/14.3763 dB, cached render 4.886/4.634 ms.
+72-step median diagnostic step: total 32.353 ms, backward 18.298 ms (56.6%), forward 7.041 ms (21.8%), compile 3.839 ms (11.9%); eval PSNR 16.1156/14.1326 dB, cached render 11.608/12.147 ms.
+200-step median diagnostic step: total 25.792 ms, backward 14.561 ms (56.5%), forward 6.122 ms (23.7%), compile 2.532 ms (9.8%); eval PSNR 16.2801/13.4639 dB, cached render 6.107/6.682 ms.
+```
+
+Read: after D2f, compiler cost is no longer the train-step bottleneck. The real
+D2 PRT training path is now dominated by backward, then forward rasterization.
+The next speed pass should profile or split `projective_rational_tile_pixel_atomic_backward`
+instead of further optimizing the camera compiler.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -903,5 +932,5 @@ should be measured before splitting a camera window.
 2. Add tile-load scaling scenes that stress moving-camera curvature beyond the synthetic `camera_motion_scale` knob.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
-5. Add backward phase timing for PRT training.
+5. Add internal phase timing for `projective_rational_tile_pixel_atomic_backward`.
 6. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
