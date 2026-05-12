@@ -36,6 +36,7 @@ Last updated: 2026-05-13
 - [x] Gate C5c: 128px fuller-res single-video overfit slice.
 - [x] Gate D0: synthetic world-camera forward probe against exact per-frame projection.
 - [x] Gate D1: synthetic world-camera train/holdout compare against dense per-frame projection.
+- [x] Gate D1b: 128px synthetic world-camera train/holdout scaling row.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -655,6 +656,27 @@ PRT camera compiler and evaluate train plus holdout camera sequences. Quality
 matches the exact dense per-frame projection baseline within run noise while
 training and rendering materially faster in these synthetic rows. This is still
 not a full 3DGS/direct-splat comparison and not a real-video heldout result.
+
+Gate D1b repeats the world-camera train/holdout comparison at 128px for the
+128-tube case, with both the conservative auto tile config and an explicit
+`8x8x2:128` row:
+
+```text
+python3 research_project/benchmarks/projective_rational_world_camera_train_compare.py --height 128 --width 128 --tube-count 128 --steps 20 --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_world_camera_train_compare_128_4f_128t_20step_auto.json
+python3 research_project/benchmarks/projective_rational_world_camera_train_compare.py --height 128 --width 128 --tube-count 128 --steps 20 --tile-config 8x8x2:128 --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_world_camera_train_compare_128_4f_128t_20step_8x8x2_cap128.json
+```
+
+Result:
+
+```text
+128px/128 tubes, auto 4x4x2:512: PRT train/holdout PSNR 40.6525/40.5855 dB, train wall 1345 ms, render 32.8/27.6 ms, max tile count 54, overflow 0; dense 40.6488/40.5832 dB, train wall 5578 ms, render 71.4/70.1 ms
+128px/128 tubes, 8x8x2:128: PRT train/holdout PSNR 40.6494/40.5794 dB, train wall 1521 ms, render 32.5/27.6 ms, max tile count 69, overflow 0; dense 40.6488/40.5832 dB, train wall 5457 ms, render 72.0/71.7 ms
+```
+
+Read: the synthetic heldout-camera speed/quality result survives the 128px
+scale-up. Auto `4x4x2:512` is slightly faster on train wall here, so there is no
+selector change from this row. This is still exact dense projection of the same
+world tubes, not full direct splats.
 
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
