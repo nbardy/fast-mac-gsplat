@@ -1,0 +1,302 @@
+{
+  "best_failed_candidate": null,
+  "candidates": [
+    {
+      "active_tile_count": 119,
+      "candidate": {
+        "tile_capacity": 128,
+        "tile_t": 2,
+        "tile_x": 8,
+        "tile_y": 8
+      },
+      "max_abs_error_vs_direct": 0.7457685470581055,
+      "max_tile_count": 303,
+      "overflow_tile_count": 33,
+      "pass": false,
+      "returncode": 1,
+      "rows": [
+        {
+          "active_tile_count": 119,
+          "camera_fit_error": 5.984424689131629e-08,
+          "direct": {
+            "max_ms": 37.15987500618212,
+            "median_ms": 37.02687499753665,
+            "min_ms": 37.0098749990575,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "frames": 8,
+          "height": 48,
+          "max_abs_error_vs_direct": 0.7457685470581055,
+          "max_tile_count": 303,
+          "overflow_tile_count": 33,
+          "pass": false,
+          "tile_capacity": 128,
+          "tile_t": 2,
+          "tile_x": 8,
+          "tile_y": 8,
+          "tiled": {
+            "max_ms": 8.5601669998141,
+            "median_ms": 8.365458008483984,
+            "min_ms": 8.086749992799014,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "tiled_to_direct_median_ratio": 0.22592935561104,
+          "total_tile_pairs": 8055,
+          "tube_count": 512,
+          "width": 64
+        }
+      ],
+      "selection_score": [
+        1,
+        8.365458008483984,
+        8055,
+        119,
+        303
+      ],
+      "tiled_median_ms_sum": 8.365458008483984,
+      "total_tile_pairs": 8055
+    },
+    {
+      "active_tile_count": 119,
+      "candidate": {
+        "tile_capacity": 256,
+        "tile_t": 2,
+        "tile_x": 8,
+        "tile_y": 8
+      },
+      "max_abs_error_vs_direct": 0.29241716861724854,
+      "max_tile_count": 303,
+      "overflow_tile_count": 16,
+      "pass": false,
+      "returncode": 1,
+      "rows": [
+        {
+          "active_tile_count": 119,
+          "camera_fit_error": 5.984424689131629e-08,
+          "direct": {
+            "max_ms": 39.36166698986199,
+            "median_ms": 36.831666991929524,
+            "min_ms": 36.106375002418645,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "frames": 8,
+          "height": 48,
+          "max_abs_error_vs_direct": 0.29241716861724854,
+          "max_tile_count": 303,
+          "overflow_tile_count": 16,
+          "pass": false,
+          "tile_capacity": 256,
+          "tile_t": 2,
+          "tile_x": 8,
+          "tile_y": 8,
+          "tiled": {
+            "max_ms": 26.78225000272505,
+            "median_ms": 25.95833300438244,
+            "min_ms": 25.88149999792222,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "tiled_to_direct_median_ratio": 0.7047830067010101,
+          "total_tile_pairs": 10754,
+          "tube_count": 512,
+          "width": 64
+        }
+      ],
+      "selection_score": [
+        1,
+        25.95833300438244,
+        10754,
+        119,
+        303
+      ],
+      "tiled_median_ms_sum": 25.95833300438244,
+      "total_tile_pairs": 10754
+    },
+    {
+      "active_tile_count": 415,
+      "candidate": {
+        "tile_capacity": 128,
+        "tile_t": 2,
+        "tile_x": 4,
+        "tile_y": 4
+      },
+      "max_abs_error_vs_direct": 0.3452981412410736,
+      "max_tile_count": 238,
+      "overflow_tile_count": 80,
+      "pass": false,
+      "returncode": 1,
+      "rows": [
+        {
+          "active_tile_count": 415,
+          "camera_fit_error": 5.984424689131629e-08,
+          "direct": {
+            "max_ms": 37.985125003615394,
+            "median_ms": 36.774416992557235,
+            "min_ms": 36.45504200540017,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "frames": 8,
+          "height": 48,
+          "max_abs_error_vs_direct": 0.3452981412410736,
+          "max_tile_count": 238,
+          "overflow_tile_count": 80,
+          "pass": false,
+          "tile_capacity": 128,
+          "tile_t": 2,
+          "tile_x": 4,
+          "tile_y": 4,
+          "tiled": {
+            "max_ms": 7.863000006182119,
+            "median_ms": 7.615583002916537,
+            "min_ms": 7.168707990786061,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "tiled_to_direct_median_ratio": 0.20708915669439037,
+          "total_tile_pairs": 23351,
+          "tube_count": 512,
+          "width": 64
+        }
+      ],
+      "selection_score": [
+        1,
+        7.615583002916537,
+        23351,
+        415,
+        238
+      ],
+      "tiled_median_ms_sum": 7.615583002916537,
+      "total_tile_pairs": 23351
+    },
+    {
+      "active_tile_count": 415,
+      "candidate": {
+        "tile_capacity": 256,
+        "tile_t": 2,
+        "tile_x": 4,
+        "tile_y": 4
+      },
+      "max_abs_error_vs_direct": 7.152557373046875e-07,
+      "max_tile_count": 238,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "returncode": 0,
+      "rows": [
+        {
+          "active_tile_count": 415,
+          "camera_fit_error": 5.984424689131629e-08,
+          "direct": {
+            "max_ms": 42.8938749973895,
+            "median_ms": 37.699833992519416,
+            "min_ms": 36.58200000063516,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "frames": 8,
+          "height": 48,
+          "max_abs_error_vs_direct": 7.152557373046875e-07,
+          "max_tile_count": 238,
+          "overflow_tile_count": 0,
+          "pass": true,
+          "tile_capacity": 256,
+          "tile_t": 2,
+          "tile_x": 4,
+          "tile_y": 4,
+          "tiled": {
+            "max_ms": 20.821499987505376,
+            "median_ms": 20.80487499188166,
+            "min_ms": 20.694915991043672,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "tiled_to_direct_median_ratio": 0.551855878092457,
+          "total_tile_pairs": 27892,
+          "tube_count": 512,
+          "width": 64
+        }
+      ],
+      "selection_score": [
+        0,
+        20.80487499188166,
+        27892,
+        415,
+        238
+      ],
+      "tiled_median_ms_sum": 20.80487499188166,
+      "total_tile_pairs": 27892
+    }
+  ],
+  "frames": 8,
+  "height": 48,
+  "name": "projective_rational_tile_config_sweep",
+  "note": "Each candidate runs in a fresh process because Metal shader tile constants are process-static.",
+  "pass": true,
+  "repeats": 3,
+  "seed": 31,
+  "selected_candidate": {
+    "active_tile_count": 415,
+    "candidate": {
+      "tile_capacity": 256,
+      "tile_t": 2,
+      "tile_x": 4,
+      "tile_y": 4
+    },
+    "max_abs_error_vs_direct": 7.152557373046875e-07,
+    "max_tile_count": 238,
+    "overflow_tile_count": 0,
+    "pass": true,
+    "returncode": 0,
+    "rows": [
+      {
+        "active_tile_count": 415,
+        "camera_fit_error": 5.984424689131629e-08,
+        "direct": {
+          "max_ms": 42.8938749973895,
+          "median_ms": 37.699833992519416,
+          "min_ms": 36.58200000063516,
+          "repeats": 3,
+          "warmups": 1
+        },
+        "frames": 8,
+        "height": 48,
+        "max_abs_error_vs_direct": 7.152557373046875e-07,
+        "max_tile_count": 238,
+        "overflow_tile_count": 0,
+        "pass": true,
+        "tile_capacity": 256,
+        "tile_t": 2,
+        "tile_x": 4,
+        "tile_y": 4,
+        "tiled": {
+          "max_ms": 20.821499987505376,
+          "median_ms": 20.80487499188166,
+          "min_ms": 20.694915991043672,
+          "repeats": 3,
+          "warmups": 1
+        },
+        "tiled_to_direct_median_ratio": 0.551855878092457,
+        "total_tile_pairs": 27892,
+        "tube_count": 512,
+        "width": 64
+      }
+    ],
+    "selection_score": [
+      0,
+      20.80487499188166,
+      27892,
+      415,
+      238
+    ],
+    "tiled_median_ms_sum": 20.80487499188166,
+    "total_tile_pairs": 27892
+  },
+  "tube_counts": [
+    512
+  ],
+  "warmups": 1,
+  "width": 64
+}

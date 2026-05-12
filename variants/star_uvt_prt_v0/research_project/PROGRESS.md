@@ -17,7 +17,8 @@ Last updated: 2026-05-13
 - [x] Gate B1: tiled Metal PRT bin-and-render parity on a tiny scene.
 - [x] Gate B2: diagnostic tiled PRT timing and tile-load scaling against direct PRT.
 - [x] Gate B3: capacity-256 256-tube overflow clearance smoke.
-- [ ] Gate B4: default-capacity support tightening or camera-window segmentation.
+- [x] Gate B4: support tightening and tile-shape sweep.
+- [ ] Gate B5: production PRT tile config selection and integration.
 - [ ] Gate C: PRT backward parity.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -133,6 +134,20 @@ Temporal tile splitting alone does not fix it. Spatial tile splitting does clear
 the 512-tube cap-256 gate in this smoke, so the next practical rasterizer path is
 an explicit tile-shape/capacity cost model rather than more global capacity bumps.
 
+The first explicit tile-config sweep runs each candidate in a fresh Python
+process because the Metal tile constants are process-static. On the 512-tube
+stress case it selected `4x4x2:256`:
+
+```text
+8x8x2:128: fail, max tile count 303, overflow tiles 33
+8x8x2:256: fail, max tile count 303, overflow tiles 16
+4x4x2:128: fail, max tile count 238, overflow tiles 80
+4x4x2:256: pass, max tile count 238, overflow 0, tiled/direct ratio 0.551855878092457
+```
+
+Read: capacity and tile shape have to be chosen together. `4x4` fixes the
+hotspot shape, but only cap 256 keeps all active tile lists valid.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -145,7 +160,7 @@ should be measured before splitting a camera window.
 
 ## Next Gates
 
-1. Turn tile shape and capacity into an explicit cost-model choice for PRT forward.
+1. Add a production PRT tile config selector instead of requiring manual env flags.
 2. Add tile-load scaling scenes that stress moving-camera curvature.
 3. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 4. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
