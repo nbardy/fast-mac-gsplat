@@ -266,6 +266,10 @@ def _render_prt_train(model: MulticamPRTWorldTubeModel, camera_path: CameraPathP
 
 def _render_prt_eval(model: MulticamPRTWorldTubeModel, camera_path: CameraPathPolynomial, config: UVTRenderConfig):
     projected = _compile_detached_footprint(model, camera_path)
+    return _render_prt_projected_eval(projected, config)
+
+
+def _render_prt_projected_eval(projected, config: UVTRenderConfig):
     return render_projective_rational_tubes_tiled(
         projected.h_coeff,
         projected.lambda_uv,
@@ -470,15 +474,26 @@ def _eval_prt(
     device: torch.device,
     render_warmups: int,
     render_repeats: int,
+    cache_compiled: bool,
 ) -> dict[str, Any]:
     train_rows = []
     train_times = []
+    compile_times = []
     max_tile_count = 0
     overflow_tile_count = 0
     for view, camera_path in enumerate(train_camera_paths):
+        if cache_compiled:
+            projected, compile_elapsed = _time_call(
+                device,
+                lambda camera_path=camera_path: _compile_detached_footprint(model, camera_path),
+            )
+            compile_times.append(compile_elapsed)
+            render_fn = lambda projected=projected: _render_prt_projected_eval(projected, config)
+        else:
+            render_fn = lambda camera_path=camera_path: _render_prt_eval(model, camera_path, config)
         aux, elapsed = _time_repeated(
             device,
-            lambda camera_path=camera_path: _render_prt_eval(model, camera_path, config),
+            render_fn,
             warmups=render_warmups,
             repeats=render_repeats,
         )
@@ -492,9 +507,18 @@ def _eval_prt(
     heldout_times = []
     if bundle.heldout_frames is not None:
         for view, camera_path in enumerate(heldout_camera_paths):
+            if cache_compiled:
+                projected, compile_elapsed = _time_call(
+                    device,
+                    lambda camera_path=camera_path: _compile_detached_footprint(model, camera_path),
+                )
+                compile_times.append(compile_elapsed)
+                render_fn = lambda projected=projected: _render_prt_projected_eval(projected, config)
+            else:
+                render_fn = lambda camera_path=camera_path: _render_prt_eval(model, camera_path, config)
             aux, elapsed = _time_repeated(
                 device,
-                lambda camera_path=camera_path: _render_prt_eval(model, camera_path, config),
+                render_fn,
                 warmups=render_warmups,
                 repeats=render_repeats,
             )
@@ -511,6 +535,8 @@ def _eval_prt(
         "metrics": metrics,
         "train_render_seconds": _summarize_seconds(train_times),
         "heldout_render_seconds": None if not heldout_times else _summarize_seconds(heldout_times),
+        "cache_compiled": cache_compiled,
+        "compile_seconds": None if not compile_times else _summarize_seconds(compile_times),
         "max_tile_count": max_tile_count,
         "overflow_tile_count": overflow_tile_count,
     }
@@ -660,6 +686,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
         device=device,
         render_warmups=args.render_warmups,
         render_repeats=args.render_repeats,
+        cache_compiled=args.prt_eval_cache_compiled,
     )
 
     splat_model, splat_render_cfg, splat_train = _fit_splats(
@@ -707,6 +734,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
             "steps": args.steps,
             "render_warmups": args.render_warmups,
             "render_repeats": args.render_repeats,
+            "prt_eval_cache_compiled": args.prt_eval_cache_compiled,
             "train_cameras": bundle.train_camera_names,
             "heldout_cameras": bundle.heldout_camera_names,
             "pose_source": bundle.pose_source,
@@ -767,6 +795,11 @@ def main() -> None:
     parser.add_argument("--init-depth", type=float, default=0.5)
     parser.add_argument("--render-warmups", type=int, default=0)
     parser.add_argument("--render-repeats", type=int, default=1)
+    parser.add_argument(
+        "--prt-eval-cache-compiled",
+        action="store_true",
+        help="Precompile PRT eval footprints once per camera and time only tiled rasterization.",
+    )
     parser.add_argument("--out-json", type=Path)
     args = parser.parse_args()
 

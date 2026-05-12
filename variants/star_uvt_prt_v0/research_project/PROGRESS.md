@@ -41,6 +41,7 @@ Last updated: 2026-05-13
 - [x] Gate D2b: corrected-depth fast-mac direct-splat and same-wall rows.
 - [x] Gate D2c: repeated render timing probe for PRT tile sizes.
 - [x] Gate D2d: PRT forward phase profile separates camera-compiler cost from Metal raster cost.
+- [x] Gate D2e: cached-compiled PRT eval timing in the direct-splat compare harness.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -816,6 +817,38 @@ and optimize `render_projective_rational_tiles` if working inside the Metal
 rasterizer. More tile-size sweeping alone is unlikely to close the direct-splat
 render gap.
 
+Gate D2e adds `--prt-eval-cache-compiled` to
+`projective_rational_multicam_splat_compare.py`. With this flag, the benchmark
+compiles the PRT footprint once per eval camera after training and times only
+the tiled rasterizer in the render-repeat loop. The output records the one-time
+compile timing separately as `projective_rational.eval.compile_seconds`.
+
+Commands:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 32 --max-frames 2 --steps 1 --prt-tubes 16 --splat-count 16 --splat-renderer fast_mac --init-depth 0.5 --render-warmups 0 --render-repeats 1 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_32_2f_16t_16s_1step_depth0p5_cachedprt_fastmacsplat_smoke.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_20step_depth0p5_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_72step_depth0p5_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_200step_depth0p5_cachedprt_fastmacsplat.json
+```
+
+Result:
+
+```text
+20 steps cached PRT: train/heldout PSNR 14.9275/14.3763 dB, train wall 1.303 s, raster render 10.038/10.708 ms, compile median 39.079 ms, max tile 99, overflow 0; fast-mac direct splats 8.6144/7.9594 dB, train wall 0.604 s, render 20.490/21.080 ms.
+72 steps cached PRT: 16.1283/14.1625 dB, train wall 4.816 s, raster render 4.474/4.972 ms, compile median 35.419 ms, max tile 77, overflow 0; same-run 72-step fast-mac direct splats 9.8891/8.9967 dB, train wall 1.719 s, render 22.934/30.506 ms.
+200 steps cached PRT: 16.7678/14.1060 dB, train wall 14.329 s, raster render 6.987/8.300 ms, compile median 67.059 ms, max tile 56, overflow 0; fast-mac direct splats 13.2900/11.2843 dB, train wall 4.511 s, render 22.337/22.597 ms.
+```
+
+Read: when the camera-space PRT footprint is cached, the actual tiled PRT
+rasterizer is faster than the fast-mac direct-splat eval path in these D2 rows.
+That rescues the original rasterizer speed thesis, but with an important
+condition: the current end-to-end eval path is only fast if it does not recompile
+world tubes for every timed render call. The next practical speed task is to
+make this cache/fuse boundary first-class for camera-path playback and for
+camera-edit bake, then decide whether `render_projective_rational_tiles` itself
+needs optimization.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -837,4 +870,4 @@ should be measured before splitting a camera window.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Add backward phase timing for PRT training.
-6. Prototype a cached or fused camera-compiler path so D2 eval render timing no longer pays `_compile_detached_footprint` every call.
+6. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
