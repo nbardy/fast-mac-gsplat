@@ -19,6 +19,7 @@ from torch_gsplat_bridge_star_uvt_prt import (  # noqa: E402
     UVTRenderConfig,
     projective_rational_direct_serial_backward,
     projective_rational_tile_pair_atomic_backward,
+    projective_rational_tile_pixel_atomic_backward,
 )
 
 
@@ -54,7 +55,21 @@ def _metal_gradients(config: UVTRenderConfig, mode: str) -> tuple[dict[str, torc
         grads = result[:6]
         tile_unstable = result[6].detach().cpu()
         return {name: grad.detach().cpu() for name, grad in zip(PARAM_NAMES, grads, strict=True)}, tile_unstable
-    raise ValueError("mode must be direct_serial or tile_pair_atomic")
+    if mode == "tile_pixel_atomic":
+        result = projective_rational_tile_pixel_atomic_backward(
+            params["h_coeff"],
+            params["lambda_uv"],
+            params["lambda_t"],
+            params["center_t"],
+            params["opacity"],
+            params["color"],
+            grad_image,
+            config,
+        )
+        grads = result[:6]
+        tile_unstable = result[6].detach().cpu()
+        return {name: grad.detach().cpu() for name, grad in zip(PARAM_NAMES, grads, strict=True)}, tile_unstable
+    raise ValueError("mode must be direct_serial, tile_pair_atomic, or tile_pixel_atomic")
 
 
 def run_check(*, abs_tol: float, rel_tol: float) -> dict[str, Any]:

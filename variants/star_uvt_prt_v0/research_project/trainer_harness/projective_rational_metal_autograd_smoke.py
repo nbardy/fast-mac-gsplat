@@ -184,7 +184,11 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=4)
     parser.add_argument("--lr", type=float, default=0.1)
     parser.add_argument("--forward-mode", choices=("direct", "tiled"), default="tiled")
-    parser.add_argument("--backward-mode", choices=("direct_serial", "tile_pair_atomic"), default="direct_serial")
+    parser.add_argument(
+        "--backward-mode",
+        choices=("direct_serial", "tile_pair_atomic", "tile_pixel_atomic"),
+        default="direct_serial",
+    )
     parser.add_argument("--out-json", type=Path)
     args = parser.parse_args()
 

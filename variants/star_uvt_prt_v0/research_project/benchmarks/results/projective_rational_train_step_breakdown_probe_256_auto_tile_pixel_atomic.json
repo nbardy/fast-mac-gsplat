@@ -1,0 +1,70 @@
+{
+  "camera_motion_scale": 1.0,
+  "name": "projective_rational_train_step_breakdown_probe",
+  "note": "Diagnostic PRT train-step timing split into forward, loss, backward, and SGD segments.",
+  "pass": true,
+  "rows": [
+    {
+      "active_tile_count": 107,
+      "backward_mode": "tile_pixel_atomic",
+      "camera_fit_error": 5.984424689131629e-08,
+      "final_loss": 0.004052142146974802,
+      "forward_mode": "tiled",
+      "frames": 8,
+      "height": 48,
+      "initial_loss": 0.004054920747876167,
+      "loss_decreased": true,
+      "lr": 0.02,
+      "max_tile_count": 150,
+      "median_backward_ms": 15.592499999911524,
+      "median_component_sum_ms": 26.353958004619926,
+      "median_forward_ms": 8.881457993993536,
+      "median_loss_ms": 0.35512499744072556,
+      "median_optimizer_ms": 0.2865410060621798,
+      "median_wall_ms": 26.357708004070446,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "records": [
+        {
+          "backward_ms": 15.592499999911524,
+          "component_sum_ms": 26.353958004619926,
+          "forward_ms": 10.08900000306312,
+          "loss": 0.004054145887494087,
+          "loss_ms": 0.3859169955831021,
+          "optimizer_ms": 0.2865410060621798,
+          "wall_ms": 26.357708004070446
+        },
+        {
+          "backward_ms": 20.95612499397248,
+          "component_sum_ms": 30.441999988397583,
+          "forward_ms": 8.881457993993536,
+          "loss": 0.004053142387419939,
+          "loss_ms": 0.35512499744072556,
+          "optimizer_ms": 0.24929200299084187,
+          "wall_ms": 30.448000004980713
+        },
+        {
+          "backward_ms": 13.603500003227964,
+          "component_sum_ms": 23.051041993312538,
+          "forward_ms": 8.834083986585028,
+          "loss": 0.004052142146974802,
+          "loss_ms": 0.313292010105215,
+          "optimizer_ms": 0.30016599339433014,
+          "wall_ms": 23.056833000737242
+        }
+      ],
+      "repeats": 3,
+      "total_tile_pairs": 5549,
+      "tube_count": 256,
+      "warmups": 1,
+      "width": 64
+    }
+  ],
+  "tile_config": {
+    "tile_capacity": 256,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8
+  },
+  "tile_config_key": "8x8x2:256"
+}

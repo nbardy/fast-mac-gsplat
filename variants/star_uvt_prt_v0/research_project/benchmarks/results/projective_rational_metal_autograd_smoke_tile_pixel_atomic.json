@@ -1,0 +1,40 @@
+{
+  "backward_mode": "tile_pixel_atomic",
+  "config": {
+    "frames": 3,
+    "height": 5,
+    "width": 6
+  },
+  "final_loss": 0.0008352987351827323,
+  "first_step_grad_norms": {
+    "center_t": 1.4231824934540782e-05,
+    "color": 0.0054564522579312325,
+    "h_coeff": 0.0003325970028527081,
+    "lambda_t": 0.001116369036026299,
+    "lambda_uv": 0.0006791703053750098,
+    "opacity": 0.006486657075583935
+  },
+  "forward_mode": "tiled",
+  "initial_loss": 0.0008642825414426625,
+  "loss_decreased": true,
+  "losses": [
+    0.0008642825414426625,
+    0.000856933300383389,
+    0.0008496532682329416,
+    0.0008424422121606767,
+    0.0008352987351827323
+  ],
+  "lr": 0.1,
+  "metal_checked": true,
+  "name": "projective_rational_metal_autograd_smoke",
+  "note": "Metal PRT train-step smoke using tiled forward and tile_pixel_atomic backward.",
+  "pass": true,
+  "steps": 4,
+  "tile_config": {
+    "tile_capacity": 128,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8
+  },
+  "tile_config_key": "8x8x2:128"
+}

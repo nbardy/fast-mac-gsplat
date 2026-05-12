@@ -29,6 +29,7 @@ Last updated: 2026-05-13
 - [x] Gate C3b: numeric repeatability check for tiled atomic PRT backward.
 - [x] Gate C3d: selector-recommended 256/512-tube PRT train-step timing.
 - [x] Gate C3e: train-step breakdown isolates backward as the scale bottleneck.
+- [x] Gate C4: tile-pixel atomic PRT backward removes the repeated target-slot recompute.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -384,6 +385,52 @@ The current tile-pair atomic backward recomputes the per-pixel ordered sequence
 once per target slot, so the next speed path should replace that kernel before
 spending time on forward rasterizer micro-optimizations.
 
+Gate C4 adds `projective_rational_tile_pixel_atomic_backward`, a tiled backward
+kernel that computes each tile pixel's ordered sequence once and accumulates
+gradients for all active tubes from that pass.
+
+Validation:
+
+```text
+python3 tests/projective_rational_tile_pixel_atomic_backward_check.py
+python3 research_project/benchmarks/projective_rational_tile_pixel_atomic_backward_check.py --out-json research_project/benchmarks/results/projective_rational_tile_pixel_atomic_backward_check.json
+python3 research_project/trainer_harness/projective_rational_metal_autograd_smoke.py --backward-mode tile_pixel_atomic --out-json research_project/benchmarks/results/projective_rational_metal_autograd_smoke_tile_pixel_atomic.json
+```
+
+Result:
+
+```text
+tile-pixel atomic parity: pass, max abs 7.450580596923828e-08, max rel 1.1374921996321063e-05
+train smoke: pass, initial loss 0.0008642825414426625, final loss 0.0008352987351827323
+```
+
+Timing against the old tile-pair atomic path:
+
+```text
+256 tubes: old median step 1535.383541995543 ms; tile-pixel median step 38.774833010393195 ms
+512 tubes: old median step 2989.2938749981113 ms; tile-pixel median step 48.69275000237394 ms
+```
+
+Breakdown with tile-pixel atomic:
+
+```text
+256 tubes: median forward 8.881457993993536 ms, backward 15.592499999911524 ms, wall 26.357708004070446 ms
+512 tubes: median forward 20.76037500228267 ms, backward 27.39641700463835 ms, wall 48.84575000323821 ms
+```
+
+Repeatability:
+
+```text
+256 tubes: pass, max_grad_delta 1.6880221664905548e-09, max_loss_delta 0.0
+512 tubes: pass, max_grad_delta 3.205059329047799e-09, max_loss_delta 0.0
+unique gradient digests: 3/3 for every checked parameter
+```
+
+Read: this is the first PRT training-speed result that matches the intended
+shape of the STAR-UVT rasterizer. It is still synthetic and atomic, so it is
+not a held-out-video quality claim and not bitwise deterministic. But the
+seconds-per-step blocker from C3e is gone on the 256/512 diagnostic cases.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -397,7 +444,7 @@ should be measured before splitting a camera window.
 ## Next Gates
 
 1. Decide whether PRT training needs bitwise deterministic gradients or only numeric repeatability.
-2. Prototype a pixel/tile backward path that computes each pixel's ordered sequence once and accumulates gradients for all active tubes.
+2. Make `tile_pixel_atomic` the default PRT train backward only after one moving-camera stress timing pass.
 3. Add tile-load scaling scenes that stress moving-camera curvature.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.

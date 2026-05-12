@@ -1,0 +1,41 @@
+{
+  "abs_tol": 1e-06,
+  "camera_motion_scale": 1.0,
+  "name": "projective_rational_train_step_repeatability_probe",
+  "note": "Same-state PRT backward repeatability check for loss and parameter gradients.",
+  "pass": true,
+  "rows": [
+    {
+      "active_tile_count": 107,
+      "backward_mode": "tile_pixel_atomic",
+      "camera_fit_error": 5.984424689131629e-08,
+      "forward_mode": "tiled",
+      "frames": 8,
+      "height": 48,
+      "max_grad_delta": 1.6880221664905548e-09,
+      "max_loss_delta": 0.0,
+      "max_tile_count": 150,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "repeats": 3,
+      "total_tile_pairs": 5549,
+      "tube_count": 256,
+      "unique_digest_counts": {
+        "center_t": 3,
+        "color": 3,
+        "h_coeff": 3,
+        "lambda_t": 3,
+        "lambda_uv": 3,
+        "opacity": 3
+      },
+      "width": 64
+    }
+  ],
+  "tile_config": {
+    "tile_capacity": 256,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8
+  },
+  "tile_config_key": "8x8x2:256"
+}

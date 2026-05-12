@@ -16,13 +16,14 @@ from torch_gsplat_bridge_star_uvt_prt import (  # noqa: E402
     UVTRenderConfig,
     projective_rational_direct_serial_backward,
     projective_rational_tile_pair_atomic_backward,
+    projective_rational_tile_pixel_atomic_backward,
     render_projective_rational_tubes_direct,
     render_projective_rational_tubes_tiled,
 )
 
 
 ForwardMode = Literal["direct", "tiled"]
-BackwardMode = Literal["direct_serial", "tile_pair_atomic"]
+BackwardMode = Literal["direct_serial", "tile_pair_atomic", "tile_pixel_atomic"]
 
 
 def _render_forward(
@@ -93,6 +94,7 @@ class _ProjectiveRationalDirectSerialBackward(torch.autograd.Function):
         backward_fn = {
             "direct_serial": projective_rational_direct_serial_backward,
             "tile_pair_atomic": projective_rational_tile_pair_atomic_backward,
+            "tile_pixel_atomic": projective_rational_tile_pixel_atomic_backward,
         }[ctx.backward_mode]
         result = backward_fn(
             h_coeff.detach(),

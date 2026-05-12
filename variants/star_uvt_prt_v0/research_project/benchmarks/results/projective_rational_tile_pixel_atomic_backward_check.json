@@ -1,0 +1,58 @@
+{
+  "abs_tol": 0.0005,
+  "config": {
+    "frames": 3,
+    "height": 5,
+    "tile_capacity": 128,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8,
+    "width": 6
+  },
+  "max_abs_error": 7.450580596923828e-08,
+  "max_rel_error": 1.1374921996321063e-05,
+  "metal_checked": true,
+  "name": "projective_rational_tile_pixel_atomic_backward_check",
+  "note": "Tile-pixel atomic Metal PRT backward against direct-serial Metal PRT backward.",
+  "pass": true,
+  "rel_tol": 0.05,
+  "rows": [
+    {
+      "max_abs_error": 3.725290298461914e-09,
+      "max_rel_error": 6.0553466028068215e-06,
+      "param": "h_coeff",
+      "pass": true
+    },
+    {
+      "max_abs_error": 2.2351741790771484e-08,
+      "max_rel_error": 1.1374921996321063e-05,
+      "param": "lambda_uv",
+      "pass": true
+    },
+    {
+      "max_abs_error": 0.0,
+      "max_rel_error": 0.0,
+      "param": "lambda_t",
+      "pass": true
+    },
+    {
+      "max_abs_error": 1.862645149230957e-09,
+      "max_rel_error": 2.4809585852381133e-07,
+      "param": "center_t",
+      "pass": true
+    },
+    {
+      "max_abs_error": 7.450580596923828e-08,
+      "max_rel_error": 1.0121893865289167e-06,
+      "param": "opacity",
+      "pass": true
+    },
+    {
+      "max_abs_error": 5.960464477539063e-08,
+      "max_rel_error": 1.2557620721054263e-06,
+      "param": "color",
+      "pass": true
+    }
+  ],
+  "tile_unstable_count": 2
+}

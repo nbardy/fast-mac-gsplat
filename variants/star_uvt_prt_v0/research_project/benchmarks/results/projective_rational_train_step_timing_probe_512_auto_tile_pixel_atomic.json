@@ -1,0 +1,44 @@
+{
+  "camera_motion_scale": 1.0,
+  "name": "projective_rational_train_step_timing_probe",
+  "note": "Diagnostic PRT forward+loss+backward+SGD timing; not a video-quality benchmark.",
+  "pass": true,
+  "rows": [
+    {
+      "active_tile_count": 415,
+      "backward_mode": "tile_pixel_atomic",
+      "camera_fit_error": 5.984424689131629e-08,
+      "final_loss": 0.004348628222942352,
+      "forward_mode": "tiled",
+      "frames": 8,
+      "height": 48,
+      "initial_loss": 0.004354664124548435,
+      "loss_decreased": true,
+      "losses": [
+        0.004354664124548435,
+        0.004352637566626072,
+        0.004349864087998867,
+        0.004348628222942352
+      ],
+      "lr": 0.02,
+      "max_step_ms": 48.9153329981491,
+      "max_tile_count": 238,
+      "median_step_ms": 48.69275000237394,
+      "min_step_ms": 48.330374993383884,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "repeats": 3,
+      "total_tile_pairs": 27892,
+      "tube_count": 512,
+      "warmups": 1,
+      "width": 64
+    }
+  ],
+  "tile_config": {
+    "tile_capacity": 256,
+    "tile_t": 2,
+    "tile_x": 4,
+    "tile_y": 4
+  },
+  "tile_config_key": "4x4x2:256"
+}

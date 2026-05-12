@@ -244,7 +244,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=31)
     parser.add_argument("--camera-motion-scale", type=float, default=1.0)
     parser.add_argument("--forward-mode", choices=("direct", "tiled"), default="tiled")
-    parser.add_argument("--backward-mode", choices=("direct_serial", "tile_pair_atomic"), default="tile_pair_atomic")
+    parser.add_argument(
+        "--backward-mode",
+        choices=("direct_serial", "tile_pair_atomic", "tile_pixel_atomic"),
+        default="tile_pair_atomic",
+    )
     parser.add_argument("--lr", type=float, default=0.02)
     parser.add_argument("--out-json", type=Path)
     args = parser.parse_args()
