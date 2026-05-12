@@ -493,6 +493,20 @@ per-frame screen Gaussian: PSNR 23.767788461727967 dB, final MSE 0.0041997279040
 PRT tile load: max tile count 61, overflow 0
 ```
 
+Comparable-parameter 200-step run with 64 splats per frame:
+
+```text
+python3 research_project/benchmarks/projective_rational_video_overfit_compare.py ../../../../../tests/fixtures/lalaland.mp4 --target-size 64 --max-frames 4 --steps 200 --tube-count 128 --per-frame-splats 64 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_video_overfit_compare_lalaland_64_4f_200step_128prt_64pf.json --contact-sheet research_project/benchmarks/results/projective_rational_video_overfit_compare_lalaland_64_4f_200step_128prt_64pf.png
+```
+
+Result:
+
+```text
+PRT: pass, parameters 2176, PSNR 26.477061063327035 dB, final MSE 0.00225057709030807, median render 7.809999995515682 ms, train wall 5338.531999994302 ms
+per-frame screen Gaussian: parameters 2048, PSNR 25.085034375204227 dB, final MSE 0.003100962843745947, median render 22.821167003712617 ms, train wall 32772.46066600492 ms
+PRT tile load: max tile count 60, overflow 0
+```
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
