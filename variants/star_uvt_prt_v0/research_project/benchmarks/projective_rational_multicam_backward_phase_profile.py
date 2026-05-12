@@ -29,6 +29,7 @@ from torch_gsplat_bridge_star_uvt_prt import (  # noqa: E402
     apply_projective_rational_tile_env,
     parse_projective_rational_tile_config,
     profile_projective_rational_tile_pixel_atomic_backward,
+    recommend_projective_rational_train_speed_tile_policy,
     recommend_projective_rational_tile_config,
 )
 
@@ -174,16 +175,29 @@ def run_profile(args: argparse.Namespace) -> dict[str, Any]:
         train_fit_errors.append(path.fit_error)
         train_camera_paths.append(_camera_path_to_device(path, device))
 
-    tile_config = (
-        recommend_projective_rational_tile_config(tube_count=args.prt_tubes)
-        if args.tile_config == "auto"
-        else parse_projective_rational_tile_config(args.tile_config)
-    )
+    prt_support_alpha_threshold = args.prt_support_alpha_threshold
+    if args.prt_tile_policy == "train_speed":
+        if args.tile_config != "auto":
+            raise ValueError("--prt-tile-policy train_speed requires --tile-config auto")
+        tile_policy = recommend_projective_rational_train_speed_tile_policy(tube_count=args.prt_tubes)
+        tile_config = tile_policy.tile_config
+        if prt_support_alpha_threshold is None:
+            prt_support_alpha_threshold = tile_policy.support_alpha_threshold
+        prt_tile_policy = tile_policy.name
+    else:
+        tile_config = (
+            recommend_projective_rational_tile_config(tube_count=args.prt_tubes)
+            if args.tile_config == "auto"
+            else parse_projective_rational_tile_config(args.tile_config)
+        )
+        prt_tile_policy = "generic_auto" if args.tile_config == "auto" else "explicit_tile_config"
     apply_projective_rational_tile_env(tile_config)
     prt_config = UVTRenderConfig(
         height=height,
         width=width,
         frames=frames,
+        alpha_threshold=args.prt_alpha_threshold,
+        support_alpha_threshold=prt_support_alpha_threshold,
         background=(1.0, 1.0, 1.0),
         **tile_config.as_render_kwargs(),
     )
@@ -251,6 +265,9 @@ def run_profile(args: argparse.Namespace) -> dict[str, Any]:
             "pose_source": bundle.pose_source,
             "sample_id": None if bundle.metadata is None else bundle.metadata.get("sample_id"),
             "camera_poly_degree": args.camera_poly_degree,
+            "prt_alpha_threshold": args.prt_alpha_threshold,
+            "prt_support_alpha_threshold": prt_support_alpha_threshold,
+            "prt_tile_policy": prt_tile_policy,
             "train_camera_fit_errors": train_fit_errors,
         },
         "projective_rational": {
@@ -280,12 +297,20 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=31)
     parser.add_argument("--camera-poly-degree", type=int, default=1)
     parser.add_argument("--tile-config", default="auto", help="'auto' or an explicit config like 8x8x2:128")
+    parser.add_argument(
+        "--prt-tile-policy",
+        choices=("generic", "train_speed"),
+        default="generic",
+        help="generic preserves the fail-closed auto selector; train_speed opts into measured support-pruned 1024 policy.",
+    )
     parser.add_argument("--prt-tubes", type=int, default=128)
     parser.add_argument("--prt-lr", type=float, default=0.02)
     parser.add_argument("--prt-loss-mode", choices=("sampled_frame", "sequence"), default="sampled_frame")
     parser.add_argument("--prt-init-precision-xy", type=float, default=36.0)
     parser.add_argument("--prt-init-lambda-t", type=float, default=0.25)
     parser.add_argument("--prt-init-opacity", type=float, default=0.35)
+    parser.add_argument("--prt-alpha-threshold", type=float, default=1.0 / 255.0)
+    parser.add_argument("--prt-support-alpha-threshold", type=float)
     parser.add_argument("--init-depth", type=float, default=0.5)
     parser.add_argument("--profile-view", type=int, default=0)
     parser.add_argument("--profile-frame", type=int, default=0)

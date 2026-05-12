@@ -56,6 +56,7 @@ Last updated: 2026-05-13
 - [x] Gate D2q: 1024-tube support-pruned `tile_t=1` train-speed comparison.
 - [x] Gate D2r: lower 1024-tube `tile_t=1` support-pruning cutoff.
 - [x] Gate D2s: explicit 1024 train-speed tile policy API.
+- [x] Gate D2t: support-aware backward phase profile for the 1024 train-speed policy.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1346,6 +1347,38 @@ python3 research_project/benchmarks/projective_rational_multicam_splat_compare.p
 Smoke read: pass true, policy `train_speed_support32_1024`, support
 `0.12549019607843137`, tile `4x4x1:512`, max tile 474, overflow 0.
 
+Gate D2t wires the backward phase profiler to the same explicit train-speed
+policy and support threshold, then profiles the selected 1024 policy. This
+prevents the profile harness from accidentally measuring the old overflowing
+generic selector path.
+
+Validation:
+
+```text
+python3 -m py_compile research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py
+python3 setup.py build_ext --inplace
+python3 research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 1024 --prt-tile-policy train_speed --profile-warmups 1 --profile-repeats 5 --out-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_64_4f_1024t_20step_train_speed_support32.json
+```
+
+Result:
+
+```text
+pass true, policy train_speed_support32_1024, support 32/255, tile 4x4x1:512, max tile 460, overflow 0, grad finite true.
+median total 19.517 ms:
+  alloc tiles 0.009 ms
+  clear tiles 0.243 ms
+  bin tubes 0.518 ms
+  alloc grads 0.012 ms
+  clear grads 0.262 ms
+  backward kernel 18.483 ms
+```
+
+Read: for the selected 1024 train-speed policy, the remaining backward time is
+inside `projective_rational_tile_pixel_atomic_backward`, not binning or setup.
+The backward kernel is about 95% of the profiled total, while binning is about
+2.7%. The next speed work should target lower-atomic/two-pass accumulation
+inside the backward kernel; reducing tile setup will not move this row much.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1368,6 +1401,6 @@ should be measured before splitting a camera window.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
-7. Profile the remaining inner loops of `projective_rational_tile_pixel_atomic_backward`: alpha replay and atomic accumulation.
-8. Test a lower-atomic or two-pass backward accumulation structure for PRT.
+7. Test a lower-atomic or two-pass accumulation structure inside `projective_rational_tile_pixel_atomic_backward`; D2t shows this kernel is the selected 1024 policy bottleneck.
+8. Profile alpha replay vs atomic accumulation inside `projective_rational_tile_pixel_atomic_backward` if the next kernel split is ambiguous.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
