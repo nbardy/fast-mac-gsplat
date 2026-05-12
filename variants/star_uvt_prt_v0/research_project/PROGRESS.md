@@ -15,7 +15,8 @@ Last updated: 2026-05-13
 - [x] Gate A8: projection-only frame scaling probe across 8/16/32 frames.
 - [x] Gate B0: direct Metal PRT forward API and dense-vs-Metal parity.
 - [x] Gate B1: tiled Metal PRT bin-and-render parity on a tiny scene.
-- [ ] Gate B2: tiled PRT timing and tile-load scaling against direct PRT.
+- [x] Gate B2: diagnostic tiled PRT timing and tile-load scaling against direct PRT.
+- [ ] Gate B3: overflow-safe tiled PRT scaling beyond default tile capacity.
 - [ ] Gate C: PRT backward parity.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -73,6 +74,20 @@ The first tiled path uses sample-level depth selection inside each tile. That is
 the conservative correctness-first version; Gate B2 still has to measure tile
 load, timing, and whether stable depth shortcuts are worth adding.
 
+Gate B2 timing probe:
+
+```text
+16 tubes:  direct median 2.165500001865439 ms, tiled median 3.4470835016691126 ms, ratio 1.5918187479564403
+64 tubes:  direct median 6.6889790032291785 ms, tiled median 5.393875493609812 ms, ratio 0.8063824824395261
+128 tubes: direct median 16.94479199795751 ms, tiled median 15.051396498165559 ms, ratio 0.8882609181617469
+```
+
+The same setup at 256 tubes fails the default-capacity gate with `15` overflow
+tiles and max error `0.21615934371948242`. That is the next concrete scaling
+blocker: either raise/segment capacity, tighten support bounds, or split camera
+windows before claiming useful-scale speed. The no-overflow timing rows are
+diagnostic and noisy; they are not a training-speed claim.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -85,7 +100,7 @@ should be measured before splitting a camera window.
 
 ## Next Gates
 
-1. Add a timing probe for tiled PRT vs direct PRT and affine STAR-UVT.
+1. Fix the 256-tube default-capacity overflow gate.
 2. Add tile-load scaling scenes that stress moving-camera curvature.
 3. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 4. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.

@@ -75,6 +75,9 @@ tests/projective_rational_direct_render_check.py
 
 tests/projective_rational_tiled_render_check.py
   Dense-vs-tiled-Metal parity check for the first tiled PRT forward path.
+
+research_project/benchmarks/projective_rational_metal_forward_timing_probe.py
+  Diagnostic Metal timing and tile-load probe for direct PRT vs tiled PRT.
 ```
 
 ## New Idea Added In This Fork
@@ -112,6 +115,7 @@ python3 tests/projective_rational_scaling_check.py
 python3 setup.py build_ext --inplace
 python3 tests/projective_rational_direct_render_check.py --out-json research_project/benchmarks/results/projective_rational_direct_render_check.json
 python3 tests/projective_rational_tiled_render_check.py --out-json research_project/benchmarks/results/projective_rational_tiled_render_check.json
+python3 research_project/benchmarks/projective_rational_metal_forward_timing_probe.py --out-json research_project/benchmarks/results/projective_rational_metal_forward_timing_probe.json
 ```
 
 Expected first gate:
@@ -126,4 +130,5 @@ curvature_selective.pass = true
 projective_rational_projection_scaling_probe.pass = true
 projective_rational_direct_render_check.pass = true
 projective_rational_tiled_render_check.pass = true
+projective_rational_metal_forward_timing_probe.pass = true
 ```
