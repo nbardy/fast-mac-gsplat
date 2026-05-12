@@ -141,12 +141,15 @@ stress case it selected `4x4x2:256`:
 ```text
 8x8x2:128: fail, max tile count 303, overflow tiles 33
 8x8x2:256: fail, max tile count 303, overflow tiles 16
+8x8x2:512: pass, max tile count 303, overflow 0, tiled/direct ratio 0.8764672143637684
 4x4x2:128: fail, max tile count 238, overflow tiles 80
-4x4x2:256: pass, max tile count 238, overflow 0, tiled/direct ratio 0.551855878092457
+4x4x2:256: pass, max tile count 238, overflow 0, tiled/direct ratio 0.5893798248457015
 ```
 
 Read: capacity and tile shape have to be chosen together. `4x4` fixes the
-hotspot shape, but only cap 256 keeps all active tile lists valid.
+hotspot shape, but only cap 256 keeps all active tile lists valid. `8x8` with
+cap 512 is valid but slower on this smoke, so shape splitting beats a pure
+capacity bump here.
 
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature

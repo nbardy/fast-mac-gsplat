@@ -70,8 +70,8 @@ def _runtime_validate(config: UVTRenderConfig) -> None:
         raise ValueError("tile_y must be 4, 8, or 16")
     if config.tile_t not in (1, 2, 4):
         raise ValueError("tile_t must be 1, 2, or 4")
-    if config.tile_capacity not in (32, 64, 128, 256):
-        raise ValueError("tile_capacity must be 32, 64, 128, or 256")
+    if config.tile_capacity not in (32, 64, 128, 256, 512):
+        raise ValueError("tile_capacity must be 32, 64, 128, 256, or 512")
     if config.tile_x != _env_int("STAR_UVT_TILE_X", 8):
         raise ValueError("config.tile_x must match STAR_UVT_TILE_X")
     if config.tile_y != _env_int("STAR_UVT_TILE_Y", 8):

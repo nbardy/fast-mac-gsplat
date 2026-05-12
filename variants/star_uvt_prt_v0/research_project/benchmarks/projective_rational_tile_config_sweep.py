@@ -49,6 +49,7 @@ def _candidate_summary(candidate: dict[str, int], probe: dict[str, Any], returnc
     total_tile_pairs = sum(int(row.get("total_tile_pairs", 0)) for row in rows)
     active_tile_count = sum(int(row.get("active_tile_count", 0)) for row in rows)
     pass_gate = bool(probe.get("pass")) and returncode == 0
+    capacity_overage = max(0, max_tile_count - int(candidate["tile_capacity"]))
     return {
         "candidate": candidate,
         "pass": pass_gate,
@@ -65,6 +66,12 @@ def _candidate_summary(candidate: dict[str, int], probe: dict[str, Any], returnc
             total_tile_pairs,
             active_tile_count,
             max_tile_count,
+        ],
+        "failure_score": [
+            overflow_tiles,
+            capacity_overage,
+            max_error,
+            tiled_median_ms_sum,
         ],
         "rows": rows,
     }
@@ -162,7 +169,7 @@ def run_sweep(
         ]
     passing = [candidate for candidate in results if bool(candidate["pass"])]
     selected = min(passing, key=lambda item: tuple(item["selection_score"])) if passing else None
-    best_failed = min(results, key=lambda item: tuple(item["selection_score"])) if selected is None else None
+    best_failed = min(results, key=lambda item: tuple(item["failure_score"])) if selected is None else None
     return {
         "name": "projective_rational_tile_config_sweep",
         "note": "Each candidate runs in a fresh process because Metal shader tile constants are process-static.",
@@ -189,6 +196,7 @@ def main() -> None:
         default=[
             _parse_candidate("8x8x2:128"),
             _parse_candidate("8x8x2:256"),
+            _parse_candidate("8x8x2:512"),
             _parse_candidate("4x4x2:128"),
             _parse_candidate("4x4x2:256"),
         ],
