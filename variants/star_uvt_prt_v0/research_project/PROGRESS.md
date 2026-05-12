@@ -37,6 +37,7 @@ Last updated: 2026-05-13
 - [x] Gate D0: synthetic world-camera forward probe against exact per-frame projection.
 - [x] Gate D1: synthetic world-camera train/holdout compare against dense per-frame projection.
 - [x] Gate D1b: 128px synthetic world-camera train/holdout scaling row.
+- [x] Gate D2: real multicam PRT world-tube compare against direct dynamic splats.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -678,6 +679,45 @@ scale-up. Auto `4x4x2:512` is slightly faster on train wall here, so there is no
 selector change from this row. This is still exact dense projection of the same
 world tubes, not full direct splats.
 
+Gate D2 adds the first real multicam direct-splat comparison:
+`research_project/benchmarks/projective_rational_multicam_splat_compare.py`.
+It uses the DeepView dog local multicam config with train cameras `camera_0006`
+and `camera_0014`, and heldout camera `camera_0005`. The PRT path trains
+world tubes through the moving-camera tiled Metal rasterizer. The baseline is
+Dynaworld's `FreeDynamic3DGS` direct per-frame dynamic splat model rendered
+through the dense splat path in these rows.
+
+The initial draft trained PRT against the full train-camera sequence each step
+while direct splats sampled one frame per step. That was unfair, so the script
+now defaults PRT to `--prt-loss-mode sampled_frame`; all D2 numbers below use
+that corrected mode. A one-step random-view sampled loss can increase when the
+sample changes, so the benchmark records `sampled_loss_decreased` separately
+but gates pass/fail on finite losses plus no PRT tile overflow.
+
+Commands:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 32 --max-frames 2 --steps 1 --prt-tubes 16 --splat-count 16 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_32_2f_16t_16s_1step_smoke.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --splat-count 128 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_20step.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 128 --splat-count 128 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_200step.json
+```
+
+Result:
+
+```text
+32px/2f/1 step: PRT 176 params, train/heldout PSNR 4.0547/4.1095 dB, train wall 0.161 s, render 10.745/8.725 ms, max tile count 8, overflow 0; direct splats 448 params, train/heldout PSNR 3.7585/3.8652 dB, train wall 0.970 s, render 5.472/2.719 ms
+64px/4f/20 steps: PRT 1408 params, train/heldout PSNR 6.9801/6.2738 dB, train wall 1.101 s, render 42.998/42.114 ms, max tile count 37, overflow 0; direct splats 7168 params, train/heldout PSNR 4.0628/4.1142 dB, train wall 2.125 s, render 25.996/22.241 ms
+64px/4f/200 steps: PRT 1408 params, train/heldout PSNR 12.7012/9.5443 dB, train wall 15.565 s, render 64.103/69.896 ms, max tile count 35, overflow 0; direct splats 7168 params, train/heldout PSNR 4.4404/4.3374 dB, train wall 6.437 s, render 29.469/26.951 ms
+```
+
+Read: this is finally the direct-splat baseline gate on a real multicam bundle.
+PRT wins early quality and uses fewer parameters here, but the dense direct
+splat renderer is still faster in all D2 render rows and the 200-step direct
+baseline trains faster. The absolute PSNR is low, so this is a harness and
+directional signal, not a tuned result. The next useful work is better PRT
+initialization/loss weighting, a same-wall row, and then a stronger direct
+splat render baseline before making a broad speed claim.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -698,4 +738,4 @@ should be measured before splitting a camera window.
 2. Add tile-load scaling scenes that stress moving-camera curvature beyond the synthetic `camera_motion_scale` knob.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
-5. Run the same-step comparison through the world-camera harness against direct splats/full per-frame reference.
+5. Add same-wall and stronger-baseline rows for the real multicam direct-splat harness.

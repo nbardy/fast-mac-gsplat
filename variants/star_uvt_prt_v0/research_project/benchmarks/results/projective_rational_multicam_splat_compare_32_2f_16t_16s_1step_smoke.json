@@ -1,0 +1,159 @@
+{
+  "free_dynamic_splats": {
+    "camera_projection": "legacy_pinhole",
+    "eval": {
+      "camera_projection": "legacy_pinhole",
+      "heldout_render_seconds": {
+        "max_s": 0.002718792005907744,
+        "median_s": 0.002718792005907744,
+        "min_s": 0.002718792005907744,
+        "samples_s": [
+          0.002718792005907744
+        ]
+      },
+      "metrics": {
+        "heldout_l1": 0.6091437935829163,
+        "heldout_mse": 0.4106578230857849,
+        "heldout_psnr": 3.8651989939060356,
+        "l1": 0.6180931329727173,
+        "mse": 0.42105354368686676,
+        "psnr": 3.7584781316504854
+      },
+      "train_render_seconds": {
+        "max_s": 0.007894291993579827,
+        "median_s": 0.005471812997711822,
+        "min_s": 0.0030493340018438175,
+        "samples_s": [
+          0.007894291993579827,
+          0.0030493340018438175
+        ]
+      }
+    },
+    "init_depth": 2.0,
+    "init_scale": 0.035,
+    "lr": 0.002,
+    "parameter_count": 448,
+    "renderer": "dense",
+    "splat_count": 16,
+    "train": {
+      "final_loss": 0.40833353996276855,
+      "initial_loss": 0.4085042476654053,
+      "losses": [
+        {
+          "frame": 1,
+          "loss": 0.4085042476654053,
+          "step": 0,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.40833353996276855,
+          "step": 1,
+          "view": 0
+        }
+      ],
+      "sampled_loss_decreased": true,
+      "steps": 1,
+      "train_loop_elapsed_s": 0.970303750000312
+    }
+  },
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "camera_poly_degree": 1,
+    "device": "mps",
+    "frames": 2,
+    "height": 32,
+    "heldout_camera_fit_errors": [
+      0.0
+    ],
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "max_frames": 2,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+    "seed": 31,
+    "steps": 1,
+    "target_size": 32,
+    "train_camera_fit_errors": [
+      0.0,
+      0.0
+    ],
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "width": 32
+  },
+  "name": "projective_rational_multicam_splat_compare",
+  "note": "Small real-multicam gate. PRT trains world tubes with the projective-rational tiled Metal path. The baseline is the existing FreeDynamic3DGS per-frame direct-splat model.",
+  "pass": true,
+  "projective_rational": {
+    "eval": {
+      "heldout_render_seconds": {
+        "max_s": 0.00872466700093355,
+        "median_s": 0.00872466700093355,
+        "min_s": 0.00872466700093355,
+        "samples_s": [
+          0.00872466700093355
+        ]
+      },
+      "max_tile_count": 8,
+      "metrics": {
+        "heldout_l1": 0.589021623134613,
+        "heldout_mse": 0.3881978988647461,
+        "heldout_psnr": 4.109468195759816,
+        "l1": 0.5952900648117065,
+        "mse": 0.39319564402103424,
+        "psnr": 4.05470011290691
+      },
+      "overflow_tile_count": 0,
+      "train_render_seconds": {
+        "max_s": 0.013092332999804057,
+        "median_s": 0.01074468749720836,
+        "min_s": 0.008397041994612664,
+        "samples_s": [
+          0.013092332999804057,
+          0.008397041994612664
+        ]
+      }
+    },
+    "init_depth": 2.0,
+    "init_lambda_t": 0.25,
+    "init_opacity": 0.35,
+    "init_precision_xy": 36.0,
+    "loss_mode": "sampled_frame",
+    "lr": 0.02,
+    "parameter_count": 176,
+    "tile_config": {
+      "tile_capacity": 128,
+      "tile_t": 2,
+      "tile_x": 8,
+      "tile_y": 8
+    },
+    "tile_config_key": "8x8x2:128",
+    "train": {
+      "final_loss": 0.40047383308410645,
+      "initial_loss": 0.3873457908630371,
+      "loss_mode": "sampled_frame",
+      "losses": [
+        {
+          "frame": 1,
+          "loss": 0.3873457908630371,
+          "step": 0,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.40047383308410645,
+          "step": 1,
+          "view": 1
+        }
+      ],
+      "sampled_loss_decreased": false,
+      "steps": 1,
+      "train_loop_elapsed_s": 0.16083137498935685
+    },
+    "tube_count": 16
+  }
+}
