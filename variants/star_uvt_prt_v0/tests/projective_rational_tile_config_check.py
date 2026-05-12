@@ -38,7 +38,7 @@ def main() -> None:
 
     assert recommend_projective_rational_tile_config(tube_count=128).key == "8x8x1:128"
     assert recommend_projective_rational_tile_config(tube_count=256).key == "8x8x1:256"
-    assert recommend_projective_rational_tile_config(tube_count=512).key == "4x4x2:256"
+    assert recommend_projective_rational_tile_config(tube_count=512).key == "4x4x2:512"
     assert recommend_projective_rational_tile_config(tube_count=512, camera_motion_scale=3.0).key == "4x4x2:512"
     assert recommend_projective_rational_tile_config(tube_count=1024).key == "4x4x2:512"
     assert (

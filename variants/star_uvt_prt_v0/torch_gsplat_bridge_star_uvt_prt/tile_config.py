@@ -95,7 +95,7 @@ def recommend_projective_rational_tile_config(
     if tube_count <= 256 and camera_motion_scale <= 1.5:
         return ProjectiveRationalTileConfig(8, 8, 1, 256)
     if tube_count <= 512 and camera_motion_scale < 3.0:
-        return ProjectiveRationalTileConfig(4, 4, 2, 256)
+        return ProjectiveRationalTileConfig(4, 4, 2, 512)
     if tube_count <= 1024:
         return ProjectiveRationalTileConfig(4, 4, 2, 512)
     if allow_unverified:

@@ -48,6 +48,7 @@ Last updated: 2026-05-13
 - [x] Gate D2i: exact `tile_t=1` presorted backward shortcut and D2 timing rows.
 - [x] Gate D2j: cached direct-splat compare for `tile_t=1` and 128-tube selector update.
 - [x] Gate D2k: 256-tube cached direct-splat compare for `tile_t=1` and selector update.
+- [x] Gate D2l: 512-tube capacity correction and `tile_t=1` train/render tradeoff.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1065,6 +1066,49 @@ substantially faster than direct dynamic splats in the 72/200-step render
 checks. I updated the verified selector for `tube_count <= 256` normal-motion
 PRT rows to `8x8x1:256`; 512+ tubes stay on the older heuristic until measured.
 
+Gate D2l measures the 512-tube selector tier on the same cached real-D2
+direct-splat comparison. The nominal 512 selector from older synthetic timing
+rows, `4x4x2:256`, is not valid on this real multicam row: it overflows at
+20 steps. The gate therefore checks the capacity correction first, then compares
+the valid `tile_t=2` and `tile_t=1` capacity-512 policies.
+
+Commands:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 512 --splat-count 512 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x2:256 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_512t_512s_20step_depth0p5_tile4x4x2_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 512 --splat-count 512 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:256 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_512t_512s_20step_depth0p5_tile4x4x1cap256_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 512 --splat-count 512 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x2:512 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_512t_512s_20step_depth0p5_tile4x4x2cap512_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 512 --splat-count 512 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_512t_512s_20step_depth0p5_tile4x4x1cap512_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 512 --splat-count 512 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x2:512 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_512t_512s_72step_depth0p5_tile4x4x2cap512_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 512 --splat-count 512 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_512t_512s_72step_depth0p5_tile4x4x1cap512_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 512 --splat-count 512 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x2:512 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_512t_512s_200step_depth0p5_tile4x4x2cap512_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 512 --splat-count 512 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_512t_512s_200step_depth0p5_tile4x4x1cap512_cachedprt_fastmacsplat.json
+```
+
+Result:
+
+```text
+20-step tile4x4x2:256: pass false, max tile 403, overflow 772, PRT PSNR 13.9205/14.1479 dB, train wall 3.722 s, cached render 36.542/36.224 ms; direct splats 15.1559/11.4593 dB, train wall 1.018 s, render 31.707/33.061 ms.
+20-step tile4x4x1:256: pass false, max tile 370, overflow 1123, PRT PSNR 13.6709/14.1018 dB, train wall 2.678 s, cached render 55.127/54.062 ms; direct splats 15.1559/11.4593 dB, train wall 1.109 s, render 25.237/30.853 ms.
+20-step tile4x4x2:512: pass true, max tile 409, overflow 0, PRT PSNR 13.6582/13.9660 dB, train wall 5.793 s, cached render 55.417/51.798 ms; direct splats 15.1559/11.4593 dB, train wall 1.031 s, render 23.607/23.158 ms.
+20-step tile4x4x1:512: pass true, max tile 382, overflow 0, PRT PSNR 13.6736/13.9672 dB, train wall 3.334 s, cached render 71.067/69.025 ms; direct splats 15.1559/11.4593 dB, train wall 1.060 s, render 25.278/31.018 ms.
+72-step tile4x4x2:512: pass true, max tile 296, overflow 0, PRT PSNR 15.6340/14.3135 dB, train wall 14.528 s, cached render 32.762/36.956 ms; direct splats 15.3450/12.0576 dB, train wall 2.068 s, render 23.690/32.892 ms.
+72-step tile4x4x1:512: pass true, max tile 275, overflow 0, PRT PSNR 15.5902/14.3548 dB, train wall 7.406 s, cached render 38.740/42.865 ms; direct splats 15.3450/12.0576 dB, train wall 2.055 s, render 22.158/21.454 ms.
+200-step tile4x4x2:512: pass true, max tile 175, overflow 0, PRT PSNR 16.9642/14.1056 dB, train wall 23.148 s, cached render 11.189/13.588 ms; direct splats 17.7169/12.5350 dB, train wall 5.134 s, render 24.834/31.812 ms.
+200-step tile4x4x1:512: pass true, max tile 181, overflow 0, PRT PSNR 16.6867/14.2889 dB, train wall 12.996 s, cached render 15.707/21.905 ms; direct splats 17.7169/12.5350 dB, train wall 5.550 s, render 28.778/21.441 ms.
+```
+
+Read: the immediate correction is capacity, not `tile_t`. The current
+`4x4x2:256` selector is invalid for the real 512-tube D2 row, so the verified
+generic selector must move to `4x4x2:512`. The `4x4x1:512` path is a real
+train-speed option, cutting PRT train wall from 14.528 s to 7.406 s at 72 steps
+and from 23.148 s to 12.996 s at 200 steps, with slightly better heldout PSNR.
+But it is slower to render than `4x4x2:512` at every measured step count and
+has lower train PSNR at 72/200 steps. Since the same selector currently feeds
+training and eval/playback-style probes, the conservative default is
+`4x4x2:512`; `4x4x1:512` should become an explicit train-speed or split-policy
+choice if we want that optimization.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1085,7 +1129,7 @@ should be measured before splitting a camera window.
 2. Add tile-load scaling scenes that stress moving-camera curvature beyond the synthetic `camera_motion_scale` knob.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
-5. Measure the new `tile_t=1` shortcut at 512 tubes before changing that selector tier.
+5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Profile the remaining inner loops of `projective_rational_tile_pixel_atomic_backward`: alpha replay and atomic accumulation.
 7. Test a lower-atomic or two-pass backward accumulation structure for PRT.
 8. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
