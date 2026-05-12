@@ -101,7 +101,7 @@ def _norm(tensor: torch.Tensor | None) -> float:
     return float(torch.linalg.vector_norm(tensor.detach()).cpu())
 
 
-def run_smoke(*, steps: int, lr: float, forward_mode: str, backward_mode: str = "direct_serial") -> dict[str, Any]:
+def run_smoke(*, steps: int, lr: float, forward_mode: str, backward_mode: str = "tile_pixel_atomic") -> dict[str, Any]:
     if not torch.backends.mps.is_available():
         return {
             "name": "projective_rational_metal_autograd_smoke",
@@ -187,7 +187,7 @@ def main() -> None:
     parser.add_argument(
         "--backward-mode",
         choices=("direct_serial", "tile_pair_atomic", "tile_pixel_atomic"),
-        default="direct_serial",
+        default="tile_pixel_atomic",
     )
     parser.add_argument("--out-json", type=Path)
     args = parser.parse_args()

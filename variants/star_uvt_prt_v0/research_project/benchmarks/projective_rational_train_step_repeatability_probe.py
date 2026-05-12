@@ -173,7 +173,7 @@ def main() -> None:
     parser.add_argument(
         "--backward-mode",
         choices=("direct_serial", "tile_pair_atomic", "tile_pixel_atomic"),
-        default="tile_pair_atomic",
+        default="tile_pixel_atomic",
     )
     parser.add_argument("--out-json", type=Path)
     args = parser.parse_args()

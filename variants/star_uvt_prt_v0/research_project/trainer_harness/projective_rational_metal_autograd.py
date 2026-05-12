@@ -120,7 +120,7 @@ def render_projective_rational_tubes_metal_direct_serial_backward(
     config: UVTRenderConfig,
     *,
     forward_mode: ForwardMode = "tiled",
-    backward_mode: BackwardMode = "direct_serial",
+    backward_mode: BackwardMode = "tile_pixel_atomic",
 ) -> Tensor:
     """Use Metal PRT forward with an explicit Metal backward mode."""
 

@@ -30,6 +30,7 @@ Last updated: 2026-05-13
 - [x] Gate C3d: selector-recommended 256/512-tube PRT train-step timing.
 - [x] Gate C3e: train-step breakdown isolates backward as the scale bottleneck.
 - [x] Gate C4: tile-pixel atomic PRT backward removes the repeated target-slot recompute.
+- [x] Gate C4b: moving-camera stress timing clears tile-pixel default promotion.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -431,6 +432,25 @@ shape of the STAR-UVT rasterizer. It is still synthetic and atomic, so it is
 not a held-out-video quality claim and not bitwise deterministic. But the
 seconds-per-step blocker from C3e is gone on the 256/512 diagnostic cases.
 
+Gate C4b checks the new default candidate under stronger camera motion:
+
+```text
+python3 research_project/benchmarks/projective_rational_train_step_timing_probe.py --tube-counts 512 --tile-config auto --camera-motion-scale 3.0 --backward-mode tile_pixel_atomic --warmups 1 --repeats 3 --out-json research_project/benchmarks/results/projective_rational_train_step_timing_probe_512_motion3_auto_tile_pixel_atomic.json
+python3 research_project/benchmarks/projective_rational_train_step_breakdown_probe.py --tube-counts 512 --tile-config auto --camera-motion-scale 3.0 --backward-mode tile_pixel_atomic --warmups 1 --repeats 3 --out-json research_project/benchmarks/results/projective_rational_train_step_breakdown_probe_512_motion3_auto_tile_pixel_atomic.json
+```
+
+Result:
+
+```text
+512 tubes, motion scale 3.0, selected 4x4x2:512: pass, median step 63.434208001126535 ms, max tile count 276, overflow 0
+breakdown: forward 27.24974999728147 ms, backward 34.7171250032261 ms, wall 62.473084006342106 ms
+```
+
+Read: the stronger moving-camera stress no longer forces a seconds-per-step
+backward path. `tile_pixel_atomic` is now the default PRT training backward for
+the research harness and timing probes, while direct-serial and tile-pair modes
+remain available for parity and regression checks.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -444,7 +464,7 @@ should be measured before splitting a camera window.
 ## Next Gates
 
 1. Decide whether PRT training needs bitwise deterministic gradients or only numeric repeatability.
-2. Make `tile_pixel_atomic` the default PRT train backward only after one moving-camera stress timing pass.
-3. Add tile-load scaling scenes that stress moving-camera curvature.
+2. Add tile-load scaling scenes that stress moving-camera curvature beyond the synthetic `camera_motion_scale` knob.
+3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
-5. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
+5. Run a same-step single-video overfit comparison once the projective-rational mode is wired into the video harness.

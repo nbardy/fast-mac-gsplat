@@ -13,7 +13,7 @@ from research_project.trainer_harness.projective_rational_metal_autograd_smoke i
 
 
 def main() -> None:
-    summary = run_smoke(steps=4, lr=0.1, forward_mode="tiled", backward_mode="tile_pair_atomic")
+    summary = run_smoke(steps=4, lr=0.1, forward_mode="tiled", backward_mode="tile_pixel_atomic")
     print(json.dumps(summary, indent=2, sort_keys=True))
     if not summary["pass"]:
         raise AssertionError("projective rational Metal autograd smoke failed")
