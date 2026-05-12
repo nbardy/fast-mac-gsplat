@@ -34,6 +34,7 @@ Last updated: 2026-05-13
 - [x] Gate C5: local single-video screen-PRT overfit compare.
 - [x] Gate C5b: warmed direct-screen dense eval baseline and same-wall PRT overfit slice.
 - [x] Gate D0: synthetic world-camera forward probe against exact per-frame projection.
+- [x] Gate D1: synthetic world-camera train/holdout compare against dense per-frame projection.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -576,6 +577,46 @@ Result:
 Read: the moving-camera PRT compiler fixes the static-camera error in this
 synthetic forward probe and preserves the tiled STAR-UVT-style speed shape.
 This still is not a direct-splat training or heldout comparison.
+
+Gate D1 adds a synthetic world-camera train/holdout comparison:
+`research_project/benchmarks/projective_rational_world_camera_train_compare.py`.
+It learns world-state tube parameters and evaluates both the training camera
+sequence and a shifted holdout camera sequence. The baseline is exact dense
+per-frame projection of the same trainable world tubes, not full 3DGS or direct
+splats. For this first gate, the compiled footprint `lambda_uv` is detached so
+the result measures the camera-path training loop through world position,
+velocity, temporal precision, opacity, and color.
+
+Smoke:
+
+```text
+python3 research_project/benchmarks/projective_rational_world_camera_train_compare.py --steps 3 --render-repeats 1 --render-warmups 0 --out-json research_project/benchmarks/results/projective_rational_world_camera_train_compare_32_4f_32t_3step_smoke.json
+```
+
+64px rows:
+
+```text
+python3 research_project/benchmarks/projective_rational_world_camera_train_compare.py --height 64 --width 64 --tube-count 64 --steps 20 --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_world_camera_train_compare_64_4f_64t_20step.json
+python3 research_project/benchmarks/projective_rational_world_camera_train_compare.py --height 64 --width 64 --tube-count 64 --steps 20 --tile-config 8x8x2:128 --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_world_camera_train_compare_64_4f_64t_20step_8x8x2_cap128.json
+python3 research_project/benchmarks/projective_rational_world_camera_train_compare.py --height 64 --width 64 --tube-count 128 --steps 20 --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_world_camera_train_compare_64_4f_128t_20step_auto.json
+python3 research_project/benchmarks/projective_rational_world_camera_train_compare.py --height 64 --width 64 --tube-count 128 --steps 20 --tile-config 8x8x2:128 --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_world_camera_train_compare_64_4f_128t_20step_8x8x2_cap128.json
+```
+
+Result:
+
+```text
+32px/32 tubes, auto: PRT train/holdout PSNR 36.1888/36.0396 dB, train wall 271 ms, render 15.7/16.8 ms; dense train/holdout PSNR 36.1877/36.0387 dB, train wall 582 ms, render 43.3/43.9 ms
+64px/64 tubes, auto 4x4x2:512: PRT 38.2043/38.1243 dB, train wall 728 ms, render 29.1/30.2 ms; dense 38.2039/38.1241 dB, train wall 4683 ms, render 77.0/76.8 ms
+64px/64 tubes, 8x8x2:128: PRT 38.2053/38.1246 dB, train wall 970 ms, render 27.7/28.4 ms; dense 38.2039/38.1241 dB, train wall 4758 ms, render 76.5/74.1 ms
+64px/128 tubes, auto 4x4x2:512: PRT 40.6451/40.5645 dB, train wall 1607 ms, render 48.4/49.9 ms; dense 40.6374/40.5579 dB, train wall 7561 ms, render 101.7/100.0 ms
+64px/128 tubes, 8x8x2:128: PRT 40.6390/40.5600 dB, train wall 1393 ms, render 48.7/57.3 ms; dense 40.6374/40.5579 dB, train wall 7390 ms, render 81.7/102.0 ms
+```
+
+Read: D1 proves the trainable world-state path can optimize through the tiled
+PRT camera compiler and evaluate train plus holdout camera sequences. Quality
+matches the exact dense per-frame projection baseline within run noise while
+training and rendering materially faster in these synthetic rows. This is still
+not a full 3DGS/direct-splat comparison and not a real-video heldout result.
 
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet

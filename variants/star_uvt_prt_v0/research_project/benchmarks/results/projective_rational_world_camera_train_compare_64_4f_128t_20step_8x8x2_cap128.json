@@ -1,0 +1,165 @@
+{
+  "camera_motion_scale": 3.0,
+  "camera_poly_degree": 2,
+  "dense_direct_per_frame_projection": {
+    "active_tile_count": null,
+    "final_loss": 8.634976984467357e-05,
+    "holdout_metrics": {
+      "l1": 0.0030288640409708023,
+      "max_abs": 0.1713472604751587,
+      "mse": 8.794415043666959e-05,
+      "psnr": 40.55793042136729
+    },
+    "holdout_render_benchmark_ms": {
+      "max_ms": 116.83045799145475,
+      "median_ms": 101.96383298898581,
+      "min_ms": 97.23162499722093,
+      "repeats": 3,
+      "samples": [
+        97.23162499722093,
+        116.83045799145475,
+        101.96383298898581
+      ],
+      "warmups": 1
+    },
+    "initial_loss": 0.0006167182000353932,
+    "loss_ratio": 0.14001495308508488,
+    "losses": [
+      0.0006167182000353932,
+      0.0005608613137155771,
+      0.0003606250975281,
+      0.00030204158974811435,
+      0.0002923484717030078,
+      0.00025385493063367903,
+      0.00021954206749796867,
+      0.00019753734522964805,
+      0.00017692518304102123,
+      0.00016520735516678542,
+      0.00015300311497412622,
+      0.00013809517258778214,
+      0.0001279390708077699,
+      0.00011662110046017915,
+      0.00011050453031202778,
+      0.0001082153175957501,
+      0.00010694989759940654,
+      9.811054769670591e-05,
+      9.113740816246718e-05,
+      8.653924305690452e-05,
+      8.634976984467357e-05
+    ],
+    "max_tile_count": null,
+    "name": "dense_direct_per_frame_projection_world_tubes",
+    "overflow_tile_count": null,
+    "parameter_count": 1408,
+    "train_metrics": {
+      "l1": 0.0029968495946377516,
+      "max_abs": 0.17148631811141968,
+      "mse": 8.634976984467357e-05,
+      "psnr": 40.63738815656701
+    },
+    "train_render_benchmark_ms": {
+      "max_ms": 86.53333300026134,
+      "median_ms": 81.71704098640475,
+      "min_ms": 80.51629200053867,
+      "repeats": 3,
+      "samples": [
+        81.71704098640475,
+        80.51629200053867,
+        86.53333300026134
+      ],
+      "warmups": 1
+    },
+    "train_wall_ms": 7390.472708008019
+  },
+  "device": "mps",
+  "frames": 4,
+  "height": 64,
+  "holdout_camera_fit_error": 5.824455229230807e-08,
+  "holdout_camera_motion_scale": 2.0,
+  "holdout_x_offset": 0.08,
+  "name": "projective_rational_world_camera_train_compare",
+  "note": "Synthetic world-camera train/holdout comparison. PRT uses tiled Metal projective-rational forward/backward. The baseline uses exact dense per-frame projection of the same trainable world tubes, not full 3DGS.",
+  "pass": true,
+  "projective_rational": {
+    "active_tile_count": 54,
+    "final_loss": 8.63170571392402e-05,
+    "holdout_metrics": {
+      "l1": 0.0030277767218649387,
+      "max_abs": 0.1713506579399109,
+      "mse": 8.790313586359844e-05,
+      "psnr": 40.559956315932986
+    },
+    "holdout_render_benchmark_ms": {
+      "max_ms": 59.25033400126267,
+      "median_ms": 57.311500000650994,
+      "min_ms": 56.753124998067506,
+      "repeats": 3,
+      "samples": [
+        57.311500000650994,
+        59.25033400126267,
+        56.753124998067506
+      ],
+      "warmups": 1
+    },
+    "initial_loss": 0.0006167181418277323,
+    "loss_ratio": 0.1399619230973606,
+    "losses": [
+      0.0006167181418277323,
+      0.0005608583451248705,
+      0.00036058537079952657,
+      0.00030202229390852153,
+      0.00029230694053694606,
+      0.0002538226544857025,
+      0.00021954113617539406,
+      0.00019748168415389955,
+      0.00017694203415885568,
+      0.00016521054203622043,
+      0.00015300717495847493,
+      0.0001380573958158493,
+      0.00012796695227734745,
+      0.00011661640019156039,
+      0.00011048848682548851,
+      0.00010820297757163644,
+      0.00010699257109081373,
+      9.810851770453155e-05,
+      9.111832332564518e-05,
+      8.653524855617434e-05,
+      8.63170571392402e-05
+    ],
+    "max_tile_count": 83,
+    "name": "projective_rational_world_tubes",
+    "overflow_tile_count": 0,
+    "parameter_count": 1408,
+    "train_metrics": {
+      "l1": 0.0029959536623209715,
+      "max_abs": 0.1714709997177124,
+      "mse": 8.63170571392402e-05,
+      "psnr": 40.639033747428435
+    },
+    "train_render_benchmark_ms": {
+      "max_ms": 58.13029200362507,
+      "median_ms": 48.65666700061411,
+      "min_ms": 47.74958299822174,
+      "repeats": 3,
+      "samples": [
+        48.65666700061411,
+        47.74958299822174,
+        58.13029200362507
+      ],
+      "warmups": 1
+    },
+    "train_wall_ms": 1393.3989169890992
+  },
+  "seed": 23,
+  "steps": 20,
+  "tile_config": {
+    "tile_capacity": 128,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8
+  },
+  "tile_config_key": "8x8x2:128",
+  "train_camera_fit_error": 0.0,
+  "tube_count": 128,
+  "width": 64
+}
