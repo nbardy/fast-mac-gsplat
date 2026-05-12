@@ -1,0 +1,73 @@
+{
+  "camera_motion_scale": 1.0,
+  "name": "projective_rational_train_step_timing_probe",
+  "note": "Diagnostic PRT forward+loss+backward+SGD timing; not a video-quality benchmark.",
+  "pass": true,
+  "rows": [
+    {
+      "active_tile_count": 67,
+      "backward_mode": "direct_serial",
+      "camera_fit_error": 5.984424689131629e-08,
+      "final_loss": 0.0011061597615480423,
+      "forward_mode": "tiled",
+      "frames": 8,
+      "height": 48,
+      "initial_loss": 0.001106950337998569,
+      "loss_decreased": true,
+      "losses": [
+        0.001106950337998569,
+        0.0011066757142543793,
+        0.0011064168065786362,
+        0.0011061597615480423
+      ],
+      "lr": 0.02,
+      "max_step_ms": 304.5725419942755,
+      "max_tile_count": 13,
+      "median_step_ms": 303.265750000719,
+      "min_step_ms": 302.7942909975536,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "repeats": 3,
+      "total_tile_pairs": 335,
+      "tube_count": 16,
+      "warmups": 1,
+      "width": 64
+    },
+    {
+      "active_tile_count": 101,
+      "backward_mode": "direct_serial",
+      "camera_fit_error": 5.984424689131629e-08,
+      "final_loss": 0.0016278289258480072,
+      "forward_mode": "tiled",
+      "frames": 8,
+      "height": 48,
+      "initial_loss": 0.0016295439563691616,
+      "loss_decreased": true,
+      "losses": [
+        0.0016295439563691616,
+        0.0016289723571389914,
+        0.0016283910954371095,
+        0.0016278289258480072
+      ],
+      "lr": 0.02,
+      "max_step_ms": 2398.765249992721,
+      "max_tile_count": 38,
+      "median_step_ms": 2398.661458006245,
+      "min_step_ms": 2398.630667012185,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "repeats": 3,
+      "total_tile_pairs": 1335,
+      "tube_count": 64,
+      "warmups": 1,
+      "width": 64
+    }
+  ],
+  "tile_config": {
+    "tile_capacity": 128,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8
+  },
+  "tile_config_key": "8x8x2:128"
+}

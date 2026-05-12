@@ -25,7 +25,8 @@ Last updated: 2026-05-13
 - [x] Gate C1: direct-serial Metal PRT backward parity against C0.
 - [x] Gate C1b: tiled-forward PRT autograd train-step smoke using direct-serial backward.
 - [x] Gate C2: tiled tile-pair atomic PRT backward parity and train-step smoke.
-- [ ] Gate C3: non-tiny PRT train-step timing and deterministic-gradient check.
+- [x] Gate C3a: 16/64-tube PRT train-step timing against direct-serial backward.
+- [ ] Gate C3b: deterministic-gradient/repeatability check for tiled atomic PRT backward.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
 
@@ -302,6 +303,24 @@ Read: PRT now has a tiled backward path wired through autograd. It is still an
 atomic tile-pair path and only checked on the tiny smoke, so the next gate is
 non-tiny train-step timing and repeatability, not more direct-serial parity.
 
+Gate C3a times a small but non-tiny train-step path:
+
+```text
+python3 research_project/benchmarks/projective_rational_train_step_timing_probe.py --tube-counts 16,64 --warmups 1 --repeats 3 --out-json research_project/benchmarks/results/projective_rational_train_step_timing_probe_16_64_tiled_atomic_smoke.json
+python3 research_project/benchmarks/projective_rational_train_step_timing_probe.py --tube-counts 16,64 --backward-mode direct_serial --warmups 1 --repeats 3 --out-json research_project/benchmarks/results/projective_rational_train_step_timing_probe_16_64_direct_serial_smoke.json
+```
+
+Result:
+
+```text
+16 tubes: tile-pair atomic 17.468499994720332 ms, direct serial 303.265750000719 ms, speedup 17.36072073116626x
+64 tubes: tile-pair atomic 73.10462500026915 ms, direct serial 2398.661458006245 ms, speedup 32.81135028047013x
+```
+
+Read: tiled atomic backward changes the training path from correctness-only to
+meaningfully faster on the diagnostic scene. It is still not a video-quality or
+determinism claim; C3b must check repeatability before scaling this path.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -314,8 +333,8 @@ should be measured before splitting a camera window.
 
 ## Next Gates
 
-1. Add a non-tiny PRT train-step timing probe using `backward_mode=tile_pair_atomic`.
-2. Add a deterministic-gradient/repeatability check for tiled atomic PRT backward.
+1. Add a deterministic-gradient/repeatability check for tiled atomic PRT backward.
+2. Scale the PRT train-step timing probe to selector-recommended 256/512 tube cases.
 3. Add tile-load scaling scenes that stress moving-camera curvature.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
