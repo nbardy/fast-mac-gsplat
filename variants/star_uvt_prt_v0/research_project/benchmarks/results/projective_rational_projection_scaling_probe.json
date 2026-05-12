@@ -1,0 +1,220 @@
+{
+  "frame_counts": [
+    8,
+    16,
+    32
+  ],
+  "name": "projective_rational_projection_scaling_probe",
+  "note": "CPU projection-only probe. Timing is diagnostic and is not a Metal rasterizer speed claim.",
+  "pass": true,
+  "rows": [
+    {
+      "camera_degree": 2,
+      "camera_fit_error": 1.1360139495764088e-07,
+      "dynamic_first_order": {
+        "center_max_abs_px": 0.5121097564697266,
+        "curvature_residual_px": 0.5121097564697266
+      },
+      "frames": 8,
+      "pass": true,
+      "per_frame_direct_loop": {
+        "center_max_abs_px": 0.0
+      },
+      "projective_rational": {
+        "center_max_abs_px": 3.0517578125e-05,
+        "compile_eval_to_loop_median_ratio": 2.993735360494023,
+        "eval_only_to_loop_median_ratio": 0.5502569793131162
+      },
+      "timing": {
+        "dynamic_first_order": {
+          "checksum": 4851.2945556640625,
+          "max_ms": 3.137374995276332,
+          "median_ms": 0.4510829894570634,
+          "min_ms": 0.24275000032503158,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "per_frame_direct_loop": {
+          "checksum": 5283.048210144043,
+          "max_ms": 5.5743330012774095,
+          "median_ms": 3.8042079977458343,
+          "min_ms": 2.498000001651235,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "per_frame_direct_vectorized": {
+          "checksum": 5283.048210144043,
+          "max_ms": 4.931667004711926,
+          "median_ms": 3.488666989142075,
+          "min_ms": 3.020417003426701,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "projective_rational_compile_eval": {
+          "checksum": 5283.048210144043,
+          "max_ms": 12.37745898833964,
+          "median_ms": 11.388792001525871,
+          "min_ms": 11.123167001642287,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "projective_rational_eval_only": {
+          "checksum": 5283.048210144043,
+          "max_ms": 2.1486670011654496,
+          "median_ms": 2.093292001518421,
+          "min_ms": 1.4502080011880025,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "static_one_frame_project": {
+          "checksum": 5231.721878051758,
+          "max_ms": 0.7890839915489778,
+          "median_ms": 0.5344999954104424,
+          "min_ms": 0.2202079922426492,
+          "repeats": 5,
+          "warmups": 2
+        }
+      },
+      "tube_count": 8192
+    },
+    {
+      "camera_degree": 2,
+      "camera_fit_error": 5.788593071542891e-08,
+      "dynamic_first_order": {
+        "center_max_abs_px": 1.8731575012207031,
+        "curvature_residual_px": 1.8731575012207031
+      },
+      "frames": 16,
+      "pass": true,
+      "per_frame_direct_loop": {
+        "center_max_abs_px": 0.0
+      },
+      "projective_rational": {
+        "center_max_abs_px": 3.0517578125e-05,
+        "compile_eval_to_loop_median_ratio": 3.7227411537412602,
+        "eval_only_to_loop_median_ratio": 0.8468964859414072
+      },
+      "timing": {
+        "dynamic_first_order": {
+          "checksum": 5668.2568359375,
+          "max_ms": 1.2795830116374418,
+          "median_ms": 0.7730419893050566,
+          "min_ms": 0.2615830017020926,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "per_frame_direct_loop": {
+          "checksum": 6108.4088134765625,
+          "max_ms": 12.921083005494438,
+          "median_ms": 3.7725000001955777,
+          "min_ms": 2.83033300365787,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "per_frame_direct_vectorized": {
+          "checksum": 6108.4088134765625,
+          "max_ms": 76.988667002297,
+          "median_ms": 32.3032919986872,
+          "min_ms": 7.221457999548875,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "projective_rational_compile_eval": {
+          "checksum": 6108.4088134765625,
+          "max_ms": 40.927166992332786,
+          "median_ms": 14.04404100321699,
+          "min_ms": 12.953124998603016,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "projective_rational_eval_only": {
+          "checksum": 6108.4088134765625,
+          "max_ms": 5.142082998645492,
+          "median_ms": 3.194916993379593,
+          "min_ms": 2.6312080008210614,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "static_one_frame_project": {
+          "checksum": 6069.830093383789,
+          "max_ms": 0.7473750010831282,
+          "median_ms": 0.352917006239295,
+          "min_ms": 0.23204099852591753,
+          "repeats": 5,
+          "warmups": 2
+        }
+      },
+      "tube_count": 8192
+    },
+    {
+      "camera_degree": 2,
+      "camera_fit_error": 1.0481348766688825e-07,
+      "dynamic_first_order": {
+        "center_max_abs_px": 10.037454605102539,
+        "curvature_residual_px": 10.037454605102539
+      },
+      "frames": 32,
+      "pass": true,
+      "per_frame_direct_loop": {
+        "center_max_abs_px": 0.0
+      },
+      "projective_rational": {
+        "center_max_abs_px": 3.0517578125e-05,
+        "compile_eval_to_loop_median_ratio": 1.9017045987060486,
+        "eval_only_to_loop_median_ratio": 0.508044537596757
+      },
+      "timing": {
+        "dynamic_first_order": {
+          "checksum": 4989.43115234375,
+          "max_ms": 7.889250002335757,
+          "median_ms": 1.7877500067697838,
+          "min_ms": 1.3184170093154535,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "per_frame_direct_loop": {
+          "checksum": 5418.818511962891,
+          "max_ms": 18.322791991522536,
+          "median_ms": 14.287707992480136,
+          "min_ms": 10.437375007313676,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "per_frame_direct_vectorized": {
+          "checksum": 5418.818511962891,
+          "max_ms": 12.607666008989327,
+          "median_ms": 10.53591699746903,
+          "min_ms": 6.433708011172712,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "projective_rational_compile_eval": {
+          "checksum": 5418.818511962891,
+          "max_ms": 93.57808300410397,
+          "median_ms": 27.17099999426864,
+          "min_ms": 17.989208005019464,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "projective_rational_eval_only": {
+          "checksum": 5418.818511962891,
+          "max_ms": 7.582917009131052,
+          "median_ms": 7.258792000357062,
+          "min_ms": 4.4400000042514876,
+          "repeats": 5,
+          "warmups": 2
+        },
+        "static_one_frame_project": {
+          "checksum": 5166.5266036987305,
+          "max_ms": 1.157958002295345,
+          "median_ms": 0.7927500118967146,
+          "min_ms": 0.773666994064115,
+          "repeats": 5,
+          "warmups": 2
+        }
+      },
+      "tube_count": 8192
+    }
+  ],
+  "tube_count": 8192
+}
