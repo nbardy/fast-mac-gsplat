@@ -33,6 +33,7 @@ Last updated: 2026-05-13
 - [x] Gate C4b: moving-camera stress timing clears tile-pixel default promotion.
 - [x] Gate C5: local single-video screen-PRT overfit compare.
 - [x] Gate C5b: warmed direct-screen dense eval baseline and same-wall PRT overfit slice.
+- [x] Gate C5c: 128px fuller-res single-video overfit slice.
 - [x] Gate D0: synthetic world-camera forward probe against exact per-frame projection.
 - [x] Gate D1: synthetic world-camera train/holdout compare against dense per-frame projection.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
@@ -546,6 +547,43 @@ slightly faster to render at this tiny scale. At roughly the same training
 wall-clock budget, PRT reaches 28.7287778393939 dB against the baseline's
 25.085034375204227 dB. This is still a local screen-space overfit bridge, not a
 world-camera or heldout proof.
+
+Gate C5c repeats the local overfit comparison at 128px with comparable
+parameters: 256 PRT tubes (`4352` params) against 128 per-frame screen splats
+(`4096` params). The baseline still trains through the loop path and evaluates
+with warmed dense vectorized rendering. This is still screen-space overfit, not
+full 3DGS or world-camera heldout.
+
+Same-step 200-step run:
+
+```text
+python3 research_project/benchmarks/projective_rational_video_overfit_compare.py ../../../../../tests/fixtures/lalaland.mp4 --target-size 128 --max-frames 4 --steps 200 --tube-count 256 --per-frame-splats 128 --baseline-eval-render-mode dense_vectorized --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_video_overfit_compare_lalaland_128_4f_200step_256prt_128pf_loop_train_dense_eval_warm.json --contact-sheet research_project/benchmarks/results/projective_rational_video_overfit_compare_lalaland_128_4f_200step_256prt_128pf_loop_train_dense_eval_warm.png
+```
+
+Result:
+
+```text
+PRT: parameters 4352, PSNR 26.84948999585133 dB, final MSE 0.002065622713416815, train wall 5563.788790997933 ms, warmed render median 11.02358300704509 ms, max tile count 60, overflow 0
+direct-screen baseline: parameters 4096, PSNR 25.49720083433901 dB, final MSE 0.002820200053974986, train wall 48931.89037499542 ms, warmed dense-eval render median 23.29466700030025 ms
+```
+
+Same-wall PRT-only run against that baseline's training budget:
+
+```text
+python3 research_project/benchmarks/projective_rational_video_overfit_compare.py ../../../../../tests/fixtures/lalaland.mp4 --target-size 128 --max-frames 4 --steps 1750 --tube-count 256 --per-frame-splats 128 --skip-baseline --render-warmups 1 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_video_overfit_compare_lalaland_128_4f_1750step_256prt_same_wall_as_128pf_baseline.json --contact-sheet research_project/benchmarks/results/projective_rational_video_overfit_compare_lalaland_128_4f_1750step_256prt_same_wall_as_128pf_baseline.png
+```
+
+Result:
+
+```text
+PRT: parameters 4352, PSNR 29.328427511305453 dB, final MSE 0.001167232170701027, train wall 54290.77204100031 ms, warmed render median 10.575874999631196 ms, max tile count 59, overflow 0
+```
+
+Read: unlike the 64px tiny case, PRT is faster than the warmed dense
+direct-screen eval path at 128px while also training much faster and reaching
+higher same-step quality. Same-wall PRT reaches 29.328427511305453 dB. The
+visual contact sheets remain blurry because this is a low-primitive screen-space
+overfit, but the fuller-resolution row preserves the speed/quality direction.
 
 Gate D0 adds a synthetic world-camera forward probe:
 `research_project/benchmarks/projective_rational_world_camera_forward_probe.py`.
