@@ -54,6 +54,7 @@ Last updated: 2026-05-13
 - [x] Gate D2o: 1024-tube alpha-threshold support-shrink sweep.
 - [x] Gate D2p: support-only alpha threshold for 1024-tube capacity.
 - [x] Gate D2q: 1024-tube support-pruned `tile_t=1` train-speed comparison.
+- [x] Gate D2r: lower 1024-tube `tile_t=1` support-pruning cutoff.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1287,6 +1288,42 @@ selector: train-speed can prefer `tile_t=1` plus support pruning, while
 fidelity/playback can prefer the more conservative `tile_t=2` support-pruned
 path until a schedule or split policy is chosen.
 
+Gate D2r lowers the `tile_t=1` support-only threshold to find the actual 1024
+capacity cutoff instead of carrying forward the conservative `40/255` row.
+
+Commands:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-alpha-threshold 0.00392156862745098 --prt-support-alpha-threshold 0.10980392156862745 --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_72step_depth0p5_tile4x4x1cap512_supportalpha28over255_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-alpha-threshold 0.00392156862745098 --prt-support-alpha-threshold 0.11764705882352941 --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_72step_depth0p5_tile4x4x1cap512_supportalpha30over255_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-alpha-threshold 0.00392156862745098 --prt-support-alpha-threshold 0.12549019607843137 --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_72step_depth0p5_tile4x4x1cap512_supportalpha32over255_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-alpha-threshold 0.00392156862745098 --prt-support-alpha-threshold 0.13333333333333333 --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_72step_depth0p5_tile4x4x1cap512_supportalpha34over255_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-alpha-threshold 0.00392156862745098 --prt-support-alpha-threshold 0.1411764705882353 --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_72step_depth0p5_tile4x4x1cap512_supportalpha36over255_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-alpha-threshold 0.00392156862745098 --prt-support-alpha-threshold 0.12549019607843137 --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_20step_depth0p5_tile4x4x1cap512_supportalpha32over255_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-alpha-threshold 0.00392156862745098 --prt-support-alpha-threshold 0.12549019607843137 --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_200step_depth0p5_tile4x4x1cap512_supportalpha32over255_cachedprt_fastmacsplat.json
+```
+
+Result:
+
+```text
+72-step support 28/255: pass false, max tile 522, overflow 5, PRT PSNR 15.0506/14.0894 dB, train wall 4.033 s, cached render 16.602/17.824 ms.
+72-step support 30/255: pass false, max tile 516, overflow 1, PRT PSNR 15.1236/14.1822 dB, train wall 3.759 s, cached render 15.624/15.379 ms.
+72-step support 32/255: pass true, max tile 493, overflow 0, PRT PSNR 15.0573/14.3772 dB, train wall 3.447 s, cached render 13.597/13.530 ms.
+72-step support 34/255: pass true, max tile 470, overflow 0, PRT PSNR 15.1768/14.0598 dB, train wall 2.819 s, cached render 12.169/12.355 ms.
+72-step support 36/255: pass true, max tile 440, overflow 0, PRT PSNR 15.1518/14.1611 dB, train wall 3.260 s, cached render 13.417/14.079 ms.
+72-step support 40/255: pass true, max tile 404, overflow 0, PRT PSNR 14.9909/14.2664 dB, train wall 2.815 s, cached render 14.292/13.553 ms.
+20-step support 32/255: pass true, max tile 459, overflow 0, PRT PSNR 13.8584/14.4636 dB, train wall 1.081 s, cached render 17.384/16.484 ms.
+200-step support 32/255: pass true, max tile 387, overflow 0, PRT PSNR 16.2663/13.9667 dB, train wall 8.887 s, cached render 14.342/14.038 ms; direct splats PSNR 18.1577/12.5995 dB, train wall 5.825 s.
+```
+
+Read: `32/255` is the lowest measured `tile_t=1` 1024 support threshold that
+clears the 72-step capacity gate; `30/255` still overflows. This makes
+`32/255` the current train-speed policy candidate, not `40/255`: it preserves
+more support, improves heldout PSNR at 72 and 200 steps, and still passes
+20/72/200 with zero overflow. The tradeoff is thinner capacity margin at
+72 steps (`493/512`) and slower 20-step render, so a conservative render/eval
+policy may still prefer a higher threshold or a margin rule.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1308,7 +1345,7 @@ should be measured before splitting a camera window.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
-6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` is measured as the train-speed choice.
+6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Profile the remaining inner loops of `projective_rational_tile_pixel_atomic_backward`: alpha replay and atomic accumulation.
 8. Test a lower-atomic or two-pass backward accumulation structure for PRT.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
