@@ -31,6 +31,7 @@ Last updated: 2026-05-13
 - [x] Gate C3e: train-step breakdown isolates backward as the scale bottleneck.
 - [x] Gate C4: tile-pixel atomic PRT backward removes the repeated target-slot recompute.
 - [x] Gate C4b: moving-camera stress timing clears tile-pixel default promotion.
+- [x] Gate C5: local single-video screen-PRT overfit compare.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -451,6 +452,37 @@ backward path. `tile_pixel_atomic` is now the default PRT training backward for
 the research harness and timing probes, while direct-serial and tile-pair modes
 remain available for parity and regression checks.
 
+Gate C5 adds a local single-video overfit benchmark:
+`research_project/benchmarks/projective_rational_video_overfit_compare.py`.
+This is intentionally narrower than the full world-camera harness: it optimizes
+screen-time PRT tubes with the Metal `tile_pixel_atomic` backward and compares
+against a simple per-frame screen Gaussian baseline. The baseline is not full
+3DGS.
+
+Smoke:
+
+```text
+python3 research_project/benchmarks/projective_rational_video_overfit_compare.py ../../../../../tests/fixtures/lalaland.mp4 --target-size 32 --max-frames 3 --steps 2 --tube-count 32 --per-frame-splats 16 --render-repeats 1 --out-json research_project/benchmarks/results/projective_rational_video_overfit_compare_lalaland_32_3f_2step_smoke.json --contact-sheet research_project/benchmarks/results/projective_rational_video_overfit_compare_lalaland_32_3f_2step_smoke.png
+```
+
+Local overfit comparison:
+
+```text
+python3 research_project/benchmarks/projective_rational_video_overfit_compare.py ../../../../../tests/fixtures/lalaland.mp4 --target-size 64 --max-frames 4 --steps 20 --tube-count 128 --per-frame-splats 32 --render-repeats 3 --out-json research_project/benchmarks/results/projective_rational_video_overfit_compare_lalaland_64_4f_20step_128prt_32pf.json --contact-sheet research_project/benchmarks/results/projective_rational_video_overfit_compare_lalaland_64_4f_20step_128prt_32pf.png
+```
+
+Result:
+
+```text
+PRT: pass, PSNR 22.707577326192375 dB, final MSE 0.0053609563037753105, median render 6.408583998563699 ms, train wall 308.9734999957727 ms
+per-frame screen Gaussian: PSNR 15.421344281483602 dB, final MSE 0.02869892120361328, median render 16.718792001483962 ms, train wall 1824.5809170039138 ms
+PRT tile load: max tile count 66, overflow 0
+```
+
+Read: this is the first actual video-overfit result for the PRT fork. It is a
+good local sanity check for the rasterizer and optimizer path, but it is not yet
+the requested full comparison against direct splats or world-camera heldout.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -467,4 +499,4 @@ should be measured before splitting a camera window.
 2. Add tile-load scaling scenes that stress moving-camera curvature beyond the synthetic `camera_motion_scale` knob.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
-5. Run a same-step single-video overfit comparison once the projective-rational mode is wired into the video harness.
+5. Run the same-step comparison through the world-camera harness against direct splats/full per-frame reference.
