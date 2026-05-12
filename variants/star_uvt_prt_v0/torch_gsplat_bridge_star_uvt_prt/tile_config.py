@@ -43,6 +43,7 @@ class ProjectiveRationalTileConfig:
 
 DEFAULT_PROJECTIVE_RATIONAL_TILE_CANDIDATES: tuple[ProjectiveRationalTileConfig, ...] = (
     ProjectiveRationalTileConfig(8, 8, 1, 128),
+    ProjectiveRationalTileConfig(8, 8, 1, 256),
     ProjectiveRationalTileConfig(8, 8, 2, 128),
     ProjectiveRationalTileConfig(8, 8, 2, 256),
     ProjectiveRationalTileConfig(8, 8, 2, 512),
@@ -92,7 +93,7 @@ def recommend_projective_rational_tile_config(
     if tube_count <= 128 and camera_motion_scale <= 1.5:
         return ProjectiveRationalTileConfig(8, 8, 1, 128)
     if tube_count <= 256 and camera_motion_scale <= 1.5:
-        return ProjectiveRationalTileConfig(8, 8, 2, 256)
+        return ProjectiveRationalTileConfig(8, 8, 1, 256)
     if tube_count <= 512 and camera_motion_scale < 3.0:
         return ProjectiveRationalTileConfig(4, 4, 2, 256)
     if tube_count <= 1024:
