@@ -18,7 +18,8 @@ Last updated: 2026-05-13
 - [x] Gate B2: diagnostic tiled PRT timing and tile-load scaling against direct PRT.
 - [x] Gate B3: capacity-256 256-tube overflow clearance smoke.
 - [x] Gate B4: support tightening and tile-shape sweep.
-- [ ] Gate B5: production PRT tile config selection and integration.
+- [x] Gate B5a: production PRT tile config selector and process-static env contract.
+- [ ] Gate B5b: launch/training integration applies selector before first Metal shader call.
 - [ ] Gate C: PRT backward parity.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -141,9 +142,10 @@ stress case it selected `4x4x2:256`:
 ```text
 8x8x2:128: fail, max tile count 303, overflow tiles 33
 8x8x2:256: fail, max tile count 303, overflow tiles 16
-8x8x2:512: pass, max tile count 303, overflow 0, tiled/direct ratio 0.8764672143637684
+8x8x2:512: pass, max tile count 303, overflow 0, tiled/direct ratio 0.8633058849041223
 4x4x2:128: fail, max tile count 238, overflow tiles 80
-4x4x2:256: pass, max tile count 238, overflow 0, tiled/direct ratio 0.5893798248457015
+4x4x2:256: pass, max tile count 238, overflow 0, tiled/direct ratio 0.5604430452008048
+4x4x2:512: pass, max tile count 238, overflow 0, tiled/direct ratio 0.6103707983493051
 ```
 
 Read: capacity and tile shape have to be chosen together. `4x4` fixes the
@@ -176,6 +178,27 @@ Read: stronger camera motion pushes the 512-tube case over the cap-256 edge.
 The 4x4 shape still controls the hotspot better than 8x8, but the selected
 capacity has to rise to 512 under stronger camera motion.
 
+Gate B5 now has a production-facing selector module:
+`torch_gsplat_bridge_star_uvt_prt.tile_config`. It exposes typed tile configs,
+env export, the verified heuristic selector, and the shared sweep-summary
+selector used by `projective_rational_tile_config_sweep.py`.
+
+The current verified heuristic is deliberately narrow:
+
+```text
+<=128 tubes, normal motion: 8x8x2:128
+<=256 tubes, normal motion: 8x8x2:256
+<=512 tubes, normal motion: 4x4x2:256
+<=512 tubes, motion scale >= 3: 4x4x2:512
+<=1024 tubes: 4x4x2:512
+>1024 tubes: fail closed unless allow_unverified=True
+```
+
+The env contract is still process-static from the caller's point of view: set
+`STAR_UVT_TILE_X/Y/T/CAPACITY` before the first Metal shader call and construct
+`UVTRenderConfig` from the same values. The selector does not make tile constants
+runtime-switchable inside an already-warmed process.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -188,7 +211,7 @@ should be measured before splitting a camera window.
 
 ## Next Gates
 
-1. Add a production PRT tile config selector instead of requiring manual env flags.
+1. Wire the selector into the training/timing launch path so projective-rational runs do not hand-roll env flags.
 2. Add tile-load scaling scenes that stress moving-camera curvature.
 3. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 4. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.

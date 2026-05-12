@@ -12,6 +12,15 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 PROBE = ROOT / "research_project/benchmarks/projective_rational_metal_forward_timing_probe.py"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from torch_gsplat_bridge_star_uvt_prt.tile_config import (  # noqa: E402
+    DEFAULT_PROJECTIVE_RATIONAL_TILE_CANDIDATES,
+    ProjectiveRationalTileConfig,
+    parse_projective_rational_tile_config,
+    select_projective_rational_tile_summary,
+)
 
 
 def _parse_int_list(value: str) -> list[int]:
@@ -23,24 +32,18 @@ def _parse_int_list(value: str) -> list[int]:
     return out
 
 
-def _parse_candidate(value: str) -> dict[str, int]:
+def _parse_candidate(value: str) -> ProjectiveRationalTileConfig:
     try:
-        shape, capacity_raw = value.split(":", 1)
-        tile_x_raw, tile_y_raw, tile_t_raw = shape.lower().split("x", 2)
-        candidate = {
-            "tile_x": int(tile_x_raw),
-            "tile_y": int(tile_y_raw),
-            "tile_t": int(tile_t_raw),
-            "tile_capacity": int(capacity_raw),
-        }
+        return parse_projective_rational_tile_config(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError("candidate must look like 8x8x2:128") from exc
-    if any(item <= 0 for item in candidate.values()):
-        raise argparse.ArgumentTypeError("candidate values must be positive")
-    return candidate
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-def _candidate_summary(candidate: dict[str, int], probe: dict[str, Any], returncode: int) -> dict[str, Any]:
+def _candidate_summary(
+    candidate: ProjectiveRationalTileConfig,
+    probe: dict[str, Any],
+    returncode: int,
+) -> dict[str, Any]:
     rows = list(probe.get("rows", []))
     overflow_tiles = sum(int(row.get("overflow_tile_count", 0)) for row in rows)
     max_tile_count = max((int(row.get("max_tile_count", 0)) for row in rows), default=0)
@@ -49,9 +52,10 @@ def _candidate_summary(candidate: dict[str, int], probe: dict[str, Any], returnc
     total_tile_pairs = sum(int(row.get("total_tile_pairs", 0)) for row in rows)
     active_tile_count = sum(int(row.get("active_tile_count", 0)) for row in rows)
     pass_gate = bool(probe.get("pass")) and returncode == 0
-    capacity_overage = max(0, max_tile_count - int(candidate["tile_capacity"]))
+    capacity_overage = max(0, max_tile_count - int(candidate.tile_capacity))
     return {
-        "candidate": candidate,
+        "candidate": candidate.as_dict(),
+        "candidate_key": candidate.key,
         "pass": pass_gate,
         "returncode": returncode,
         "max_tile_count": max_tile_count,
@@ -79,7 +83,7 @@ def _candidate_summary(candidate: dict[str, int], probe: dict[str, Any], returnc
 
 def _run_candidate(
     *,
-    candidate: dict[str, int],
+    candidate: ProjectiveRationalTileConfig,
     tube_counts: list[int],
     frames: int,
     width: int,
@@ -91,18 +95,11 @@ def _run_candidate(
     tmpdir: Path,
 ) -> dict[str, Any]:
     out_json = tmpdir / (
-        f"prt_tile_sweep_{candidate['tile_x']}x{candidate['tile_y']}x"
-        f"{candidate['tile_t']}_cap{candidate['tile_capacity']}.json"
+        f"prt_tile_sweep_{candidate.tile_x}x{candidate.tile_y}x"
+        f"{candidate.tile_t}_cap{candidate.tile_capacity}.json"
     )
     env = os.environ.copy()
-    env.update(
-        {
-            "STAR_UVT_TILE_X": str(candidate["tile_x"]),
-            "STAR_UVT_TILE_Y": str(candidate["tile_y"]),
-            "STAR_UVT_TILE_T": str(candidate["tile_t"]),
-            "STAR_UVT_TILE_CAPACITY": str(candidate["tile_capacity"]),
-        }
-    )
+    env.update(candidate.as_env())
     cmd = [
         sys.executable,
         str(PROBE),
@@ -117,13 +114,13 @@ def _run_candidate(
         "--camera-motion-scale",
         str(camera_motion_scale),
         "--tile-x",
-        str(candidate["tile_x"]),
+        str(candidate.tile_x),
         "--tile-y",
-        str(candidate["tile_y"]),
+        str(candidate.tile_y),
         "--tile-t",
-        str(candidate["tile_t"]),
+        str(candidate.tile_t),
         "--tile-capacity",
-        str(candidate["tile_capacity"]),
+        str(candidate.tile_capacity),
         "--warmups",
         str(warmups),
         "--repeats",
@@ -143,7 +140,7 @@ def _run_candidate(
 
 def run_sweep(
     *,
-    candidates: list[dict[str, int]],
+    candidates: list[ProjectiveRationalTileConfig],
     tube_counts: list[int],
     frames: int,
     width: int,
@@ -172,9 +169,7 @@ def run_sweep(
             )
             for candidate in candidates
         ]
-    passing = [candidate for candidate in results if bool(candidate["pass"])]
-    selected = min(passing, key=lambda item: tuple(item["selection_score"])) if passing else None
-    best_failed = min(results, key=lambda item: tuple(item["failure_score"])) if selected is None else None
+    selected, best_failed = select_projective_rational_tile_summary(results)
     return {
         "name": "projective_rational_tile_config_sweep",
         "note": "Each candidate runs in a fresh process because Metal shader tile constants are process-static.",
@@ -199,14 +194,7 @@ def main() -> None:
         "--candidates",
         type=_parse_candidate,
         nargs="+",
-        default=[
-            _parse_candidate("8x8x2:128"),
-            _parse_candidate("8x8x2:256"),
-            _parse_candidate("8x8x2:512"),
-            _parse_candidate("4x4x2:128"),
-            _parse_candidate("4x4x2:256"),
-            _parse_candidate("4x4x2:512"),
-        ],
+        default=list(DEFAULT_PROJECTIVE_RATIONAL_TILE_CANDIDATES),
     )
     parser.add_argument("--tube-counts", type=_parse_int_list, default=[512])
     parser.add_argument("--frames", type=int, default=8)
