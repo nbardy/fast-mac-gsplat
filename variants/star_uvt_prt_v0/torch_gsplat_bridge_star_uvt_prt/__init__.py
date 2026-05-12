@@ -8,6 +8,7 @@ from .tile_config import (
 )
 from .rasterize import (
     Gate0Stats,
+    ProjectiveRationalBackwardProfileResult,
     ProjectiveRationalProfileResult,
     UVTRenderConfig,
     UVTRenderResult,
@@ -21,6 +22,7 @@ from .rasterize import (
     projective_rational_direct_serial_backward,
     projective_rational_tile_pair_atomic_backward,
     projective_rational_tile_pixel_atomic_backward,
+    profile_projective_rational_tile_pixel_atomic_backward,
     profile_projective_rational_tubes_tiled,
     render_uvt_tubes,
     render_projective_rational_tubes_direct,
@@ -50,6 +52,7 @@ from .rasterize import (
 __all__ = [
     "DEFAULT_PROJECTIVE_RATIONAL_TILE_CANDIDATES",
     "Gate0Stats",
+    "ProjectiveRationalBackwardProfileResult",
     "ProjectiveRationalTileConfig",
     "ProjectiveRationalProfileResult",
     "UVTRenderConfig",
@@ -66,6 +69,7 @@ __all__ = [
     "projective_rational_direct_serial_backward",
     "projective_rational_tile_pair_atomic_backward",
     "projective_rational_tile_pixel_atomic_backward",
+    "profile_projective_rational_tile_pixel_atomic_backward",
     "profile_projective_rational_tubes_tiled",
     "render_uvt_tubes",
     "render_projective_rational_tubes_direct",

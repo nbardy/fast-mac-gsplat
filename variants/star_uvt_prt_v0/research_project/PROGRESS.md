@@ -44,6 +44,7 @@ Last updated: 2026-05-13
 - [x] Gate D2e: cached-compiled PRT eval timing in the direct-splat compare harness.
 - [x] Gate D2f: analytic 2x2 compiler inverse removes the tiny-matrix `torch.linalg.inv` bottleneck.
 - [x] Gate D2g: real-multicam PRT train-step breakdown after compiler inverse fix.
+- [x] Gate D2h: internal phase timing for `projective_rational_tile_pixel_atomic_backward`.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -912,6 +913,43 @@ D2 PRT training path is now dominated by backward, then forward rasterization.
 The next speed pass should profile or split `projective_rational_tile_pixel_atomic_backward`
 instead of further optimizing the camera compiler.
 
+Gate D2h adds a profiled sibling of `projective_rational_tile_pixel_atomic_backward`
+that runs the same clear, bin, gradient-clear, and backward kernels while
+synchronizing after each phase. It returns the same gradients plus tile counts,
+overflow, unstable tiles, and a CPU timing tensor. The normal autograd path is
+unchanged.
+
+Validation:
+
+```text
+python3 tests/projective_rational_tile_pixel_atomic_backward_check.py
+python3 tests/projective_rational_metal_autograd_smoke.py
+```
+
+Commands:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py --target-size 32 --max-frames 2 --steps 1 --prt-tubes 16 --init-depth 0.5 --profile-warmups 0 --profile-repeats 1 --out-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_32_2f_16t_1step_smoke.json
+python3 research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --init-depth 0.5 --profile-warmups 1 --profile-repeats 3 --out-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_64_4f_128t_20step_depth0p5.json
+python3 research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 128 --init-depth 0.5 --profile-warmups 1 --profile-repeats 3 --out-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_64_4f_128t_72step_depth0p5.json
+python3 research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 128 --init-depth 0.5 --profile-warmups 1 --profile-repeats 3 --out-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_64_4f_128t_200step_depth0p5.json
+```
+
+Result:
+
+```text
+20-step profiled backward: total 9.087 ms, backward kernel 8.514 ms (93.7%), bin 0.258 ms, clear tiles 0.164 ms, clear grads 0.168 ms, max tile 96, overflow 0.
+72-step profiled backward: total 14.869 ms, backward kernel 13.968 ms (93.9%), bin 0.451 ms, clear tiles 0.225 ms, clear grads 0.227 ms, max tile 70, overflow 0.
+200-step profiled backward: total 8.655 ms, backward kernel 7.678 ms (88.7%), bin 0.532 ms, clear tiles 0.226 ms, clear grads 0.252 ms, max tile 46, overflow 0.
+```
+
+Read: D2g's backward bottleneck is not hiding in tile allocation, clearing, or
+binning. On the real D2 rows, the pixel-atomic backward shader itself accounts
+for roughly 89-94% of profiled backward wall. The next useful speed work is
+inside `projective_rational_tile_pixel_atomic_backward`: reduce per-pixel
+sample ordering/recomputation, or test a different accumulation structure, not
+more host-side phase splitting.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -932,5 +970,6 @@ should be measured before splitting a camera window.
 2. Add tile-load scaling scenes that stress moving-camera curvature beyond the synthetic `camera_motion_scale` knob.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
-5. Add internal phase timing for `projective_rational_tile_pixel_atomic_backward`.
-6. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
+5. Profile the inner loops of `projective_rational_tile_pixel_atomic_backward`: sample ordering, alpha replay, and atomic accumulation.
+6. Test a lower-atomic or two-pass backward accumulation structure for PRT.
+7. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.

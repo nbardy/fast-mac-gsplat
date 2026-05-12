@@ -1,0 +1,272 @@
+{
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "camera_poly_degree": 1,
+    "device": "mps",
+    "frames": 2,
+    "height": 32,
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "max_frames": 2,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "profile_frame": 0,
+    "profile_view": 0,
+    "sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+    "seed": 31,
+    "steps": 1,
+    "target_size": 32,
+    "train_camera_fit_errors": [
+      0.0,
+      0.0
+    ],
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "width": 32
+  },
+  "name": "projective_rational_multicam_backward_phase_profile",
+  "note": "Diagnostic internal phase timing for the PRT tile-pixel atomic backward on the real D2 multicam bundle. Each profiled phase synchronizes, so totals are diagnostic rather than normal train wall time.",
+  "pass": true,
+  "projective_rational": {
+    "backward_profile": {
+      "grad_all_finite": true,
+      "grad_max_abs": 1.529783844947815,
+      "max_tile_count": 16,
+      "mean_tile_count": 12.0,
+      "overflow_tile_count": 0,
+      "repeats": 1,
+      "timing_rows_ms": [
+        {
+          "alloc_grads_ms": 0.002417,
+          "alloc_tiles_ms": 0.003167,
+          "backward_kernel_ms": 1.073,
+          "bin_tubes_ms": 0.232792,
+          "clear_grads_ms": 0.158,
+          "clear_tiles_ms": 0.464166,
+          "total_ms": 1.933583
+        }
+      ],
+      "timing_summary_ms": {
+        "alloc_grads_ms": {
+          "max_ms": 0.002417,
+          "median_ms": 0.002417,
+          "min_ms": 0.002417,
+          "samples_ms": [
+            0.002417
+          ]
+        },
+        "alloc_tiles_ms": {
+          "max_ms": 0.003167,
+          "median_ms": 0.003167,
+          "min_ms": 0.003167,
+          "samples_ms": [
+            0.003167
+          ]
+        },
+        "backward_kernel_ms": {
+          "max_ms": 1.073,
+          "median_ms": 1.073,
+          "min_ms": 1.073,
+          "samples_ms": [
+            1.073
+          ]
+        },
+        "bin_tubes_ms": {
+          "max_ms": 0.232792,
+          "median_ms": 0.232792,
+          "min_ms": 0.232792,
+          "samples_ms": [
+            0.232792
+          ]
+        },
+        "clear_grads_ms": {
+          "max_ms": 0.158,
+          "median_ms": 0.158,
+          "min_ms": 0.158,
+          "samples_ms": [
+            0.158
+          ]
+        },
+        "clear_tiles_ms": {
+          "max_ms": 0.464166,
+          "median_ms": 0.464166,
+          "min_ms": 0.464166,
+          "samples_ms": [
+            0.464166
+          ]
+        },
+        "median_share_of_total": {
+          "alloc_grads_ms": 0.0012500109899600896,
+          "alloc_tiles_ms": 0.0016378919343002084,
+          "backward_kernel_ms": 0.5549283377025966,
+          "bin_tubes_ms": 0.12039410772643326,
+          "clear_grads_ms": 0.0817135856076517,
+          "clear_tiles_ms": 0.24005486188076747,
+          "total_ms": 1.0
+        },
+        "total_ms": {
+          "max_ms": 1.933583,
+          "median_ms": 1.933583,
+          "min_ms": 1.933583,
+          "samples_ms": [
+            1.933583
+          ]
+        }
+      },
+      "unstable_tile_count": 16,
+      "warmups": 0
+    },
+    "init_depth": 0.5,
+    "init_lambda_t": 0.25,
+    "init_opacity": 0.35,
+    "init_precision_xy": 36.0,
+    "loss_mode": "sampled_frame",
+    "lr": 0.02,
+    "parameter_count": 176,
+    "tile_config": {
+      "tile_capacity": 128,
+      "tile_t": 2,
+      "tile_x": 8,
+      "tile_y": 8
+    },
+    "tile_config_key": "8x8x2:128",
+    "train": {
+      "diagnostic_sync_boundaries": true,
+      "final_loss": 0.13740544021129608,
+      "initial_loss": 0.16378700733184814,
+      "loss_mode": "sampled_frame",
+      "losses": [
+        {
+          "frame": 1,
+          "loss": 0.16378700733184814,
+          "step": 0,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.13740544021129608,
+          "step": 1,
+          "view": 1
+        }
+      ],
+      "sampled_loss_decreased": true,
+      "steps": 1,
+      "timing_rows": [
+        {
+          "backward_s": 0.03925579201313667,
+          "compile_s": 0.02509233400633093,
+          "forward_s": 0.011087999999290332,
+          "frame": 1,
+          "loss_s": 0.004556499989121221,
+          "optimizer_s": 0.014920332992915064,
+          "sample_s": 0.010883208000450395,
+          "step": 0,
+          "step_total_s": 0.10620158399979118,
+          "view": 0,
+          "zero_grad_s": 0.00035041599767282605
+        },
+        {
+          "backward_s": 0.0,
+          "compile_s": 0.002351584000280127,
+          "forward_s": 0.0013793340040137991,
+          "frame": 1,
+          "loss_s": 0.0002977909898618236,
+          "optimizer_s": 0.0,
+          "sample_s": 0.0005300420016283169,
+          "step": 1,
+          "step_total_s": 0.004633083997759968,
+          "view": 1,
+          "zero_grad_s": 3.733400080818683e-05
+        }
+      ],
+      "timing_summary_s": {
+        "backward_s": {
+          "max_s": 0.03925579201313667,
+          "median_s": 0.019627896006568335,
+          "min_s": 0.0,
+          "samples_s": [
+            0.03925579201313667,
+            0.0
+          ]
+        },
+        "compile_s": {
+          "max_s": 0.02509233400633093,
+          "median_s": 0.013721959003305528,
+          "min_s": 0.002351584000280127,
+          "samples_s": [
+            0.02509233400633093,
+            0.002351584000280127
+          ]
+        },
+        "forward_s": {
+          "max_s": 0.011087999999290332,
+          "median_s": 0.006233667001652066,
+          "min_s": 0.0013793340040137991,
+          "samples_s": [
+            0.011087999999290332,
+            0.0013793340040137991
+          ]
+        },
+        "loss_s": {
+          "max_s": 0.004556499989121221,
+          "median_s": 0.0024271454894915223,
+          "min_s": 0.0002977909898618236,
+          "samples_s": [
+            0.004556499989121221,
+            0.0002977909898618236
+          ]
+        },
+        "median_share_of_step": {
+          "backward_s": 0.3541833320058667,
+          "compile_s": 0.24761131604794828,
+          "forward_s": 0.112485869525766,
+          "loss_s": 0.043797586681906225,
+          "optimizer_s": 0.134617924720492,
+          "sample_s": 0.10297545170912484,
+          "step_total_s": 1.0,
+          "zero_grad_s": 0.0034984540982211454
+        },
+        "optimizer_s": {
+          "max_s": 0.014920332992915064,
+          "median_s": 0.007460166496457532,
+          "min_s": 0.0,
+          "samples_s": [
+            0.014920332992915064,
+            0.0
+          ]
+        },
+        "sample_s": {
+          "max_s": 0.010883208000450395,
+          "median_s": 0.005706625001039356,
+          "min_s": 0.0005300420016283169,
+          "samples_s": [
+            0.010883208000450395,
+            0.0005300420016283169
+          ]
+        },
+        "step_total_s": {
+          "max_s": 0.10620158399979118,
+          "median_s": 0.055417333998775575,
+          "min_s": 0.004633083997759968,
+          "samples_s": [
+            0.10620158399979118,
+            0.004633083997759968
+          ]
+        },
+        "zero_grad_s": {
+          "max_s": 0.00035041599767282605,
+          "median_s": 0.00019387499924050644,
+          "min_s": 3.733400080818683e-05,
+          "samples_s": [
+            0.00035041599767282605,
+            3.733400080818683e-05
+          ]
+        }
+      },
+      "train_loop_elapsed_s": 0.1119213329948252
+    },
+    "tube_count": 16
+  }
+}
