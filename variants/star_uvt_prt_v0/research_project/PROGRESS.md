@@ -49,6 +49,7 @@ Last updated: 2026-05-13
 - [x] Gate D2j: cached direct-splat compare for `tile_t=1` and 128-tube selector update.
 - [x] Gate D2k: 256-tube cached direct-splat compare for `tile_t=1` and selector update.
 - [x] Gate D2l: 512-tube capacity correction and `tile_t=1` train/render tradeoff.
+- [x] Gate D2m: 1024-tube real-D2 overflow check and fail-closed selector ceiling.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1109,6 +1110,32 @@ training and eval/playback-style probes, the conservative default is
 `4x4x2:512`; `4x4x1:512` should become an explicit train-speed or split-policy
 choice if we want that optimization.
 
+Gate D2m tests the remaining advertised 1024-tube selector tier on the same
+real D2 multicam compare. This is only a 20-step validity probe; it is not a
+quality or speed matrix. Both capacity-512 variants overflow, so 1024 tubes is
+not verified on this real row.
+
+Commands:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x2:512 --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_20step_depth0p5_tile4x4x2cap512_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_20step_depth0p5_tile4x4x1cap512_cachedprt_fastmacsplat.json
+```
+
+Result:
+
+```text
+20-step tile4x4x2:512: pass false, max tile 835, overflow 841, PRT PSNR 13.4417/14.1006 dB, train wall 15.216 s, cached render 101.945/114.930 ms.
+20-step tile4x4x1:512: pass false, max tile 784, overflow 1260, PRT PSNR 13.2017/14.1768 dB, train wall 6.126 s, cached render 135.066/134.430 ms.
+```
+
+Read: neither `tile_t=2` nor `tile_t=1` can make 1024 tubes valid with the
+current 4x4 spatial tiles and max capacity 512. The selector now fails closed
+above 512 tubes unless `allow_unverified=True` is explicit. To re-enable 1024,
+we need a real capacity strategy: residual-certified footprint tightening,
+camera-window segmentation, smaller effective support, or a different
+accumulation/bucketing path.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1130,6 +1157,7 @@ should be measured before splitting a camera window.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
-6. Profile the remaining inner loops of `projective_rational_tile_pixel_atomic_backward`: alpha replay and atomic accumulation.
-7. Test a lower-atomic or two-pass backward accumulation structure for PRT.
-8. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
+6. Add a 1024-tube capacity strategy before re-enabling auto selector support above 512 tubes.
+7. Profile the remaining inner loops of `projective_rational_tile_pixel_atomic_backward`: alpha replay and atomic accumulation.
+8. Test a lower-atomic or two-pass backward accumulation structure for PRT.
+9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.

@@ -94,13 +94,11 @@ def recommend_projective_rational_tile_config(
         return ProjectiveRationalTileConfig(8, 8, 1, 128)
     if tube_count <= 256 and camera_motion_scale <= 1.5:
         return ProjectiveRationalTileConfig(8, 8, 1, 256)
-    if tube_count <= 512 and camera_motion_scale < 3.0:
-        return ProjectiveRationalTileConfig(4, 4, 2, 512)
-    if tube_count <= 1024:
+    if tube_count <= 512:
         return ProjectiveRationalTileConfig(4, 4, 2, 512)
     if allow_unverified:
         return ProjectiveRationalTileConfig(4, 4, 2, 512)
-    raise ValueError("PRT tile config is only verified up to 1024 tubes")
+    raise ValueError("PRT tile config is only verified up to 512 tubes")
 
 
 def select_projective_rational_tile_summary(

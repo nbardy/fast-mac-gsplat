@@ -40,7 +40,7 @@ def main() -> None:
     assert recommend_projective_rational_tile_config(tube_count=256).key == "8x8x1:256"
     assert recommend_projective_rational_tile_config(tube_count=512).key == "4x4x2:512"
     assert recommend_projective_rational_tile_config(tube_count=512, camera_motion_scale=3.0).key == "4x4x2:512"
-    assert recommend_projective_rational_tile_config(tube_count=1024).key == "4x4x2:512"
+    assert recommend_projective_rational_tile_config(tube_count=1024, allow_unverified=True).key == "4x4x2:512"
     assert (
         _resolve_tile_config(
             Namespace(
@@ -71,9 +71,9 @@ def main() -> None:
     )
 
     try:
-        recommend_projective_rational_tile_config(tube_count=2048)
+        recommend_projective_rational_tile_config(tube_count=1024)
     except ValueError as exc:
-        assert "verified up to 1024" in str(exc)
+        assert "verified up to 512" in str(exc)
     else:
         raise AssertionError("unverified tube count must fail closed")
 
