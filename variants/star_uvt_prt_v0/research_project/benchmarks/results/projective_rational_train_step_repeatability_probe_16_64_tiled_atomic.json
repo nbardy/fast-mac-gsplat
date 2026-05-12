@@ -1,0 +1,66 @@
+{
+  "abs_tol": 1e-06,
+  "camera_motion_scale": 1.0,
+  "name": "projective_rational_train_step_repeatability_probe",
+  "note": "Same-state PRT backward repeatability check for loss and parameter gradients.",
+  "pass": true,
+  "rows": [
+    {
+      "active_tile_count": 67,
+      "backward_mode": "tile_pair_atomic",
+      "camera_fit_error": 5.984424689131629e-08,
+      "forward_mode": "tiled",
+      "frames": 8,
+      "height": 48,
+      "max_grad_delta": 3.7834979593753815e-10,
+      "max_loss_delta": 0.0,
+      "max_tile_count": 13,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "repeats": 3,
+      "total_tile_pairs": 335,
+      "tube_count": 16,
+      "unique_digest_counts": {
+        "center_t": 3,
+        "color": 3,
+        "h_coeff": 3,
+        "lambda_t": 3,
+        "lambda_uv": 3,
+        "opacity": 3
+      },
+      "width": 64
+    },
+    {
+      "active_tile_count": 101,
+      "backward_mode": "tile_pair_atomic",
+      "camera_fit_error": 5.984424689131629e-08,
+      "forward_mode": "tiled",
+      "frames": 8,
+      "height": 48,
+      "max_grad_delta": 2.3283064365386963e-10,
+      "max_loss_delta": 0.0,
+      "max_tile_count": 38,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "repeats": 3,
+      "total_tile_pairs": 1335,
+      "tube_count": 64,
+      "unique_digest_counts": {
+        "center_t": 3,
+        "color": 3,
+        "h_coeff": 3,
+        "lambda_t": 3,
+        "lambda_uv": 3,
+        "opacity": 3
+      },
+      "width": 64
+    }
+  ],
+  "tile_config": {
+    "tile_capacity": 128,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8
+  },
+  "tile_config_key": "8x8x2:128"
+}

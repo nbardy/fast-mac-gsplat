@@ -26,7 +26,8 @@ Last updated: 2026-05-13
 - [x] Gate C1b: tiled-forward PRT autograd train-step smoke using direct-serial backward.
 - [x] Gate C2: tiled tile-pair atomic PRT backward parity and train-step smoke.
 - [x] Gate C3a: 16/64-tube PRT train-step timing against direct-serial backward.
-- [ ] Gate C3b: deterministic-gradient/repeatability check for tiled atomic PRT backward.
+- [x] Gate C3b: numeric repeatability check for tiled atomic PRT backward.
+- [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
 
@@ -321,6 +322,24 @@ Read: tiled atomic backward changes the training path from correctness-only to
 meaningfully faster on the diagnostic scene. It is still not a video-quality or
 determinism claim; C3b must check repeatability before scaling this path.
 
+Gate C3b checks same-state repeatability:
+
+```text
+python3 research_project/benchmarks/projective_rational_train_step_repeatability_probe.py --tube-counts 16,64 --repeats 3 --out-json research_project/benchmarks/results/projective_rational_train_step_repeatability_probe_16_64_tiled_atomic.json
+```
+
+Result:
+
+```text
+16 tubes: pass, max_grad_delta 3.7834979593753815e-10, max_loss_delta 0.0
+64 tubes: pass, max_grad_delta 2.3283064365386963e-10, max_loss_delta 0.0
+unique gradient digests: 3/3 for every checked parameter
+```
+
+Read: tiled atomic PRT backward is numerically repeatable at this scale but not
+bitwise deterministic. That is acceptable for a first train-speed path, but C3c
+keeps the bitwise-determinism decision explicit before promotion.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -333,7 +352,7 @@ should be measured before splitting a camera window.
 
 ## Next Gates
 
-1. Add a deterministic-gradient/repeatability check for tiled atomic PRT backward.
+1. Decide whether PRT training needs bitwise deterministic gradients or only numeric repeatability.
 2. Scale the PRT train-step timing probe to selector-recommended 256/512 tube cases.
 3. Add tile-load scaling scenes that stress moving-camera curvature.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
