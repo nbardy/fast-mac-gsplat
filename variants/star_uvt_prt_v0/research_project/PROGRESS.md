@@ -27,6 +27,7 @@ Last updated: 2026-05-13
 - [x] Gate C2: tiled tile-pair atomic PRT backward parity and train-step smoke.
 - [x] Gate C3a: 16/64-tube PRT train-step timing against direct-serial backward.
 - [x] Gate C3b: numeric repeatability check for tiled atomic PRT backward.
+- [x] Gate C3d: selector-recommended 256/512-tube PRT train-step timing.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -340,6 +341,28 @@ Read: tiled atomic PRT backward is numerically repeatable at this scale but not
 bitwise deterministic. That is acceptable for a first train-speed path, but C3c
 keeps the bitwise-determinism decision explicit before promotion.
 
+Gate C3d scales the same tiled atomic train-step probe to the selector-recommended
+256/512-tube cases:
+
+```text
+python3 research_project/benchmarks/projective_rational_train_step_timing_probe.py --tube-counts 256 --tile-config auto --warmups 1 --repeats 3 --out-json research_project/benchmarks/results/projective_rational_train_step_timing_probe_256_auto_tiled_atomic.json
+python3 research_project/benchmarks/projective_rational_train_step_timing_probe.py --tube-counts 512 --tile-config auto --warmups 1 --repeats 3 --out-json research_project/benchmarks/results/projective_rational_train_step_timing_probe_512_auto_tiled_atomic.json
+```
+
+Result:
+
+```text
+256 tubes, 8x8x2:256: pass, median step 1535.383541995543 ms, max tile count 150, overflow 0
+512 tubes, 4x4x2:256: pass, median step 2989.2938749981113 ms, max tile count 238, overflow 0
+```
+
+Read: the selector-recommended train path now stays finite, overflow-free, and
+loss-decreasing at 256/512 tubes on the synthetic diagnostic scene. That is a
+correctness and scaling-validity result, not the speed win. The current tiled
+atomic training path is still seconds per step at this size, so the rasterizer
+needs a real train-speed pass before it can support the original STAR-UVT speed
+claim.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -353,7 +376,7 @@ should be measured before splitting a camera window.
 ## Next Gates
 
 1. Decide whether PRT training needs bitwise deterministic gradients or only numeric repeatability.
-2. Scale the PRT train-step timing probe to selector-recommended 256/512 tube cases.
+2. Profile the 256/512 train-step path to split forward, tile build, backward, and optimizer costs.
 3. Add tile-load scaling scenes that stress moving-camera curvature.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
