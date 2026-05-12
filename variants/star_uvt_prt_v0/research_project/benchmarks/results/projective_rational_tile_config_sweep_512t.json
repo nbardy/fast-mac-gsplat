@@ -12,10 +12,10 @@
       "failure_score": [
         33,
         175,
-        0.47951751947402954,
-        9.329416992841288
+        0.7457685470581055,
+        10.583625000435859
       ],
-      "max_abs_error_vs_direct": 0.47951751947402954,
+      "max_abs_error_vs_direct": 0.7457685470581055,
       "max_tile_count": 303,
       "overflow_tile_count": 33,
       "pass": false,
@@ -25,15 +25,15 @@
           "active_tile_count": 119,
           "camera_fit_error": 5.984424689131629e-08,
           "direct": {
-            "max_ms": 39.20595798990689,
-            "median_ms": 37.555916991550475,
-            "min_ms": 36.861708998912945,
+            "max_ms": 39.107207994675264,
+            "median_ms": 38.77491599996574,
+            "min_ms": 36.941500002285466,
             "repeats": 3,
             "warmups": 1
           },
           "frames": 8,
           "height": 48,
-          "max_abs_error_vs_direct": 0.47951751947402954,
+          "max_abs_error_vs_direct": 0.7457685470581055,
           "max_tile_count": 303,
           "overflow_tile_count": 33,
           "pass": false,
@@ -42,13 +42,13 @@
           "tile_x": 8,
           "tile_y": 8,
           "tiled": {
-            "max_ms": 11.195625003892928,
-            "median_ms": 9.329416992841288,
-            "min_ms": 8.8887499878183,
+            "max_ms": 11.04825000220444,
+            "median_ms": 10.583625000435859,
+            "min_ms": 10.466082996572368,
             "repeats": 3,
             "warmups": 1
           },
-          "tiled_to_direct_median_ratio": 0.24841403805797815,
+          "tiled_to_direct_median_ratio": 0.27295030118041286,
           "total_tile_pairs": 8055,
           "tube_count": 512,
           "width": 64
@@ -56,12 +56,12 @@
       ],
       "selection_score": [
         1,
-        9.329416992841288,
+        10.583625000435859,
         8055,
         119,
         303
       ],
-      "tiled_median_ms_sum": 9.329416992841288,
+      "tiled_median_ms_sum": 10.583625000435859,
       "total_tile_pairs": 8055
     },
     {
@@ -75,10 +75,10 @@
       "failure_score": [
         16,
         47,
-        0.29215410351753235,
-        27.057083003455773
+        0.293802410364151,
+        27.4041669908911
       ],
-      "max_abs_error_vs_direct": 0.29215410351753235,
+      "max_abs_error_vs_direct": 0.293802410364151,
       "max_tile_count": 303,
       "overflow_tile_count": 16,
       "pass": false,
@@ -88,15 +88,15 @@
           "active_tile_count": 119,
           "camera_fit_error": 5.984424689131629e-08,
           "direct": {
-            "max_ms": 42.938875005347654,
-            "median_ms": 39.444250011001714,
-            "min_ms": 37.32095900340937,
+            "max_ms": 37.733292003395036,
+            "median_ms": 37.618749993271194,
+            "min_ms": 37.09604100731667,
             "repeats": 3,
             "warmups": 1
           },
           "frames": 8,
           "height": 48,
-          "max_abs_error_vs_direct": 0.29215410351753235,
+          "max_abs_error_vs_direct": 0.293802410364151,
           "max_tile_count": 303,
           "overflow_tile_count": 16,
           "pass": false,
@@ -105,13 +105,13 @@
           "tile_x": 8,
           "tile_y": 8,
           "tiled": {
-            "max_ms": 27.388250004150905,
-            "median_ms": 27.057083003455773,
-            "min_ms": 25.72058400255628,
+            "max_ms": 28.030708999722265,
+            "median_ms": 27.4041669908911,
+            "min_ms": 26.76762499322649,
             "repeats": 3,
             "warmups": 1
           },
-          "tiled_to_direct_median_ratio": 0.6859575982788129,
+          "tiled_to_direct_median_ratio": 0.7284709618419761,
           "total_tile_pairs": 10754,
           "tube_count": 512,
           "width": 64
@@ -119,12 +119,12 @@
       ],
       "selection_score": [
         1,
-        27.057083003455773,
+        27.4041669908911,
         10754,
         119,
         303
       ],
-      "tiled_median_ms_sum": 27.057083003455773,
+      "tiled_median_ms_sum": 27.4041669908911,
       "total_tile_pairs": 10754
     },
     {
@@ -139,7 +139,7 @@
         0,
         0,
         7.152557373046875e-07,
-        33.03587499249261
+        33.52033298870083
       ],
       "max_abs_error_vs_direct": 7.152557373046875e-07,
       "max_tile_count": 303,
@@ -151,9 +151,9 @@
           "active_tile_count": 119,
           "camera_fit_error": 5.984424689131629e-08,
           "direct": {
-            "max_ms": 38.84604200720787,
-            "median_ms": 37.69208300218452,
-            "min_ms": 37.435209000250325,
+            "max_ms": 40.73945799609646,
+            "median_ms": 38.827875003335066,
+            "min_ms": 37.016124988440424,
             "repeats": 3,
             "warmups": 1
           },
@@ -168,13 +168,13 @@
           "tile_x": 8,
           "tile_y": 8,
           "tiled": {
-            "max_ms": 33.56475000327919,
-            "median_ms": 33.03587499249261,
-            "min_ms": 32.969167004921474,
+            "max_ms": 34.061415994074196,
+            "median_ms": 33.52033298870083,
+            "min_ms": 33.3664170029806,
             "repeats": 3,
             "warmups": 1
           },
-          "tiled_to_direct_median_ratio": 0.8764672143637684,
+          "tiled_to_direct_median_ratio": 0.8633058849041223,
           "total_tile_pairs": 11119,
           "tube_count": 512,
           "width": 64
@@ -182,12 +182,12 @@
       ],
       "selection_score": [
         0,
-        33.03587499249261,
+        33.52033298870083,
         11119,
         119,
         303
       ],
-      "tiled_median_ms_sum": 33.03587499249261,
+      "tiled_median_ms_sum": 33.52033298870083,
       "total_tile_pairs": 11119
     },
     {
@@ -201,10 +201,10 @@
       "failure_score": [
         80,
         110,
-        0.3358839750289917,
-        7.59979200665839
+        0.3452981412410736,
+        7.917041992186569
       ],
-      "max_abs_error_vs_direct": 0.3358839750289917,
+      "max_abs_error_vs_direct": 0.3452981412410736,
       "max_tile_count": 238,
       "overflow_tile_count": 80,
       "pass": false,
@@ -214,15 +214,15 @@
           "active_tile_count": 415,
           "camera_fit_error": 5.984424689131629e-08,
           "direct": {
-            "max_ms": 41.83362500043586,
-            "median_ms": 40.33945800620131,
-            "min_ms": 37.68408398900647,
+            "max_ms": 41.70983299263753,
+            "median_ms": 39.24966699560173,
+            "min_ms": 38.06474999873899,
             "repeats": 3,
             "warmups": 1
           },
           "frames": 8,
           "height": 48,
-          "max_abs_error_vs_direct": 0.3358839750289917,
+          "max_abs_error_vs_direct": 0.3452981412410736,
           "max_tile_count": 238,
           "overflow_tile_count": 80,
           "pass": false,
@@ -231,13 +231,13 @@
           "tile_x": 4,
           "tile_y": 4,
           "tiled": {
-            "max_ms": 7.71099999838043,
-            "median_ms": 7.59979200665839,
-            "min_ms": 7.327667000936344,
+            "max_ms": 8.002750008017756,
+            "median_ms": 7.917041992186569,
+            "min_ms": 7.623042009072378,
             "repeats": 3,
             "warmups": 1
           },
-          "tiled_to_direct_median_ratio": 0.1883959870132635,
+          "tiled_to_direct_median_ratio": 0.201709787577911,
           "total_tile_pairs": 23351,
           "tube_count": 512,
           "width": 64
@@ -245,12 +245,12 @@
       ],
       "selection_score": [
         1,
-        7.59979200665839,
+        7.917041992186569,
         23351,
         415,
         238
       ],
-      "tiled_median_ms_sum": 7.59979200665839,
+      "tiled_median_ms_sum": 7.917041992186569,
       "total_tile_pairs": 23351
     },
     {
@@ -265,7 +265,7 @@
         0,
         0,
         7.152557373046875e-07,
-        22.393167004338466
+        21.617292004521005
       ],
       "max_abs_error_vs_direct": 7.152557373046875e-07,
       "max_tile_count": 238,
@@ -277,9 +277,9 @@
           "active_tile_count": 415,
           "camera_fit_error": 5.984424689131629e-08,
           "direct": {
-            "max_ms": 38.76033298729453,
-            "median_ms": 37.994458005414344,
-            "min_ms": 36.94487499888055,
+            "max_ms": 42.02483399421908,
+            "median_ms": 38.57179099577479,
+            "min_ms": 37.62866699253209,
             "repeats": 3,
             "warmups": 1
           },
@@ -294,13 +294,13 @@
           "tile_x": 4,
           "tile_y": 4,
           "tiled": {
-            "max_ms": 22.493041993584484,
-            "median_ms": 22.393167004338466,
-            "min_ms": 21.442459008540027,
+            "max_ms": 22.464791996753775,
+            "median_ms": 21.617292004521005,
+            "min_ms": 21.500874994671904,
             "repeats": 3,
             "warmups": 1
           },
-          "tiled_to_direct_median_ratio": 0.5893798248457015,
+          "tiled_to_direct_median_ratio": 0.5604430452008048,
           "total_tile_pairs": 27892,
           "tube_count": 512,
           "width": 64
@@ -308,12 +308,75 @@
       ],
       "selection_score": [
         0,
-        22.393167004338466,
+        21.617292004521005,
         27892,
         415,
         238
       ],
-      "tiled_median_ms_sum": 22.393167004338466,
+      "tiled_median_ms_sum": 21.617292004521005,
+      "total_tile_pairs": 27892
+    },
+    {
+      "active_tile_count": 415,
+      "candidate": {
+        "tile_capacity": 512,
+        "tile_t": 2,
+        "tile_x": 4,
+        "tile_y": 4
+      },
+      "failure_score": [
+        0,
+        0,
+        7.152557373046875e-07,
+        22.7719169924967
+      ],
+      "max_abs_error_vs_direct": 7.152557373046875e-07,
+      "max_tile_count": 238,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "returncode": 0,
+      "rows": [
+        {
+          "active_tile_count": 415,
+          "camera_fit_error": 5.984424689131629e-08,
+          "direct": {
+            "max_ms": 38.536332998774014,
+            "median_ms": 37.30833299050573,
+            "min_ms": 37.21741600020323,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "frames": 8,
+          "height": 48,
+          "max_abs_error_vs_direct": 7.152557373046875e-07,
+          "max_tile_count": 238,
+          "overflow_tile_count": 0,
+          "pass": true,
+          "tile_capacity": 512,
+          "tile_t": 2,
+          "tile_x": 4,
+          "tile_y": 4,
+          "tiled": {
+            "max_ms": 23.006332994555123,
+            "median_ms": 22.7719169924967,
+            "min_ms": 21.915749995969236,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "tiled_to_direct_median_ratio": 0.6103707983493051,
+          "total_tile_pairs": 27892,
+          "tube_count": 512,
+          "width": 64
+        }
+      ],
+      "selection_score": [
+        0,
+        22.7719169924967,
+        27892,
+        415,
+        238
+      ],
+      "tiled_median_ms_sum": 22.7719169924967,
       "total_tile_pairs": 27892
     }
   ],
@@ -336,7 +399,7 @@
       0,
       0,
       7.152557373046875e-07,
-      22.393167004338466
+      21.617292004521005
     ],
     "max_abs_error_vs_direct": 7.152557373046875e-07,
     "max_tile_count": 238,
@@ -348,9 +411,9 @@
         "active_tile_count": 415,
         "camera_fit_error": 5.984424689131629e-08,
         "direct": {
-          "max_ms": 38.76033298729453,
-          "median_ms": 37.994458005414344,
-          "min_ms": 36.94487499888055,
+          "max_ms": 42.02483399421908,
+          "median_ms": 38.57179099577479,
+          "min_ms": 37.62866699253209,
           "repeats": 3,
           "warmups": 1
         },
@@ -365,13 +428,13 @@
         "tile_x": 4,
         "tile_y": 4,
         "tiled": {
-          "max_ms": 22.493041993584484,
-          "median_ms": 22.393167004338466,
-          "min_ms": 21.442459008540027,
+          "max_ms": 22.464791996753775,
+          "median_ms": 21.617292004521005,
+          "min_ms": 21.500874994671904,
           "repeats": 3,
           "warmups": 1
         },
-        "tiled_to_direct_median_ratio": 0.5893798248457015,
+        "tiled_to_direct_median_ratio": 0.5604430452008048,
         "total_tile_pairs": 27892,
         "tube_count": 512,
         "width": 64
@@ -379,12 +442,12 @@
     ],
     "selection_score": [
       0,
-      22.393167004338466,
+      21.617292004521005,
       27892,
       415,
       238
     ],
-    "tiled_median_ms_sum": 22.393167004338466,
+    "tiled_median_ms_sum": 21.617292004521005,
     "total_tile_pairs": 27892
   },
   "tube_counts": [

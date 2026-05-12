@@ -151,6 +151,18 @@ hotspot shape, but only cap 256 keeps all active tile lists valid. `8x8` with
 cap 512 is valid but slower on this smoke, so shape splitting beats a pure
 capacity bump here.
 
+At 1024 tubes, the selected configuration moves to `4x4x2:512`:
+
+```text
+8x8x2:512: fail, max tile count 609, overflow tiles 16
+4x4x2:256: fail, max tile count 496, overflow tiles 80
+4x4x2:512: pass, max tile count 496, overflow 0, tiled/direct ratio 0.6402926779318678
+```
+
+Read: the current cost model needs both a shape ladder and a capacity ladder.
+`4x4` remains the right shape in this synthetic hotspot, but the capacity tier
+must rise from 256 to 512 by 1024 tubes.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path

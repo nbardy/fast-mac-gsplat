@@ -199,6 +199,7 @@ def main() -> None:
             _parse_candidate("8x8x2:512"),
             _parse_candidate("4x4x2:128"),
             _parse_candidate("4x4x2:256"),
+            _parse_candidate("4x4x2:512"),
         ],
     )
     parser.add_argument("--tube-counts", type=_parse_int_list, default=[512])
