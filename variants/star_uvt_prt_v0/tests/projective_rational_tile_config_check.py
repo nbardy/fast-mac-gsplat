@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from argparse import Namespace
 from pathlib import Path
 import sys
 
@@ -14,6 +15,9 @@ from torch_gsplat_bridge_star_uvt_prt.tile_config import (  # noqa: E402
     parse_projective_rational_tile_config,
     recommend_projective_rational_tile_config,
     select_projective_rational_tile_summary,
+)
+from research_project.benchmarks.projective_rational_metal_forward_timing_probe import (  # noqa: E402
+    _resolve_tile_config,
 )
 
 
@@ -37,6 +41,34 @@ def main() -> None:
     assert recommend_projective_rational_tile_config(tube_count=512).key == "4x4x2:256"
     assert recommend_projective_rational_tile_config(tube_count=512, camera_motion_scale=3.0).key == "4x4x2:512"
     assert recommend_projective_rational_tile_config(tube_count=1024).key == "4x4x2:512"
+    assert (
+        _resolve_tile_config(
+            Namespace(
+                tile_config="auto",
+                tube_counts=[512],
+                camera_motion_scale=3.0,
+                tile_x=8,
+                tile_y=8,
+                tile_t=2,
+                tile_capacity=128,
+            )
+        ).key
+        == "4x4x2:512"
+    )
+    assert (
+        _resolve_tile_config(
+            Namespace(
+                tile_config="4x4x2:256",
+                tube_counts=[1024],
+                camera_motion_scale=3.0,
+                tile_x=8,
+                tile_y=8,
+                tile_t=2,
+                tile_capacity=128,
+            )
+        ).key
+        == "4x4x2:256"
+    )
 
     try:
         recommend_projective_rational_tile_config(tube_count=2048)

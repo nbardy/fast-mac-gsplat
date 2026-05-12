@@ -19,7 +19,8 @@ Last updated: 2026-05-13
 - [x] Gate B3: capacity-256 256-tube overflow clearance smoke.
 - [x] Gate B4: support tightening and tile-shape sweep.
 - [x] Gate B5a: production PRT tile config selector and process-static env contract.
-- [ ] Gate B5b: launch/training integration applies selector before first Metal shader call.
+- [x] Gate B5b: timing launch integration applies selector before first Metal shader call.
+- [ ] Gate B5c: training integration applies selector before first Metal shader call.
 - [ ] Gate C: PRT backward parity.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -199,6 +200,12 @@ The env contract is still process-static from the caller's point of view: set
 `UVTRenderConfig` from the same values. The selector does not make tile constants
 runtime-switchable inside an already-warmed process.
 
+The forward timing probe now accepts `--tile-config auto` or an explicit key like
+`--tile-config 4x4x2:256`, applies the corresponding env vars before rendering,
+and records `tile_config` / `tile_config_key` in the output JSON. Manual
+`--tile-x/y/t/capacity` flags still work and are also mirrored into env by the
+probe, so timing launches no longer need separate shell env flags.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -211,7 +218,7 @@ should be measured before splitting a camera window.
 
 ## Next Gates
 
-1. Wire the selector into the training/timing launch path so projective-rational runs do not hand-roll env flags.
+1. Wire the selector into the real training path so projective-rational runs do not hand-roll env flags.
 2. Add tile-load scaling scenes that stress moving-camera curvature.
 3. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 4. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.

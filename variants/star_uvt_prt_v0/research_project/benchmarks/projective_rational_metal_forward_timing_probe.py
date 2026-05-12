@@ -21,7 +21,11 @@ from research_project.trainer_harness.projective_rational import (  # noqa: E402
     fit_camera_path_polynomial,
 )
 from torch_gsplat_bridge_star_uvt_prt import (  # noqa: E402
+    ProjectiveRationalTileConfig,
     UVTRenderConfig,
+    apply_projective_rational_tile_env,
+    parse_projective_rational_tile_config,
+    recommend_projective_rational_tile_config,
     render_projective_rational_tubes_direct,
     render_projective_rational_tubes_tiled,
 )
@@ -247,6 +251,17 @@ def _parse_int_list(value: str) -> list[int]:
     return out
 
 
+def _resolve_tile_config(args: argparse.Namespace) -> ProjectiveRationalTileConfig:
+    if args.tile_config is None:
+        return ProjectiveRationalTileConfig(args.tile_x, args.tile_y, args.tile_t, args.tile_capacity)
+    if args.tile_config == "auto":
+        return recommend_projective_rational_tile_config(
+            tube_count=max(args.tube_counts),
+            camera_motion_scale=args.camera_motion_scale,
+        )
+    return parse_projective_rational_tile_config(args.tile_config)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tube-counts", type=_parse_int_list, default=[16, 64, 128])
@@ -257,27 +272,35 @@ def main() -> None:
     parser.add_argument("--tile-y", type=int, default=8)
     parser.add_argument("--tile-t", type=int, default=2)
     parser.add_argument("--tile-capacity", type=int, default=128)
+    parser.add_argument("--tile-config", default=None, help="'auto' or an explicit config like 4x4x2:256")
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--repeats", type=int, default=10)
     parser.add_argument("--seed", type=int, default=31)
     parser.add_argument("--camera-motion-scale", type=float, default=1.0)
     parser.add_argument("--out-json", type=Path)
     args = parser.parse_args()
+    try:
+        tile_config = _resolve_tile_config(args)
+    except ValueError as exc:
+        parser.error(str(exc))
+    apply_projective_rational_tile_env(tile_config)
 
     summary = run_probe(
         tube_counts=args.tube_counts,
         frames=args.frames,
         width=args.width,
         height=args.height,
-        tile_x=args.tile_x,
-        tile_y=args.tile_y,
-        tile_t=args.tile_t,
-        tile_capacity=args.tile_capacity,
+        tile_x=tile_config.tile_x,
+        tile_y=tile_config.tile_y,
+        tile_t=tile_config.tile_t,
+        tile_capacity=tile_config.tile_capacity,
         warmups=args.warmups,
         repeats=args.repeats,
         seed=args.seed,
         camera_motion_scale=args.camera_motion_scale,
     )
+    summary["tile_config"] = tile_config.as_dict()
+    summary["tile_config_key"] = tile_config.key
     if args.out_json is not None:
         args.out_json.parent.mkdir(parents=True, exist_ok=True)
         args.out_json.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
