@@ -46,6 +46,7 @@ Last updated: 2026-05-13
 - [x] Gate D2g: real-multicam PRT train-step breakdown after compiler inverse fix.
 - [x] Gate D2h: internal phase timing for `projective_rational_tile_pixel_atomic_backward`.
 - [x] Gate D2i: exact `tile_t=1` presorted backward shortcut and D2 timing rows.
+- [x] Gate D2j: cached direct-splat compare for `tile_t=1` and 128-tube selector update.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -226,7 +227,7 @@ selector used by `projective_rational_tile_config_sweep.py`.
 The current verified heuristic is deliberately narrow:
 
 ```text
-<=128 tubes, normal motion: 8x8x2:128
+<=128 tubes, normal motion: 8x8x1:128
 <=256 tubes, normal motion: 8x8x2:256
 <=512 tubes, normal motion: 4x4x2:256
 <=512 tubes, motion scale >= 3: 4x4x2:512
@@ -245,7 +246,8 @@ and records `tile_config` / `tile_config_key` in the output JSON. Manual
 `--tile-x/y/t/capacity` flags still work and are also mirrored into env by the
 probe, so timing launches no longer need separate shell env flags.
 
-Tiny Metal smoke for the auto path:
+Tiny Metal smoke for the original auto path before D2j selected `tile_t=1` for
+128-tube normal-motion cases:
 
 ```text
 python3 research_project/benchmarks/projective_rational_metal_forward_timing_probe.py --tube-counts 16 --tile-config auto --warmups 0 --repeats 1 --out-json research_project/benchmarks/results/projective_rational_metal_forward_timing_probe_auto_smoke_16t.json
@@ -256,9 +258,10 @@ overflow tiles: 0
 ```
 
 Gate B5c now has a tiny train-step smoke that applies the selector before the
-first PRT Metal render. It selects `8x8x2:128` for the two-tube smoke and passes
-that config into `UVTRenderConfig`, so the selector contract is exercised on an
-actual autograd path, not just timing probes.
+first PRT Metal render. It originally selected `8x8x2:128`; after D2j, live
+selector calls at this 128-and-under tier select `8x8x1:128`. The smoke still
+passes that selected config into `UVTRenderConfig`, so the selector contract is
+exercised on an actual autograd path, not just timing probes.
 
 Gate C0 establishes the gradient target before writing Metal backward kernels:
 
@@ -986,18 +989,45 @@ Result:
 200-step tile8x8x1 after shortcut: profiled backward total 5.926 ms, backward kernel 4.423 ms, bin 0.851 ms; train step 23.841 ms, backward 10.609 ms, forward 6.871 ms, PSNR 16.5397/14.0461 dB.
 ```
 
-Read: the presorted `tile_t=1` path is a real inner-kernel win once supports
-shrink. Against the default D2g `8x8x2:128` rows, it improves the 72-step median
-train step from 32.353 ms to 30.107 ms and the 200-step median train step from
-25.792 ms to 23.841 ms. It is still worse at 20 steps because `tile_t=1`
-doubles tile/bin and forward work while early supports are broad. Do not replace
-the default recommendation globally yet; the next useful policy is support- or
-schedule-aware, for example train early with `tile_t=2` and switch eval or later
-training to `tile_t=1`.
+Read: the diagnostic sync-boundary profiler says the presorted `tile_t=1` path
+is a real inner-kernel win once supports shrink. Against the default D2g
+`8x8x2:128` train-breakdown rows, it improves the 72-step median train step from
+32.353 ms to 30.107 ms and the 200-step median train step from 25.792 ms to
+23.841 ms. It is still worse in the 20-step diagnostic breakdown because
+`tile_t=1` doubles tile/bin and forward work while early supports are broad.
 
 Tried and rejected in this gate: extending the fast path to all `count == 1`
 tiles under `tile_t=2`. It remained numerically valid but made the default D2
 train-breakdown rows slower, so that change was dropped before commit.
+
+Gate D2j reruns the full cached direct-splat comparison with
+`--tile-config 8x8x1:128`. This checks the actual comparison harness instead of
+only the diagnostic train-breakdown profiler: same 20/72/200 step counts, same
+fast-mac direct-splat baseline, cached PRT eval render timing, and the same real
+D2 multicam train/heldout split.
+
+Commands:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --tile-config 8x8x1:128 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_20step_depth0p5_tile8x8x1_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --tile-config 8x8x1:128 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_72step_depth0p5_tile8x8x1_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --tile-config 8x8x1:128 --render-warmups 1 --render-repeats 5 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_200step_depth0p5_tile8x8x1_cachedprt_fastmacsplat.json
+```
+
+Result:
+
+```text
+20-step tile8x8x1 cached compare: PRT PSNR 14.9283/14.3765 dB, train wall 0.403 s, cached render 4.236/3.958 ms, compile 1.448 ms, max tile 90, overflow 0; fast-mac direct splats 8.6144/7.9594 dB, train wall 1.377 s, render 18.971/20.297 ms.
+72-step tile8x8x1 cached compare: PRT PSNR 16.1872/14.1126 dB, train wall 2.173 s, cached render 8.725/8.975 ms, compile 2.414 ms, max tile 69, overflow 0; fast-mac direct splats 9.8891/8.9967 dB, train wall 1.727 s, render 24.248/24.431 ms.
+200-step tile8x8x1 cached compare: PRT PSNR 16.7240/13.6577 dB, train wall 4.961 s, cached render 5.559/6.123 ms, compile 2.513 ms, max tile 51, overflow 0; fast-mac direct splats 13.2900/11.2843 dB, train wall 5.153 s, render 19.644/20.600 ms.
+```
+
+Read: on the actual direct-splat comparison harness, `8x8x1:128` is faster than
+the previous `8x8x2:128` PRT rows for normal train wall and cached eval render
+at 20/72/200 steps, while preserving the train/heldout quality lead over the
+fast-mac direct-splat baseline. This is enough to update the verified selector
+for `tube_count <= 128` normal-motion PRT rows to `8x8x1:128`. Higher tube
+counts stay on the older `tile_t=2` heuristic until measured.
 
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
@@ -1019,7 +1049,7 @@ should be measured before splitting a camera window.
 2. Add tile-load scaling scenes that stress moving-camera curvature beyond the synthetic `camera_motion_scale` knob.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
-5. Add a support- or schedule-aware tile policy: early `tile_t=2`, later/eval `tile_t=1`.
+5. Measure the new `tile_t=1` shortcut at 256 and 512 tubes before changing those selector tiers.
 6. Profile the remaining inner loops of `projective_rational_tile_pixel_atomic_backward`: alpha replay and atomic accumulation.
 7. Test a lower-atomic or two-pass backward accumulation structure for PRT.
 8. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
