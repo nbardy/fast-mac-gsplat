@@ -39,6 +39,7 @@ Last updated: 2026-05-13
 - [x] Gate D1b: 128px synthetic world-camera train/holdout scaling row.
 - [x] Gate D2: real multicam PRT world-tube compare against direct dynamic splats.
 - [x] Gate D2b: corrected-depth fast-mac direct-splat and same-wall rows.
+- [x] Gate D2c: repeated render timing probe for PRT tile sizes.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -748,6 +749,34 @@ than PRT in this harness, roughly 30-36 ms versus 46-73 ms depending on row.
 The next rasterizer work should target render latency, not just optimization
 quality.
 
+Gate D2c adds explicit render warmup/repeat controls to
+`projective_rational_multicam_splat_compare.py`:
+`--render-warmups` and `--render-repeats`. This was necessary because the
+single-sample D2b render timings were too noisy for tile selection.
+
+Repeated timing commands:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --render-warmups 1 --render-repeats 5 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_20step_depth0p5_tile8x8x2_cap128_repeat5_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x2:128 --render-warmups 1 --render-repeats 5 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_20step_depth0p5_tile4x4x2_cap128_repeat5_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --tile-config 16x16x2:128 --render-warmups 1 --render-repeats 5 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_20step_depth0p5_tile16x16x2_cap128_repeat5_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --render-warmups 1 --render-repeats 5 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_72step_depth0p5_tile8x8x2_cap128_repeat5_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --tile-config 16x16x2:128 --render-warmups 1 --render-repeats 5 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_72step_depth0p5_tile16x16x2_cap128_repeat5_fastmacsplat.json
+```
+
+Result:
+
+```text
+20-step repeated timing: 8x8x2 PRT render median 56.611/53.476 ms train/heldout; 4x4x2 55.645/61.982 ms; 16x16x2 51.682/44.100 ms. Direct fast-mac splat render medians stay near 24-31 ms.
+72-step repeated timing: 8x8x2 PRT train/heldout PSNR 16.1264/14.1754 dB, train wall 6.071 s, render 63.360/50.699 ms; 16x16x2 PRT 16.1554/14.2860 dB, train wall 7.292 s, render 62.826/66.183 ms. Direct fast-mac splat render medians stay near 29-32 ms.
+```
+
+Read: no selector change. A larger `16x16x2:128` tile looks faster at the
+20-step checkpoint, but it is not a robust win at the 72-step same-wall point
+and it slows training. This points away from a pure tile-size fix. The next
+rasterizer question is kernel-level: separate tile assignment, sort/fill,
+shade/blend, and backward timing instead of only sweeping tile geometry.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -768,4 +797,4 @@ should be measured before splitting a camera window.
 2. Add tile-load scaling scenes that stress moving-camera curvature beyond the synthetic `camera_motion_scale` knob.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
-5. Profile why the PRT moving-camera renderer is still slower than direct splats at 64px.
+5. Add kernel-phase timing for PRT tile assignment, sort/fill, shade/blend, and backward.

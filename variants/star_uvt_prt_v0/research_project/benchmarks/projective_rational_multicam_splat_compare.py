@@ -286,6 +286,27 @@ def _time_call(device: torch.device, fn: Callable[[], Any]) -> tuple[Any, float]
     return result, time.perf_counter() - started
 
 
+def _time_repeated(
+    device: torch.device,
+    fn: Callable[[], Any],
+    *,
+    warmups: int,
+    repeats: int,
+) -> tuple[Any, list[float]]:
+    if warmups < 0:
+        raise ValueError("render_warmups must be non-negative")
+    if repeats <= 0:
+        raise ValueError("render_repeats must be positive")
+    result = None
+    for _ in range(warmups):
+        result, _elapsed = _time_call(device, fn)
+    samples = []
+    for _ in range(repeats):
+        result, elapsed = _time_call(device, fn)
+        samples.append(elapsed)
+    return result, samples
+
+
 def _summarize_seconds(samples: list[float]) -> dict[str, Any]:
     return {
         "samples_s": samples,
@@ -447,14 +468,21 @@ def _eval_prt(
     heldout_camera_paths: list[CameraPathPolynomial],
     config: UVTRenderConfig,
     device: torch.device,
+    render_warmups: int,
+    render_repeats: int,
 ) -> dict[str, Any]:
     train_rows = []
     train_times = []
     max_tile_count = 0
     overflow_tile_count = 0
     for view, camera_path in enumerate(train_camera_paths):
-        aux, elapsed = _time_call(device, lambda camera_path=camera_path: _render_prt_eval(model, camera_path, config))
-        train_times.append(elapsed)
+        aux, elapsed = _time_repeated(
+            device,
+            lambda camera_path=camera_path: _render_prt_eval(model, camera_path, config),
+            warmups=render_warmups,
+            repeats=render_repeats,
+        )
+        train_times.extend(elapsed)
         max_tile_count = max(max_tile_count, int(aux.tile_counts.max().detach().cpu()))
         overflow_tile_count += int((aux.tile_overflow > 0).sum().detach().cpu())
         target = bundle.train_frames[view].permute(0, 2, 3, 1).contiguous()
@@ -464,8 +492,13 @@ def _eval_prt(
     heldout_times = []
     if bundle.heldout_frames is not None:
         for view, camera_path in enumerate(heldout_camera_paths):
-            aux, elapsed = _time_call(device, lambda camera_path=camera_path: _render_prt_eval(model, camera_path, config))
-            heldout_times.append(elapsed)
+            aux, elapsed = _time_repeated(
+                device,
+                lambda camera_path=camera_path: _render_prt_eval(model, camera_path, config),
+                warmups=render_warmups,
+                repeats=render_repeats,
+            )
+            heldout_times.extend(elapsed)
             max_tile_count = max(max_tile_count, int(aux.tile_counts.max().detach().cpu()))
             overflow_tile_count += int((aux.tile_overflow > 0).sum().detach().cpu())
             target = bundle.heldout_frames[view].permute(0, 2, 3, 1).contiguous()
@@ -491,6 +524,8 @@ def _eval_splats(
     bundle,
     camera_projection: str,
     device: torch.device,
+    render_warmups: int,
+    render_repeats: int,
 ) -> dict[str, Any]:
     train_rows = []
     train_times = []
@@ -502,8 +537,13 @@ def _eval_splats(
             )
             for frame in range(bundle.frame_count)
         ]
-        rendered, elapsed = _time_call(device, lambda cameras=cameras: render_splat_sequence(model, cameras, render_cfg))
-        train_times.append(elapsed)
+        rendered, elapsed = _time_repeated(
+            device,
+            lambda cameras=cameras: render_splat_sequence(model, cameras, render_cfg),
+            warmups=render_warmups,
+            repeats=render_repeats,
+        )
+        train_times.extend(elapsed)
         target = bundle.train_frames[view].permute(0, 2, 3, 1).contiguous()
         train_rows.append(_metrics(rendered["rgb"], target))
 
@@ -518,8 +558,13 @@ def _eval_splats(
                 )
                 for frame in range(bundle.frame_count)
             ]
-            rendered, elapsed = _time_call(device, lambda cameras=cameras: render_splat_sequence(model, cameras, render_cfg))
-            heldout_times.append(elapsed)
+            rendered, elapsed = _time_repeated(
+                device,
+                lambda cameras=cameras: render_splat_sequence(model, cameras, render_cfg),
+                warmups=render_warmups,
+                repeats=render_repeats,
+            )
+            heldout_times.extend(elapsed)
             target = bundle.heldout_frames[view].permute(0, 2, 3, 1).contiguous()
             heldout_rows.append(_metrics(rendered["rgb"], target))
 
@@ -613,6 +658,8 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
         heldout_camera_paths=heldout_camera_paths,
         config=prt_config,
         device=device,
+        render_warmups=args.render_warmups,
+        render_repeats=args.render_repeats,
     )
 
     splat_model, splat_render_cfg, splat_train = _fit_splats(
@@ -633,6 +680,8 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
         bundle=bundle,
         camera_projection=args.splat_camera_projection,
         device=device,
+        render_warmups=args.render_warmups,
+        render_repeats=args.render_repeats,
     )
 
     return {
@@ -656,6 +705,8 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
             "device": str(device),
             "seed": args.seed,
             "steps": args.steps,
+            "render_warmups": args.render_warmups,
+            "render_repeats": args.render_repeats,
             "train_cameras": bundle.train_camera_names,
             "heldout_cameras": bundle.heldout_camera_names,
             "pose_source": bundle.pose_source,
@@ -714,6 +765,8 @@ def main() -> None:
     parser.add_argument("--splat-camera-projection", choices=("legacy_pinhole", "dataset_lens"), default="legacy_pinhole")
     parser.add_argument("--splat-init-scale", type=float, default=0.035)
     parser.add_argument("--init-depth", type=float, default=0.5)
+    parser.add_argument("--render-warmups", type=int, default=0)
+    parser.add_argument("--render-repeats", type=int, default=1)
     parser.add_argument("--out-json", type=Path)
     args = parser.parse_args()
 
