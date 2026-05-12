@@ -16,7 +16,8 @@ Last updated: 2026-05-13
 - [x] Gate B0: direct Metal PRT forward API and dense-vs-Metal parity.
 - [x] Gate B1: tiled Metal PRT bin-and-render parity on a tiny scene.
 - [x] Gate B2: diagnostic tiled PRT timing and tile-load scaling against direct PRT.
-- [ ] Gate B3: overflow-safe tiled PRT scaling beyond default tile capacity.
+- [x] Gate B3: capacity-256 256-tube overflow clearance smoke.
+- [ ] Gate B4: default-capacity support tightening or camera-window segmentation.
 - [ ] Gate C: PRT backward parity.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -88,6 +89,20 @@ blocker: either raise/segment capacity, tighten support bounds, or split camera
 windows before claiming useful-scale speed. The no-overflow timing rows are
 diagnostic and noisy; they are not a training-speed claim.
 
+Gate B3 capacity-256 smoke:
+
+```text
+256 tubes, tile_capacity=256: direct median 17.852812503406312 ms, tiled median 15.45362549222773 ms, ratio 0.8656129385372294
+max tile count: 152
+overflow tiles: 0
+max error vs direct: 5.364418029785156e-07
+```
+
+This shows the 256-tube failure was a capacity overflow, not a PRT binning math
+failure. It does not solve default-capacity scaling; the next useful work is to
+tighten support bounds, split camera windows, or make capacity selection part of
+the cost model.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -100,7 +115,7 @@ should be measured before splitting a camera window.
 
 ## Next Gates
 
-1. Fix the 256-tube default-capacity overflow gate.
+1. Fix default-capacity scaling with support tightening, segmentation, or a capacity cost model.
 2. Add tile-load scaling scenes that stress moving-camera curvature.
 3. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 4. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.

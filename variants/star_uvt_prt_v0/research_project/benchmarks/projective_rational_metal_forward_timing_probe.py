@@ -96,6 +96,7 @@ def _case(
     frames: int,
     width: int,
     height: int,
+    tile_capacity: int,
     warmups: int,
     repeats: int,
     seed: int,
@@ -104,7 +105,7 @@ def _case(
     k_seq, w2c_seq = _camera(frames, width, height, times)
     camera_path = fit_camera_path_polynomial(k_seq, w2c_seq, degree=2, frame_times=times)
     projected = compile_projective_rational_tubes(_batch(tube_count, seed=seed), camera_path)
-    config = UVTRenderConfig(height=height, width=width, frames=frames, tile_t=2, tile_capacity=128)
+    config = UVTRenderConfig(height=height, width=width, frames=frames, tile_t=2, tile_capacity=tile_capacity)
 
     h_coeff = projected.h_coeff.to("mps")
     lambda_uv = projected.lambda_uv.to("mps")
@@ -157,6 +158,7 @@ def _case(
         "frames": frames,
         "width": width,
         "height": height,
+        "tile_capacity": tile_capacity,
         "camera_fit_error": camera_path.fit_error,
         "max_abs_error_vs_direct": max_error,
         "active_tile_count": active_tile_count,
@@ -176,6 +178,7 @@ def run_probe(
     frames: int,
     width: int,
     height: int,
+    tile_capacity: int,
     warmups: int,
     repeats: int,
     seed: int,
@@ -188,6 +191,7 @@ def run_probe(
             frames=frames,
             width=width,
             height=height,
+            tile_capacity=tile_capacity,
             warmups=warmups,
             repeats=repeats,
             seed=seed + index,
@@ -217,6 +221,7 @@ def main() -> None:
     parser.add_argument("--frames", type=int, default=8)
     parser.add_argument("--width", type=int, default=64)
     parser.add_argument("--height", type=int, default=48)
+    parser.add_argument("--tile-capacity", type=int, default=128)
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--repeats", type=int, default=10)
     parser.add_argument("--seed", type=int, default=31)
@@ -228,6 +233,7 @@ def main() -> None:
         frames=args.frames,
         width=args.width,
         height=args.height,
+        tile_capacity=args.tile_capacity,
         warmups=args.warmups,
         repeats=args.repeats,
         seed=args.seed,

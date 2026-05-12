@@ -116,6 +116,7 @@ python3 setup.py build_ext --inplace
 python3 tests/projective_rational_direct_render_check.py --out-json research_project/benchmarks/results/projective_rational_direct_render_check.json
 python3 tests/projective_rational_tiled_render_check.py --out-json research_project/benchmarks/results/projective_rational_tiled_render_check.json
 python3 research_project/benchmarks/projective_rational_metal_forward_timing_probe.py --out-json research_project/benchmarks/results/projective_rational_metal_forward_timing_probe.json
+STAR_UVT_TILE_CAPACITY=256 python3 research_project/benchmarks/projective_rational_metal_forward_timing_probe.py --tube-counts 256 --tile-capacity 256 --out-json research_project/benchmarks/results/projective_rational_metal_forward_timing_probe_cap256_256t.json
 ```
 
 Expected first gate:
@@ -131,4 +132,5 @@ projective_rational_projection_scaling_probe.pass = true
 projective_rational_direct_render_check.pass = true
 projective_rational_tiled_render_check.pass = true
 projective_rational_metal_forward_timing_probe.pass = true
+projective_rational_metal_forward_timing_probe_cap256_256t.pass = true
 ```
