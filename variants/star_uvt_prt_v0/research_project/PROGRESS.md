@@ -53,6 +53,7 @@ Last updated: 2026-05-13
 - [x] Gate D2n: rejected 2x2 spatial tile capacity probe for 1024 tubes.
 - [x] Gate D2o: 1024-tube alpha-threshold support-shrink sweep.
 - [x] Gate D2p: support-only alpha threshold for 1024-tube capacity.
+- [x] Gate D2q: 1024-tube support-pruned `tile_t=1` train-speed comparison.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1253,6 +1254,39 @@ the generic auto selector support 1024 until we define the policy surface:
 default render fidelity, train-speed mode, support pruning schedule, or
 capacity fallback.
 
+Gate D2q compares the same 1024-tube support-pruned row with `tile_t=1`.
+This tests whether the exact presorted backward shortcut remains useful in the
+1024 support-pruned regime.
+
+Commands:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-alpha-threshold 0.00392156862745098 --prt-support-alpha-threshold 0.1568627450980392 --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_20step_depth0p5_tile4x4x1cap512_supportalpha40over255_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-alpha-threshold 0.00392156862745098 --prt-support-alpha-threshold 0.1568627450980392 --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_72step_depth0p5_tile4x4x1cap512_supportalpha40over255_cachedprt_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-alpha-threshold 0.00392156862745098 --prt-support-alpha-threshold 0.1568627450980392 --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_200step_depth0p5_tile4x4x1cap512_supportalpha40over255_cachedprt_fastmacsplat.json
+```
+
+Result:
+
+```text
+20-step tile4x4x2:512 support 40/255: pass true, max tile 424, overflow 0, PRT PSNR 14.1372/14.2095 dB, train wall 2.268 s, cached render 14.779/13.233 ms.
+20-step tile4x4x1:512 support 40/255: pass true, max tile 365, overflow 0, PRT PSNR 14.0347/14.4656 dB, train wall 1.629 s, cached render 13.493/13.675 ms.
+72-step tile4x4x2:512 support 40/255: pass true, max tile 469, overflow 0, PRT PSNR 15.1541/14.1680 dB, train wall 8.821 s, cached render 14.065/14.100 ms.
+72-step tile4x4x1:512 support 40/255: pass true, max tile 404, overflow 0, PRT PSNR 14.9909/14.2664 dB, train wall 2.815 s, cached render 14.292/13.553 ms.
+200-step tile4x4x2:512 support 40/255: pass true, max tile 390, overflow 0, PRT PSNR 16.2110/13.9342 dB, train wall 22.892 s, cached render 12.958/12.441 ms.
+200-step tile4x4x1:512 support 40/255: pass true, max tile 328, overflow 0, PRT PSNR 16.5509/13.7676 dB, train wall 8.875 s, cached render 18.117/14.311 ms; direct splats PSNR 18.1577/12.5995 dB, train wall 5.578 s, render 24.810/25.918 ms.
+```
+
+Read: `tile_t=1` is the better 1024 support-pruned training policy, cutting
+PRT train wall by 28% at 20 steps, 68% at 72 steps, and 61% at 200 steps while
+keeping zero overflow and a heldout PSNR lead over direct splats. It is not a
+pure render win: at 200 steps, `tile_t=2` renders faster and has better heldout
+PSNR, while `tile_t=1` has better train PSNR and much lower train wall. This
+reinforces that PRT needs an explicit policy surface instead of one generic
+selector: train-speed can prefer `tile_t=1` plus support pruning, while
+fidelity/playback can prefer the more conservative `tile_t=2` support-pruned
+path until a schedule or split policy is chosen.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1274,7 +1308,7 @@ should be measured before splitting a camera window.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
-6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback.
+6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` is measured as the train-speed choice.
 7. Profile the remaining inner loops of `projective_rational_tile_pixel_atomic_backward`: alpha replay and atomic accumulation.
 8. Test a lower-atomic or two-pass backward accumulation structure for PRT.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
