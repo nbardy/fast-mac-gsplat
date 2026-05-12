@@ -22,7 +22,8 @@ Last updated: 2026-05-13
 - [x] Gate B5b: timing launch integration applies selector before first Metal shader call.
 - [ ] Gate B5c: training integration applies selector after a real PRT train-step path exists.
 - [x] Gate C0: CPU PRT autograd-vs-finite-difference gradient reference.
-- [ ] Gate C: PRT backward parity.
+- [x] Gate C1: direct-serial Metal PRT backward parity against C0.
+- [ ] Gate C2: tiled/sample-level PRT backward path suitable for training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
 
@@ -231,6 +232,21 @@ max rel error: 0.02855873424253072
 checked params: h_coeff, lambda_uv, lambda_t, center_t, opacity, color
 ```
 
+Gate C1 adds the first Metal backward parity check:
+
+```text
+python3 research_project/benchmarks/projective_rational_direct_serial_backward_check.py --out-json research_project/benchmarks/results/projective_rational_direct_serial_backward_check.json
+pass: true
+max abs error: 5.960464477539063e-08
+max rel error: 1.0218293027719483e-05
+checked params: h_coeff, lambda_uv, lambda_t, center_t, opacity, color
+```
+
+This is a direct-serial Metal reference kernel. It proves the PRT gradient math
+and binding boundary against the C0 CPU target, but it is intentionally not the
+fast tiled training path. Gate C2 still has to move these derivatives into the
+tile/sample path before B5c can honestly wire training.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -243,7 +259,7 @@ should be measured before splitting a camera window.
 
 ## Next Gates
 
-1. Add PRT Metal backward against the C0 gradient reference.
+1. Move PRT backward from direct-serial parity into the tiled/sample-level training path.
 2. Wire the selector into the real training path once a PRT train-step path exists.
 3. Add tile-load scaling scenes that stress moving-camera curvature.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
