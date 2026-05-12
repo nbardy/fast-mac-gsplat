@@ -50,6 +50,7 @@ Last updated: 2026-05-13
 - [x] Gate D2k: 256-tube cached direct-splat compare for `tile_t=1` and selector update.
 - [x] Gate D2l: 512-tube capacity correction and `tile_t=1` train/render tradeoff.
 - [x] Gate D2m: 1024-tube real-D2 overflow check and fail-closed selector ceiling.
+- [x] Gate D2n: rejected 2x2 spatial tile capacity probe for 1024 tubes.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1136,6 +1137,32 @@ we need a real capacity strategy: residual-certified footprint tightening,
 camera-window segmentation, smaller effective support, or a different
 accumulation/bucketing path.
 
+Gate D2n temporarily allowed 2x2 spatial tiles in Python and C++ validation,
+smoked the tile-pixel backward path, and then tested whether smaller spatial
+tiles solve the 1024-tube capacity failure. The validator change was not kept:
+2x2 did not solve overflow and made render substantially slower.
+
+Validation during the temporary patch:
+
+```text
+STAR_UVT_TILE_X=2 STAR_UVT_TILE_Y=2 STAR_UVT_TILE_T=2 STAR_UVT_TILE_CAPACITY=512 python3 tests/projective_rational_tile_pixel_atomic_backward_check.py
+```
+
+Result:
+
+```text
+2x2x2 backward smoke: pass true, max abs error 1.1176e-07, profile overflow tile count 0.
+20-step tile2x2x2:512: pass false, max tile 816, overflow 3007, PRT PSNR 13.3239/13.9631 dB, train wall 18.646 s, cached render 279.280/299.570 ms.
+20-step tile2x2x1:512: pass false, max tile 783, overflow 4527, PRT PSNR 13.3459/14.1926 dB, train wall 12.485 s, cached render 399.184/404.706 ms.
+```
+
+Read: smaller spatial tiles are not the 1024 capacity strategy. They lower the
+peak count only marginally versus 4x4 (`835` to `816` for `tile_t=2`, `784` to
+`783` for `tile_t=1`), increase the number of overflowed tiles, and are far
+slower to render. The useful next path is not more spatial subdivision; it is
+support shrinkage, camera-window segmentation, or an accumulation path that
+does not require all overlapping tubes to fit in one fixed tile list.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1157,7 +1184,7 @@ should be measured before splitting a camera window.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
-6. Add a 1024-tube capacity strategy before re-enabling auto selector support above 512 tubes.
+6. Add a 1024-tube capacity strategy before re-enabling auto selector support above 512 tubes; 2x2 spatial tiling is measured and rejected.
 7. Profile the remaining inner loops of `projective_rational_tile_pixel_atomic_backward`: alpha replay and atomic accumulation.
 8. Test a lower-atomic or two-pass backward accumulation structure for PRT.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
