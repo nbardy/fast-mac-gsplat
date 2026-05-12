@@ -197,22 +197,19 @@ inline bool inverse_sym2_diag(const device float* lambda_uv, uint tube_id, float
   return all(isfinite(diag_out));
 }
 
-inline float2 prt_spatial_half_extent(
+inline float2 prt_spatial_half_extent_for_budget(
     const device float* lambda_uv,
-    const device float* opacity,
     uint tube_id,
+    float spatial_budget,
     constant MetaF32& mf) {
-  float op = opacity[tube_id];
-  if (!(op > mf.alpha_threshold)) return float2(-1.0f);
-  float tau = -2.0f * log(max(mf.alpha_threshold / max(op, mf.eps), mf.eps));
-  if (!isfinite(tau) || tau <= 0.0f) return float2(-1.0f);
+  if (!isfinite(spatial_budget) || spatial_budget <= 0.0f) return float2(-1.0f);
 
   float2 inv_diag;
   bool ok = inverse_sym2_diag(lambda_uv, tube_id, mf.eps, inv_diag);
   if (!ok) {
     return float2(INFINITY);
   }
-  return sqrt(max(tau * inv_diag, float2(0.0f)));
+  return sqrt(max(spatial_budget * inv_diag, float2(0.0f)));
 }
 
 inline float prt_alpha_at(
@@ -1223,10 +1220,6 @@ kernel void bin_projective_rational_tubes_to_uvt_tiles(
   int f1 = min(mi.frames - 1, int(ceil(center_t[tube_id] + half_t + frame_center)));
   if (f0 > f1) return;
 
-  float2 half_xy = prt_spatial_half_extent(lambda_uv, opacity, tube_id, mf);
-  if (half_xy.x < 0.0f || half_xy.y < 0.0f) return;
-  bool full_xy = !isfinite(half_xy.x) || !isfinite(half_xy.y);
-
   uint tz0 = uint(f0 / mi.tile_t);
   uint tz1 = uint(f1 / mi.tile_t);
   for (uint tz = tz0; tz <= tz1; ++tz) {
@@ -1240,7 +1233,13 @@ kernel void bin_projective_rational_tubes_to_uvt_tiles(
     int y1 = -1;
     for (uint f = zf0; f <= zf1; ++f) {
       float t = frame_time(f, mi);
-      float3 h = eval_prt_h(h_coeff, tube_id, h_terms, t - center_t[tube_id]);
+      float tau_t = t - center_t[tube_id];
+      float spatial_budget = support_tau - time_precision * tau_t * tau_t;
+      float2 half_xy = prt_spatial_half_extent_for_budget(lambda_uv, tube_id, spatial_budget, mf);
+      if (half_xy.x < 0.0f || half_xy.y < 0.0f) continue;
+      bool full_xy = !isfinite(half_xy.x) || !isfinite(half_xy.y);
+
+      float3 h = eval_prt_h(h_coeff, tube_id, h_terms, tau_t);
       float depth = max(h.z, mf.eps);
       float2 center = h.xy / depth;
       float hx = full_xy ? float(mi.width) : half_xy.x;

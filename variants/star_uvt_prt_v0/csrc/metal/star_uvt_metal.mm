@@ -45,8 +45,8 @@ ShaderConfig& shader_config() {
     c.fixedpoint_scale = env_int("STAR_UVT_FIXEDPOINT_SCALE", 1000000);
     c.split_fixedpoint_coarse_scale = env_int("STAR_UVT_SPLIT_FIXEDPOINT_COARSE_SCALE", 100);
     c.split_fixedpoint_fine_scale = env_int("STAR_UVT_SPLIT_FIXEDPOINT_FINE_SCALE", 1000000);
-    TORCH_CHECK(c.tile_x == 8 || c.tile_x == 16, "STAR_UVT_TILE_X must be 8 or 16");
-    TORCH_CHECK(c.tile_y == 8 || c.tile_y == 16, "STAR_UVT_TILE_Y must be 8 or 16");
+    TORCH_CHECK(c.tile_x == 4 || c.tile_x == 8 || c.tile_x == 16, "STAR_UVT_TILE_X must be 4, 8, or 16");
+    TORCH_CHECK(c.tile_y == 4 || c.tile_y == 8 || c.tile_y == 16, "STAR_UVT_TILE_Y must be 4, 8, or 16");
     TORCH_CHECK(c.tile_t == 1 || c.tile_t == 2 || c.tile_t == 4, "STAR_UVT_TILE_T must be 1, 2, or 4");
     TORCH_CHECK(c.tile_capacity == 32 || c.tile_capacity == 64 || c.tile_capacity == 128 || c.tile_capacity == 256,
                 "STAR_UVT_TILE_CAPACITY must be 32, 64, 128, or 256");

@@ -1,0 +1,103 @@
+{
+  "name": "projective_rational_metal_forward_timing_probe",
+  "note": "Metal timing is diagnostic. B2 does not by itself prove training speed.",
+  "pass": true,
+  "rows": [
+    {
+      "active_tile_count": 67,
+      "camera_fit_error": 5.984424689131629e-08,
+      "direct": {
+        "max_ms": 2.6029589935205877,
+        "median_ms": 2.5702920102048665,
+        "min_ms": 2.294958001584746,
+        "repeats": 3,
+        "warmups": 1
+      },
+      "frames": 8,
+      "height": 48,
+      "max_abs_error_vs_direct": 5.960464477539062e-07,
+      "max_tile_count": 13,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "tile_capacity": 128,
+      "tile_t": 2,
+      "tile_x": 8,
+      "tile_y": 8,
+      "tiled": {
+        "max_ms": 10.797124996315688,
+        "median_ms": 3.3438750106142834,
+        "min_ms": 3.337665999424644,
+        "repeats": 3,
+        "warmups": 1
+      },
+      "tiled_to_direct_median_ratio": 1.3009708614188775,
+      "total_tile_pairs": 335,
+      "tube_count": 16,
+      "width": 64
+    },
+    {
+      "active_tile_count": 101,
+      "camera_fit_error": 5.984424689131629e-08,
+      "direct": {
+        "max_ms": 6.102500003180467,
+        "median_ms": 5.77041698852554,
+        "min_ms": 5.5659999925410375,
+        "repeats": 3,
+        "warmups": 1
+      },
+      "frames": 8,
+      "height": 48,
+      "max_abs_error_vs_direct": 8.046627044677734e-07,
+      "max_tile_count": 38,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "tile_capacity": 128,
+      "tile_t": 2,
+      "tile_x": 8,
+      "tile_y": 8,
+      "tiled": {
+        "max_ms": 6.363167005474679,
+        "median_ms": 5.699250003090128,
+        "min_ms": 4.974582989234477,
+        "repeats": 3,
+        "warmups": 1
+      },
+      "tiled_to_direct_median_ratio": 0.9876669250113247,
+      "total_tile_pairs": 1335,
+      "tube_count": 64,
+      "width": 64
+    },
+    {
+      "active_tile_count": 98,
+      "camera_fit_error": 5.984424689131629e-08,
+      "direct": {
+        "max_ms": 19.222666989662685,
+        "median_ms": 6.904791996930726,
+        "min_ms": 6.813375002820976,
+        "repeats": 3,
+        "warmups": 1
+      },
+      "frames": 8,
+      "height": 48,
+      "max_abs_error_vs_direct": 8.642673492431641e-07,
+      "max_tile_count": 87,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "tile_capacity": 128,
+      "tile_t": 2,
+      "tile_x": 8,
+      "tile_y": 8,
+      "tiled": {
+        "max_ms": 6.6958339884877205,
+        "median_ms": 6.405249994713813,
+        "min_ms": 6.377249999786727,
+        "repeats": 3,
+        "warmups": 1
+      },
+      "tiled_to_direct_median_ratio": 0.9276528529115771,
+      "total_tile_pairs": 2661,
+      "tube_count": 128,
+      "width": 64
+    }
+  ]
+}

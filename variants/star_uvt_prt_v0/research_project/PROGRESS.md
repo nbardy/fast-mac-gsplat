@@ -113,6 +113,26 @@ That bounds the current capacity-only fix: capacity 256 clears the 256-tube
 smoke, but larger scenes need support tightening, camera-window splitting, or
 adaptive capacity before the tiled PRT path is useful at scale.
 
+Gate B4 support tightening and tile-shape probe:
+
+The PRT binner now spends the opacity-derived support budget per frame:
+`spatial_budget = support_tau - lambda_t * tau_t^2`. This tightens spatial tile
+bounds near the temporal support edge without changing the PRT representation or
+sample shader.
+
+```text
+8x8x2, cap128, 16/64/128 tubes: pass, max tile counts 13/38/87, overflow 0
+8x8x2, cap256, 256 tubes: pass, max tile count 150, overflow 0
+8x8x2, cap256, 512 tubes: fail, max tile count 296, overflow tiles 16
+8x8x1, cap256, 512 tubes: fail, max tile count 302, overflow tiles 30
+4x4x2, cap256, 512 tubes: pass, max tile count 238, overflow 0, max error 7.152557373046875e-07
+```
+
+Read: support tightening helps slightly but does not remove the 512-tube hotspot.
+Temporal tile splitting alone does not fix it. Spatial tile splitting does clear
+the 512-tube cap-256 gate in this smoke, so the next practical rasterizer path is
+an explicit tile-shape/capacity cost model rather than more global capacity bumps.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -125,7 +145,7 @@ should be measured before splitting a camera window.
 
 ## Next Gates
 
-1. Fix default-capacity scaling with support tightening, segmentation, or a capacity cost model.
+1. Turn tile shape and capacity into an explicit cost-model choice for PRT forward.
 2. Add tile-load scaling scenes that stress moving-camera curvature.
 3. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 4. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.

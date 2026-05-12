@@ -96,6 +96,9 @@ def _case(
     frames: int,
     width: int,
     height: int,
+    tile_x: int,
+    tile_y: int,
+    tile_t: int,
     tile_capacity: int,
     warmups: int,
     repeats: int,
@@ -105,7 +108,15 @@ def _case(
     k_seq, w2c_seq = _camera(frames, width, height, times)
     camera_path = fit_camera_path_polynomial(k_seq, w2c_seq, degree=2, frame_times=times)
     projected = compile_projective_rational_tubes(_batch(tube_count, seed=seed), camera_path)
-    config = UVTRenderConfig(height=height, width=width, frames=frames, tile_t=2, tile_capacity=tile_capacity)
+    config = UVTRenderConfig(
+        height=height,
+        width=width,
+        frames=frames,
+        tile_x=tile_x,
+        tile_y=tile_y,
+        tile_t=tile_t,
+        tile_capacity=tile_capacity,
+    )
 
     h_coeff = projected.h_coeff.to("mps")
     lambda_uv = projected.lambda_uv.to("mps")
@@ -158,6 +169,9 @@ def _case(
         "frames": frames,
         "width": width,
         "height": height,
+        "tile_x": tile_x,
+        "tile_y": tile_y,
+        "tile_t": tile_t,
         "tile_capacity": tile_capacity,
         "camera_fit_error": camera_path.fit_error,
         "max_abs_error_vs_direct": max_error,
@@ -178,6 +192,9 @@ def run_probe(
     frames: int,
     width: int,
     height: int,
+    tile_x: int,
+    tile_y: int,
+    tile_t: int,
     tile_capacity: int,
     warmups: int,
     repeats: int,
@@ -191,6 +208,9 @@ def run_probe(
             frames=frames,
             width=width,
             height=height,
+            tile_x=tile_x,
+            tile_y=tile_y,
+            tile_t=tile_t,
             tile_capacity=tile_capacity,
             warmups=warmups,
             repeats=repeats,
@@ -221,6 +241,9 @@ def main() -> None:
     parser.add_argument("--frames", type=int, default=8)
     parser.add_argument("--width", type=int, default=64)
     parser.add_argument("--height", type=int, default=48)
+    parser.add_argument("--tile-x", type=int, default=8)
+    parser.add_argument("--tile-y", type=int, default=8)
+    parser.add_argument("--tile-t", type=int, default=2)
     parser.add_argument("--tile-capacity", type=int, default=128)
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--repeats", type=int, default=10)
@@ -233,6 +256,9 @@ def main() -> None:
         frames=args.frames,
         width=args.width,
         height=args.height,
+        tile_x=args.tile_x,
+        tile_y=args.tile_y,
+        tile_t=args.tile_t,
         tile_capacity=args.tile_capacity,
         warmups=args.warmups,
         repeats=args.repeats,

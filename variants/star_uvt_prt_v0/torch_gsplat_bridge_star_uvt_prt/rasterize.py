@@ -64,10 +64,10 @@ class UVTRenderResult:
 def _runtime_validate(config: UVTRenderConfig) -> None:
     if config.height <= 0 or config.width <= 0 or config.frames <= 0:
         raise ValueError("height, width, and frames must be positive")
-    if config.tile_x not in (8, 16):
-        raise ValueError("tile_x must be 8 or 16")
-    if config.tile_y not in (8, 16):
-        raise ValueError("tile_y must be 8 or 16")
+    if config.tile_x not in (4, 8, 16):
+        raise ValueError("tile_x must be 4, 8, or 16")
+    if config.tile_y not in (4, 8, 16):
+        raise ValueError("tile_y must be 4, 8, or 16")
     if config.tile_t not in (1, 2, 4):
         raise ValueError("tile_t must be 1, 2, or 4")
     if config.tile_capacity not in (32, 64, 128, 256):

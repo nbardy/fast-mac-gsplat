@@ -1,0 +1,39 @@
+{
+  "name": "projective_rational_metal_forward_timing_probe",
+  "note": "Metal timing is diagnostic. B2 does not by itself prove training speed.",
+  "pass": true,
+  "rows": [
+    {
+      "active_tile_count": 415,
+      "camera_fit_error": 5.984424689131629e-08,
+      "direct": {
+        "max_ms": 48.776916999486275,
+        "median_ms": 39.549416993395425,
+        "min_ms": 37.101583991898224,
+        "repeats": 3,
+        "warmups": 1
+      },
+      "frames": 8,
+      "height": 48,
+      "max_abs_error_vs_direct": 7.152557373046875e-07,
+      "max_tile_count": 238,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "tile_capacity": 256,
+      "tile_t": 2,
+      "tile_x": 4,
+      "tile_y": 4,
+      "tiled": {
+        "max_ms": 27.091416995972395,
+        "median_ms": 24.952958992798813,
+        "min_ms": 22.254416995565407,
+        "repeats": 3,
+        "warmups": 1
+      },
+      "tiled_to_direct_median_ratio": 0.6309311461396724,
+      "total_tile_pairs": 27892,
+      "tube_count": 512,
+      "width": 64
+    }
+  ]
+}
