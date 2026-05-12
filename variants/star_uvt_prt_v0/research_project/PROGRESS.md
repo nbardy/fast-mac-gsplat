@@ -38,6 +38,7 @@ Last updated: 2026-05-13
 - [x] Gate D1: synthetic world-camera train/holdout compare against dense per-frame projection.
 - [x] Gate D1b: 128px synthetic world-camera train/holdout scaling row.
 - [x] Gate D2: real multicam PRT world-tube compare against direct dynamic splats.
+- [x] Gate D2b: corrected-depth fast-mac direct-splat and same-wall rows.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -697,9 +698,9 @@ but gates pass/fail on finite losses plus no PRT tile overflow.
 Commands:
 
 ```text
-python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 32 --max-frames 2 --steps 1 --prt-tubes 16 --splat-count 16 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_32_2f_16t_16s_1step_smoke.json
-python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --splat-count 128 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_20step.json
-python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 128 --splat-count 128 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_200step.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 32 --max-frames 2 --steps 1 --prt-tubes 16 --splat-count 16 --init-depth 2.0 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_32_2f_16t_16s_1step_smoke.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --splat-count 128 --init-depth 2.0 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_20step.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 128 --splat-count 128 --init-depth 2.0 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_200step.json
 ```
 
 Result:
@@ -717,6 +718,35 @@ baseline trains faster. The absolute PSNR is low, so this is a harness and
 directional signal, not a tuned result. The next useful work is better PRT
 initialization/loss weighting, a same-wall row, and then a stronger direct
 splat render baseline before making a broad speed claim.
+
+Gate D2b fixes the main setup weakness in D2: the `--init-depth 2.0` value was
+bad for this DeepView dog bundle. The direct-splat baseline's own gauge-field
+default is `0.5`, and the cheap 20-step sweep showed that `0.5` is materially
+better for both PRT and direct splats. The harness default is now `0.5`.
+
+Corrected-depth commands:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_20step_depth0p5_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 200 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_200step_depth0p5_fastmacsplat.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 72 --prt-tubes 128 --splat-count 128 --splat-renderer fast_mac --init-depth 0.5 --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_128t_128s_72step_depth0p5_prt_samewall_fastmacsplat200.json
+```
+
+Result:
+
+```text
+20 steps, depth 0.5: PRT train/heldout PSNR 14.9283/14.3764 dB, train wall 1.485 s, render 55.564/62.950 ms, max tile count 99, overflow 0; fast-mac direct splats 8.6144/7.9594 dB, train wall 0.582 s, render 28.179/23.775 ms
+200 steps, depth 0.5: PRT train/heldout PSNR 16.1345/13.4165 dB, train wall 16.903 s, render 71.362/72.718 ms, max tile count 55, overflow 0; fast-mac direct splats 13.2901/11.2841 dB, train wall 5.313 s, render 35.620/29.694 ms
+72-step PRT same-wall row, depth 0.5: PRT train/heldout PSNR 16.1552/14.1770 dB, train wall 5.285 s, render 46.328/53.304 ms, max tile count 79, overflow 0. This matches the 200-step fast-mac direct-splat train budget at 5.313 s while keeping higher train and heldout PSNR.
+```
+
+Read: after correcting depth, the quality result is no longer a low-PSNR
+curiosity. At matched train wall-clock, PRT reaches 16.1552/14.1770 dB with
+1408 parameters while fast-mac direct splats reach 13.2901/11.2841 dB with
+7168 parameters. The speed warning remains: direct splats still render faster
+than PRT in this harness, roughly 30-36 ms versus 46-73 ms depending on row.
+The next rasterizer work should target render latency, not just optimization
+quality.
 
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
@@ -738,4 +768,4 @@ should be measured before splitting a camera window.
 2. Add tile-load scaling scenes that stress moving-camera curvature beyond the synthetic `camera_motion_scale` knob.
 3. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
-5. Add same-wall and stronger-baseline rows for the real multicam direct-splat harness.
+5. Profile why the PRT moving-camera renderer is still slower than direct splats at 64px.

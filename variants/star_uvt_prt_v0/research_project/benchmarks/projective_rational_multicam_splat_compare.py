@@ -713,7 +713,7 @@ def main() -> None:
     parser.add_argument("--splat-renderer", choices=("dense", "fast_mac"), default="dense")
     parser.add_argument("--splat-camera-projection", choices=("legacy_pinhole", "dataset_lens"), default="legacy_pinhole")
     parser.add_argument("--splat-init-scale", type=float, default=0.035)
-    parser.add_argument("--init-depth", type=float, default=2.0)
+    parser.add_argument("--init-depth", type=float, default=0.5)
     parser.add_argument("--out-json", type=Path)
     args = parser.parse_args()
 
