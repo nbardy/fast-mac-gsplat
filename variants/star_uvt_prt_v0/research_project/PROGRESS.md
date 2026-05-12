@@ -103,6 +103,16 @@ failure. It does not solve default-capacity scaling; the next useful work is to
 tighten support bounds, split camera windows, or make capacity selection part of
 the cost model.
 
+A 512-tube capacity-256 probe fails:
+
+```text
+512 tubes, tile_capacity=256: max tile count 313, overflow tiles 16, max error 0.2973073422908783
+```
+
+That bounds the current capacity-only fix: capacity 256 clears the 256-tube
+smoke, but larger scenes need support tightening, camera-window splitting, or
+adaptive capacity before the tiled PRT path is useful at scale.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
