@@ -41,6 +41,24 @@ class ProjectiveRationalTileConfig:
         return self.as_dict()
 
 
+@dataclass(frozen=True)
+class ProjectiveRationalTilePolicy:
+    name: str
+    tile_config: ProjectiveRationalTileConfig
+    support_alpha_threshold: float | None = None
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("name must be non-empty")
+        if self.support_alpha_threshold is not None and self.support_alpha_threshold <= 0.0:
+            raise ValueError("support_alpha_threshold must be positive")
+
+    def as_render_kwargs(self) -> dict[str, int]:
+        return self.tile_config.as_render_kwargs()
+
+
+PROJECTIVE_RATIONAL_1024_TRAIN_SPEED_SUPPORT_ALPHA_THRESHOLD = 32.0 / 255.0
+
 DEFAULT_PROJECTIVE_RATIONAL_TILE_CANDIDATES: tuple[ProjectiveRationalTileConfig, ...] = (
     ProjectiveRationalTileConfig(8, 8, 1, 128),
     ProjectiveRationalTileConfig(8, 8, 1, 256),
@@ -99,6 +117,28 @@ def recommend_projective_rational_tile_config(
     if allow_unverified:
         return ProjectiveRationalTileConfig(4, 4, 2, 512)
     raise ValueError("PRT tile config is only verified up to 512 tubes")
+
+
+def recommend_projective_rational_train_speed_tile_policy(
+    *,
+    tube_count: int,
+    camera_motion_scale: float = 1.0,
+) -> ProjectiveRationalTilePolicy:
+    if tube_count <= 512:
+        return ProjectiveRationalTilePolicy(
+            name="train_speed_verified",
+            tile_config=recommend_projective_rational_tile_config(
+                tube_count=tube_count,
+                camera_motion_scale=camera_motion_scale,
+            ),
+        )
+    if tube_count <= 1024 and camera_motion_scale <= 1.5:
+        return ProjectiveRationalTilePolicy(
+            name="train_speed_support32_1024",
+            tile_config=ProjectiveRationalTileConfig(4, 4, 1, 512),
+            support_alpha_threshold=PROJECTIVE_RATIONAL_1024_TRAIN_SPEED_SUPPORT_ALPHA_THRESHOLD,
+        )
+    raise ValueError("PRT train-speed tile policy is only verified up to 1024 tubes at camera_motion_scale <= 1.5")
 
 
 def select_projective_rational_tile_summary(

@@ -10,9 +10,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from torch_gsplat_bridge_star_uvt_prt.tile_config import (  # noqa: E402
+    PROJECTIVE_RATIONAL_1024_TRAIN_SPEED_SUPPORT_ALPHA_THRESHOLD,
     ProjectiveRationalTileConfig,
+    ProjectiveRationalTilePolicy,
     apply_projective_rational_tile_env,
     parse_projective_rational_tile_config,
+    recommend_projective_rational_train_speed_tile_policy,
     recommend_projective_rational_tile_config,
     select_projective_rational_tile_summary,
 )
@@ -41,6 +44,17 @@ def main() -> None:
     assert recommend_projective_rational_tile_config(tube_count=512).key == "4x4x2:512"
     assert recommend_projective_rational_tile_config(tube_count=512, camera_motion_scale=3.0).key == "4x4x2:512"
     assert recommend_projective_rational_tile_config(tube_count=1024, allow_unverified=True).key == "4x4x2:512"
+
+    train_policy_512 = recommend_projective_rational_train_speed_tile_policy(tube_count=512)
+    assert train_policy_512 == ProjectiveRationalTilePolicy(
+        name="train_speed_verified",
+        tile_config=ProjectiveRationalTileConfig(4, 4, 2, 512),
+    )
+    train_policy_1024 = recommend_projective_rational_train_speed_tile_policy(tube_count=1024)
+    assert train_policy_1024.name == "train_speed_support32_1024"
+    assert train_policy_1024.tile_config.key == "4x4x1:512"
+    assert train_policy_1024.as_render_kwargs() == {"tile_x": 4, "tile_y": 4, "tile_t": 1, "tile_capacity": 512}
+    assert train_policy_1024.support_alpha_threshold == PROJECTIVE_RATIONAL_1024_TRAIN_SPEED_SUPPORT_ALPHA_THRESHOLD
     assert (
         _resolve_tile_config(
             Namespace(
@@ -76,6 +90,13 @@ def main() -> None:
         assert "verified up to 512" in str(exc)
     else:
         raise AssertionError("unverified tube count must fail closed")
+
+    try:
+        recommend_projective_rational_train_speed_tile_policy(tube_count=1024, camera_motion_scale=3.0)
+    except ValueError as exc:
+        assert "only verified up to 1024" in str(exc)
+    else:
+        raise AssertionError("1024 train-speed policy must fail outside verified motion scale")
 
     selected, best_failed = select_projective_rational_tile_summary(
         [

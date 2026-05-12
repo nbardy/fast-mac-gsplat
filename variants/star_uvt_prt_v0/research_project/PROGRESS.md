@@ -55,6 +55,7 @@ Last updated: 2026-05-13
 - [x] Gate D2p: support-only alpha threshold for 1024-tube capacity.
 - [x] Gate D2q: 1024-tube support-pruned `tile_t=1` train-speed comparison.
 - [x] Gate D2r: lower 1024-tube `tile_t=1` support-pruning cutoff.
+- [x] Gate D2s: explicit 1024 train-speed tile policy API.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1323,6 +1324,27 @@ more support, improves heldout PSNR at 72 and 200 steps, and still passes
 20/72/200 with zero overflow. The tradeoff is thinner capacity margin at
 72 steps (`493/512`) and slower 20-step render, so a conservative render/eval
 policy may still prefer a higher threshold or a margin rule.
+
+Gate D2s turns the D2r row into an explicit opt-in policy without weakening the
+generic selector. `recommend_projective_rational_tile_config(tube_count=1024)`
+still fails closed. The new
+`recommend_projective_rational_train_speed_tile_policy(tube_count=1024)`
+returns policy `train_speed_support32_1024`, tile `4x4x1:512`, and support
+alpha `32/255`. The D2 compare harness exposes this with
+`--prt-tile-policy train_speed`; explicit `--tile-config` remains a separate
+manual path.
+
+Validation:
+
+```text
+python3 tests/projective_rational_tile_config_check.py
+python3 -m py_compile torch_gsplat_bridge_star_uvt_prt/tile_config.py torch_gsplat_bridge_star_uvt_prt/__init__.py research_project/benchmarks/projective_rational_multicam_splat_compare.py
+python3 setup.py build_ext --inplace
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 32 --max-frames 2 --steps 1 --prt-tubes 1024 --splat-count 16 --splat-renderer fast_mac --init-depth 0.5 --prt-tile-policy train_speed --render-warmups 0 --render-repeats 1 --prt-eval-cache-compiled --out-json /tmp/prt_train_speed_policy_smoke.json
+```
+
+Smoke read: pass true, policy `train_speed_support32_1024`, support
+`0.12549019607843137`, tile `4x4x1:512`, max tile 474, overflow 0.
 
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet

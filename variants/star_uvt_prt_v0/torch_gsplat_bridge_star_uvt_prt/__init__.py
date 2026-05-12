@@ -1,8 +1,11 @@
 from .tile_config import (
     DEFAULT_PROJECTIVE_RATIONAL_TILE_CANDIDATES,
+    PROJECTIVE_RATIONAL_1024_TRAIN_SPEED_SUPPORT_ALPHA_THRESHOLD,
     ProjectiveRationalTileConfig,
+    ProjectiveRationalTilePolicy,
     apply_projective_rational_tile_env,
     parse_projective_rational_tile_config,
+    recommend_projective_rational_train_speed_tile_policy,
     recommend_projective_rational_tile_config,
     select_projective_rational_tile_summary,
 )
@@ -52,8 +55,10 @@ from .rasterize import (
 __all__ = [
     "DEFAULT_PROJECTIVE_RATIONAL_TILE_CANDIDATES",
     "Gate0Stats",
+    "PROJECTIVE_RATIONAL_1024_TRAIN_SPEED_SUPPORT_ALPHA_THRESHOLD",
     "ProjectiveRationalBackwardProfileResult",
     "ProjectiveRationalTileConfig",
+    "ProjectiveRationalTilePolicy",
     "ProjectiveRationalProfileResult",
     "UVTRenderConfig",
     "UVTRenderResult",
@@ -77,6 +82,7 @@ __all__ = [
     "reduce_sample_bundle_scan",
     "reduce_sample_bundle_scan_compensated",
     "reduce_sample_bundle_sorted_segments",
+    "recommend_projective_rational_train_speed_tile_policy",
     "recommend_projective_rational_tile_config",
     "select_projective_rational_tile_summary",
     "simple_backward_samples",
