@@ -1,0 +1,81 @@
+{
+  "camera_motion_scale": 3.0,
+  "camera_poly_degree": 2,
+  "device": "mps",
+  "direct_per_frame_reference": {
+    "render_benchmark_ms": {
+      "max_ms": 63.104541011853144,
+      "median_ms": 51.37370800366625,
+      "min_ms": 41.52058299223427,
+      "repeats": 3,
+      "samples": [
+        63.104541011853144,
+        51.37370800366625,
+        41.52058299223427
+      ],
+      "warmups": 1
+    }
+  },
+  "frames": 4,
+  "height": 64,
+  "name": "projective_rational_world_camera_forward_probe",
+  "note": "Synthetic world-camera forward probe. The reference is exact per-frame projection with dense screen compositing; PRT and static-camera paths use the tiled Metal projective-rational renderer.",
+  "pass": true,
+  "projective_rational": {
+    "active_tile_count": 53,
+    "camera_fit_error": 0.0,
+    "max_tile_count": 79,
+    "metrics_vs_direct_reference": {
+      "l1": 2.7469852170725062e-08,
+      "max_abs": 1.043081283569336e-06,
+      "mse": 6.777338886360942e-15,
+      "psnr": 120.0
+    },
+    "overflow_tile_count": 0,
+    "render_benchmark_ms": {
+      "max_ms": 4.647708003176376,
+      "median_ms": 4.573249985696748,
+      "min_ms": 4.532708000624552,
+      "repeats": 3,
+      "samples": [
+        4.647708003176376,
+        4.573249985696748,
+        4.532708000624552
+      ],
+      "warmups": 1
+    }
+  },
+  "seed": 13,
+  "static_camera": {
+    "active_tile_count": 52,
+    "camera_fit_error": 0.0,
+    "max_tile_count": 75,
+    "metrics_vs_direct_reference": {
+      "l1": 0.0067309169098734856,
+      "max_abs": 0.4482106864452362,
+      "mse": 0.0005652318941429257,
+      "psnr": 32.477733403488244
+    },
+    "overflow_tile_count": 0,
+    "render_benchmark_ms": {
+      "max_ms": 3.45054198987782,
+      "median_ms": 3.2170409976970404,
+      "min_ms": 3.155124999466352,
+      "repeats": 3,
+      "samples": [
+        3.2170409976970404,
+        3.45054198987782,
+        3.155124999466352
+      ],
+      "warmups": 1
+    }
+  },
+  "tile_config": {
+    "tile_capacity": 128,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8
+  },
+  "tube_count": 128,
+  "width": 64
+}

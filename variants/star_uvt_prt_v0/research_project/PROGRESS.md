@@ -33,6 +33,7 @@ Last updated: 2026-05-13
 - [x] Gate C4b: moving-camera stress timing clears tile-pixel default promotion.
 - [x] Gate C5: local single-video screen-PRT overfit compare.
 - [x] Gate C5b: warmed direct-screen dense eval baseline and same-wall PRT overfit slice.
+- [x] Gate D0: synthetic world-camera forward probe against exact per-frame projection.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -544,6 +545,37 @@ slightly faster to render at this tiny scale. At roughly the same training
 wall-clock budget, PRT reaches 28.7287778393939 dB against the baseline's
 25.085034375204227 dB. This is still a local screen-space overfit bridge, not a
 world-camera or heldout proof.
+
+Gate D0 adds a synthetic world-camera forward probe:
+`research_project/benchmarks/projective_rational_world_camera_forward_probe.py`.
+It renders the same moving-camera world tubes through an exact per-frame dense
+projection reference, a static-camera PRT path, and the moving-camera PRT path.
+This is forward-only and synthetic; it is the bridge before a full train/heldout
+world-camera harness.
+
+Smoke:
+
+```text
+python3 research_project/benchmarks/projective_rational_world_camera_forward_probe.py --frames 4 --height 32 --width 32 --tube-count 32 --camera-motion-scale 3.0 --warmups 0 --repeats 1 --out-json research_project/benchmarks/results/projective_rational_world_camera_forward_probe_32_4f_32t_smoke.json
+```
+
+64px moving-camera rows:
+
+```text
+python3 research_project/benchmarks/projective_rational_world_camera_forward_probe.py --frames 4 --height 64 --width 64 --tube-count 64 --camera-motion-scale 3.0 --warmups 1 --repeats 3 --out-json research_project/benchmarks/results/projective_rational_world_camera_forward_probe_64_4f_64t_motion3_warm.json
+python3 research_project/benchmarks/projective_rational_world_camera_forward_probe.py --frames 4 --height 64 --width 64 --tube-count 128 --camera-motion-scale 3.0 --warmups 1 --repeats 3 --out-json research_project/benchmarks/results/projective_rational_world_camera_forward_probe_64_4f_128t_motion3_warm.json
+```
+
+Result:
+
+```text
+64 tubes: PRT PSNR vs exact per-frame reference 120.0 dB, static-camera PSNR 33.70920953512132 dB, PRT median render 2.8497079911176115 ms, exact per-frame dense reference 45.558124998933636 ms, max tile count 39, overflow 0
+128 tubes: PRT PSNR vs exact per-frame reference 120.0 dB, static-camera PSNR 32.477733403488244 dB, PRT median render 4.573249985696748 ms, exact per-frame dense reference 51.37370800366625 ms, max tile count 79, overflow 0
+```
+
+Read: the moving-camera PRT compiler fixes the static-camera error in this
+synthetic forward probe and preserves the tiled STAR-UVT-style speed shape.
+This still is not a direct-splat training or heldout comparison.
 
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
