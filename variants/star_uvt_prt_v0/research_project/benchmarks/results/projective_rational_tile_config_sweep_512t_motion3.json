@@ -1,0 +1,466 @@
+{
+  "best_failed_candidate": null,
+  "camera_motion_scale": 3.0,
+  "candidates": [
+    {
+      "active_tile_count": 121,
+      "candidate": {
+        "tile_capacity": 128,
+        "tile_t": 2,
+        "tile_x": 8,
+        "tile_y": 8
+      },
+      "failure_score": [
+        34,
+        218,
+        0.742542564868927,
+        9.060458003659733
+      ],
+      "max_abs_error_vs_direct": 0.742542564868927,
+      "max_tile_count": 346,
+      "overflow_tile_count": 34,
+      "pass": false,
+      "returncode": 1,
+      "rows": [
+        {
+          "active_tile_count": 121,
+          "camera_fit_error": 1.1192276438976023e-08,
+          "camera_motion_scale": 3.0,
+          "direct": {
+            "max_ms": 38.312707998557016,
+            "median_ms": 38.04504199069925,
+            "min_ms": 36.19929098931607,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "frames": 8,
+          "height": 48,
+          "max_abs_error_vs_direct": 0.742542564868927,
+          "max_tile_count": 346,
+          "overflow_tile_count": 34,
+          "pass": false,
+          "tile_capacity": 128,
+          "tile_t": 2,
+          "tile_x": 8,
+          "tile_y": 8,
+          "tiled": {
+            "max_ms": 10.399166989373043,
+            "median_ms": 9.060458003659733,
+            "min_ms": 8.006333009689115,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "tiled_to_direct_median_ratio": 0.23815082148876887,
+          "total_tile_pairs": 8202,
+          "tube_count": 512,
+          "width": 64
+        }
+      ],
+      "selection_score": [
+        1,
+        9.060458003659733,
+        8202,
+        121,
+        346
+      ],
+      "tiled_median_ms_sum": 9.060458003659733,
+      "total_tile_pairs": 8202
+    },
+    {
+      "active_tile_count": 121,
+      "candidate": {
+        "tile_capacity": 256,
+        "tile_t": 2,
+        "tile_x": 8,
+        "tile_y": 8
+      },
+      "failure_score": [
+        12,
+        90,
+        0.591675877571106,
+        25.909459000104107
+      ],
+      "max_abs_error_vs_direct": 0.591675877571106,
+      "max_tile_count": 346,
+      "overflow_tile_count": 12,
+      "pass": false,
+      "returncode": 1,
+      "rows": [
+        {
+          "active_tile_count": 121,
+          "camera_fit_error": 1.1192276438976023e-08,
+          "camera_motion_scale": 3.0,
+          "direct": {
+            "max_ms": 43.5566249943804,
+            "median_ms": 40.71191699767951,
+            "min_ms": 40.17750000639353,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "frames": 8,
+          "height": 48,
+          "max_abs_error_vs_direct": 0.591675877571106,
+          "max_tile_count": 346,
+          "overflow_tile_count": 12,
+          "pass": false,
+          "tile_capacity": 256,
+          "tile_t": 2,
+          "tile_x": 8,
+          "tile_y": 8,
+          "tiled": {
+            "max_ms": 26.355875001172535,
+            "median_ms": 25.909459000104107,
+            "min_ms": 25.244916003430262,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "tiled_to_direct_median_ratio": 0.6364097028784198,
+          "total_tile_pairs": 10893,
+          "tube_count": 512,
+          "width": 64
+        }
+      ],
+      "selection_score": [
+        1,
+        25.909459000104107,
+        10893,
+        121,
+        346
+      ],
+      "tiled_median_ms_sum": 25.909459000104107,
+      "total_tile_pairs": 10893
+    },
+    {
+      "active_tile_count": 121,
+      "candidate": {
+        "tile_capacity": 512,
+        "tile_t": 2,
+        "tile_x": 8,
+        "tile_y": 8
+      },
+      "failure_score": [
+        0,
+        0,
+        6.854534149169922e-07,
+        42.87208299501799
+      ],
+      "max_abs_error_vs_direct": 6.854534149169922e-07,
+      "max_tile_count": 346,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "returncode": 0,
+      "rows": [
+        {
+          "active_tile_count": 121,
+          "camera_fit_error": 1.1192276438976023e-08,
+          "camera_motion_scale": 3.0,
+          "direct": {
+            "max_ms": 41.997915992396884,
+            "median_ms": 35.42041599575896,
+            "min_ms": 34.35950000130106,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "frames": 8,
+          "height": 48,
+          "max_abs_error_vs_direct": 6.854534149169922e-07,
+          "max_tile_count": 346,
+          "overflow_tile_count": 0,
+          "pass": true,
+          "tile_capacity": 512,
+          "tile_t": 2,
+          "tile_x": 8,
+          "tile_y": 8,
+          "tiled": {
+            "max_ms": 43.344250007066876,
+            "median_ms": 42.87208299501799,
+            "min_ms": 42.83895899425261,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "tiled_to_direct_median_ratio": 1.210377738086172,
+          "total_tile_pairs": 11334,
+          "tube_count": 512,
+          "width": 64
+        }
+      ],
+      "selection_score": [
+        0,
+        42.87208299501799,
+        11334,
+        121,
+        346
+      ],
+      "tiled_median_ms_sum": 42.87208299501799,
+      "total_tile_pairs": 11334
+    },
+    {
+      "active_tile_count": 418,
+      "candidate": {
+        "tile_capacity": 128,
+        "tile_t": 2,
+        "tile_x": 4,
+        "tile_y": 4
+      },
+      "failure_score": [
+        84,
+        148,
+        0.4590810239315033,
+        7.5061250099679455
+      ],
+      "max_abs_error_vs_direct": 0.4590810239315033,
+      "max_tile_count": 276,
+      "overflow_tile_count": 84,
+      "pass": false,
+      "returncode": 1,
+      "rows": [
+        {
+          "active_tile_count": 418,
+          "camera_fit_error": 1.1192276438976023e-08,
+          "camera_motion_scale": 3.0,
+          "direct": {
+            "max_ms": 38.99645901401527,
+            "median_ms": 38.45229200669564,
+            "min_ms": 37.46370800945442,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "frames": 8,
+          "height": 48,
+          "max_abs_error_vs_direct": 0.4590810239315033,
+          "max_tile_count": 276,
+          "overflow_tile_count": 84,
+          "pass": false,
+          "tile_capacity": 128,
+          "tile_t": 2,
+          "tile_x": 4,
+          "tile_y": 4,
+          "tiled": {
+            "max_ms": 9.930667001754045,
+            "median_ms": 7.5061250099679455,
+            "min_ms": 7.476332990336232,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "tiled_to_direct_median_ratio": 0.19520617935234952,
+          "total_tile_pairs": 23756,
+          "tube_count": 512,
+          "width": 64
+        }
+      ],
+      "selection_score": [
+        1,
+        7.5061250099679455,
+        23756,
+        418,
+        276
+      ],
+      "tiled_median_ms_sum": 7.5061250099679455,
+      "total_tile_pairs": 23756
+    },
+    {
+      "active_tile_count": 418,
+      "candidate": {
+        "tile_capacity": 256,
+        "tile_t": 2,
+        "tile_x": 4,
+        "tile_y": 4
+      },
+      "failure_score": [
+        3,
+        20,
+        0.059324413537979126,
+        26.85933400061913
+      ],
+      "max_abs_error_vs_direct": 0.059324413537979126,
+      "max_tile_count": 276,
+      "overflow_tile_count": 3,
+      "pass": false,
+      "returncode": 1,
+      "rows": [
+        {
+          "active_tile_count": 418,
+          "camera_fit_error": 1.1192276438976023e-08,
+          "camera_motion_scale": 3.0,
+          "direct": {
+            "max_ms": 41.05499999423046,
+            "median_ms": 41.00812500109896,
+            "min_ms": 38.16691700194497,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "frames": 8,
+          "height": 48,
+          "max_abs_error_vs_direct": 0.059324413537979126,
+          "max_tile_count": 276,
+          "overflow_tile_count": 3,
+          "pass": false,
+          "tile_capacity": 256,
+          "tile_t": 2,
+          "tile_x": 4,
+          "tile_y": 4,
+          "tiled": {
+            "max_ms": 29.221667005913332,
+            "median_ms": 26.85933400061913,
+            "min_ms": 25.608583993744105,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "tiled_to_direct_median_ratio": 0.6549759102592312,
+          "total_tile_pairs": 28400,
+          "tube_count": 512,
+          "width": 64
+        }
+      ],
+      "selection_score": [
+        1,
+        26.85933400061913,
+        28400,
+        418,
+        276
+      ],
+      "tiled_median_ms_sum": 26.85933400061913,
+      "total_tile_pairs": 28400
+    },
+    {
+      "active_tile_count": 418,
+      "candidate": {
+        "tile_capacity": 512,
+        "tile_t": 2,
+        "tile_x": 4,
+        "tile_y": 4
+      },
+      "failure_score": [
+        0,
+        0,
+        6.854534149169922e-07,
+        27.71929198934231
+      ],
+      "max_abs_error_vs_direct": 6.854534149169922e-07,
+      "max_tile_count": 276,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "returncode": 0,
+      "rows": [
+        {
+          "active_tile_count": 418,
+          "camera_fit_error": 1.1192276438976023e-08,
+          "camera_motion_scale": 3.0,
+          "direct": {
+            "max_ms": 38.46066600817721,
+            "median_ms": 36.874417011858895,
+            "min_ms": 36.67045899783261,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "frames": 8,
+          "height": 48,
+          "max_abs_error_vs_direct": 6.854534149169922e-07,
+          "max_tile_count": 276,
+          "overflow_tile_count": 0,
+          "pass": true,
+          "tile_capacity": 512,
+          "tile_t": 2,
+          "tile_x": 4,
+          "tile_y": 4,
+          "tiled": {
+            "max_ms": 31.607124998117797,
+            "median_ms": 27.71929198934231,
+            "min_ms": 27.62566700403113,
+            "repeats": 3,
+            "warmups": 1
+          },
+          "tiled_to_direct_median_ratio": 0.7517214978728403,
+          "total_tile_pairs": 28453,
+          "tube_count": 512,
+          "width": 64
+        }
+      ],
+      "selection_score": [
+        0,
+        27.71929198934231,
+        28453,
+        418,
+        276
+      ],
+      "tiled_median_ms_sum": 27.71929198934231,
+      "total_tile_pairs": 28453
+    }
+  ],
+  "frames": 8,
+  "height": 48,
+  "name": "projective_rational_tile_config_sweep",
+  "note": "Each candidate runs in a fresh process because Metal shader tile constants are process-static.",
+  "pass": true,
+  "repeats": 3,
+  "seed": 31,
+  "selected_candidate": {
+    "active_tile_count": 418,
+    "candidate": {
+      "tile_capacity": 512,
+      "tile_t": 2,
+      "tile_x": 4,
+      "tile_y": 4
+    },
+    "failure_score": [
+      0,
+      0,
+      6.854534149169922e-07,
+      27.71929198934231
+    ],
+    "max_abs_error_vs_direct": 6.854534149169922e-07,
+    "max_tile_count": 276,
+    "overflow_tile_count": 0,
+    "pass": true,
+    "returncode": 0,
+    "rows": [
+      {
+        "active_tile_count": 418,
+        "camera_fit_error": 1.1192276438976023e-08,
+        "camera_motion_scale": 3.0,
+        "direct": {
+          "max_ms": 38.46066600817721,
+          "median_ms": 36.874417011858895,
+          "min_ms": 36.67045899783261,
+          "repeats": 3,
+          "warmups": 1
+        },
+        "frames": 8,
+        "height": 48,
+        "max_abs_error_vs_direct": 6.854534149169922e-07,
+        "max_tile_count": 276,
+        "overflow_tile_count": 0,
+        "pass": true,
+        "tile_capacity": 512,
+        "tile_t": 2,
+        "tile_x": 4,
+        "tile_y": 4,
+        "tiled": {
+          "max_ms": 31.607124998117797,
+          "median_ms": 27.71929198934231,
+          "min_ms": 27.62566700403113,
+          "repeats": 3,
+          "warmups": 1
+        },
+        "tiled_to_direct_median_ratio": 0.7517214978728403,
+        "total_tile_pairs": 28453,
+        "tube_count": 512,
+        "width": 64
+      }
+    ],
+    "selection_score": [
+      0,
+      27.71929198934231,
+      28453,
+      418,
+      276
+    ],
+    "tiled_median_ms_sum": 27.71929198934231,
+    "total_tile_pairs": 28453
+  },
+  "tube_counts": [
+    512
+  ],
+  "warmups": 1,
+  "width": 64
+}

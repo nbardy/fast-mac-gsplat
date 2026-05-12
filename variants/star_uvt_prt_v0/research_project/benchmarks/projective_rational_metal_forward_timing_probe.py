@@ -27,20 +27,27 @@ from torch_gsplat_bridge_star_uvt_prt import (  # noqa: E402
 )
 
 
-def _camera(frames: int, width: int, height: int, times: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def _camera(
+    frames: int,
+    width: int,
+    height: int,
+    times: torch.Tensor,
+    *,
+    motion_scale: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
     k = torch.eye(3, dtype=torch.float32).view(1, 3, 3).repeat(frames, 1, 1)
     k[:, 0, 0] = 0.9 * float(width)
     k[:, 1, 1] = 0.9 * float(width)
     k[:, 0, 2] = 0.5 * float(width)
     k[:, 1, 2] = 0.5 * float(height)
-    zoom = 1.0 + 0.006 * times
+    zoom = 1.0 + 0.006 * motion_scale * times
     k[:, 0, 0] *= zoom
     k[:, 1, 1] *= zoom
 
     w2c = torch.eye(4, dtype=torch.float32).view(1, 4, 4).repeat(frames, 1, 1)
-    w2c[:, 0, 3] = -0.010 * times
-    w2c[:, 1, 3] = 0.004 * times
-    w2c[:, 2, 3] = -0.040 * times
+    w2c[:, 0, 3] = -0.010 * motion_scale * times
+    w2c[:, 1, 3] = 0.004 * motion_scale * times
+    w2c[:, 2, 3] = -0.040 * motion_scale * times
     return k, w2c
 
 
@@ -103,9 +110,10 @@ def _case(
     warmups: int,
     repeats: int,
     seed: int,
+    camera_motion_scale: float,
 ) -> dict[str, object]:
     times = centered_frame_times(frames)
-    k_seq, w2c_seq = _camera(frames, width, height, times)
+    k_seq, w2c_seq = _camera(frames, width, height, times, motion_scale=camera_motion_scale)
     camera_path = fit_camera_path_polynomial(k_seq, w2c_seq, degree=2, frame_times=times)
     projected = compile_projective_rational_tubes(_batch(tube_count, seed=seed), camera_path)
     config = UVTRenderConfig(
@@ -173,6 +181,7 @@ def _case(
         "tile_y": tile_y,
         "tile_t": tile_t,
         "tile_capacity": tile_capacity,
+        "camera_motion_scale": camera_motion_scale,
         "camera_fit_error": camera_path.fit_error,
         "max_abs_error_vs_direct": max_error,
         "active_tile_count": active_tile_count,
@@ -199,6 +208,7 @@ def run_probe(
     warmups: int,
     repeats: int,
     seed: int,
+    camera_motion_scale: float,
 ) -> dict[str, object]:
     if not torch.backends.mps.is_available():
         raise RuntimeError("MPS is required for the Metal PRT timing probe")
@@ -215,12 +225,14 @@ def run_probe(
             warmups=warmups,
             repeats=repeats,
             seed=seed + index,
+            camera_motion_scale=camera_motion_scale,
         )
         for index, tube_count in enumerate(tube_counts)
     ]
     return {
         "name": "projective_rational_metal_forward_timing_probe",
         "note": "Metal timing is diagnostic. B2 does not by itself prove training speed.",
+        "camera_motion_scale": camera_motion_scale,
         "pass": all(bool(row["pass"]) for row in rows),
         "rows": rows,
     }
@@ -248,6 +260,7 @@ def main() -> None:
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--repeats", type=int, default=10)
     parser.add_argument("--seed", type=int, default=31)
+    parser.add_argument("--camera-motion-scale", type=float, default=1.0)
     parser.add_argument("--out-json", type=Path)
     args = parser.parse_args()
 
@@ -263,6 +276,7 @@ def main() -> None:
         warmups=args.warmups,
         repeats=args.repeats,
         seed=args.seed,
+        camera_motion_scale=args.camera_motion_scale,
     )
     if args.out_json is not None:
         args.out_json.parent.mkdir(parents=True, exist_ok=True)

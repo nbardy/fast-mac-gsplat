@@ -84,6 +84,7 @@ def _run_candidate(
     frames: int,
     width: int,
     height: int,
+    camera_motion_scale: float,
     warmups: int,
     repeats: int,
     seed: int,
@@ -113,6 +114,8 @@ def _run_candidate(
         str(width),
         "--height",
         str(height),
+        "--camera-motion-scale",
+        str(camera_motion_scale),
         "--tile-x",
         str(candidate["tile_x"]),
         "--tile-y",
@@ -145,6 +148,7 @@ def run_sweep(
     frames: int,
     width: int,
     height: int,
+    camera_motion_scale: float,
     warmups: int,
     repeats: int,
     seed: int,
@@ -160,6 +164,7 @@ def run_sweep(
                 frames=frames,
                 width=width,
                 height=height,
+                camera_motion_scale=camera_motion_scale,
                 warmups=warmups,
                 repeats=repeats,
                 seed=seed,
@@ -177,6 +182,7 @@ def run_sweep(
         "frames": frames,
         "width": width,
         "height": height,
+        "camera_motion_scale": camera_motion_scale,
         "warmups": warmups,
         "repeats": repeats,
         "seed": seed,
@@ -206,6 +212,7 @@ def main() -> None:
     parser.add_argument("--frames", type=int, default=8)
     parser.add_argument("--width", type=int, default=64)
     parser.add_argument("--height", type=int, default=48)
+    parser.add_argument("--camera-motion-scale", type=float, default=1.0)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--seed", type=int, default=31)
@@ -218,6 +225,7 @@ def main() -> None:
         frames=args.frames,
         width=args.width,
         height=args.height,
+        camera_motion_scale=args.camera_motion_scale,
         warmups=args.warmups,
         repeats=args.repeats,
         seed=args.seed,

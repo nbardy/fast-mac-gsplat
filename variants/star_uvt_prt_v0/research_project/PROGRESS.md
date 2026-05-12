@@ -163,6 +163,19 @@ Read: the current cost model needs both a shape ladder and a capacity ladder.
 `4x4` remains the right shape in this synthetic hotspot, but the capacity tier
 must rise from 256 to 512 by 1024 tubes.
 
+A stronger moving-camera stress (`--camera-motion-scale 3.0`) at 512 tubes also
+selects `4x4x2:512`:
+
+```text
+8x8x2:512: pass, max tile count 346, overflow 0, tiled/direct ratio 1.210377738086172
+4x4x2:256: fail, max tile count 276, overflow tiles 3
+4x4x2:512: pass, max tile count 276, overflow 0, tiled/direct ratio 0.7517214978728403
+```
+
+Read: stronger camera motion pushes the 512-tube case over the cap-256 edge.
+The 4x4 shape still controls the hotspot better than 8x8, but the selected
+capacity has to rise to 512 under stronger camera motion.
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
