@@ -654,6 +654,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
         width=width,
         frames=frames,
         alpha_threshold=args.prt_alpha_threshold,
+        support_alpha_threshold=args.prt_support_alpha_threshold,
         background=(1.0, 1.0, 1.0),
         **tile_config.as_render_kwargs(),
     )
@@ -742,6 +743,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
             "sample_id": None if bundle.metadata is None else bundle.metadata.get("sample_id"),
             "camera_poly_degree": args.camera_poly_degree,
             "prt_alpha_threshold": args.prt_alpha_threshold,
+            "prt_support_alpha_threshold": args.prt_support_alpha_threshold,
             "train_camera_fit_errors": train_fit_errors,
             "heldout_camera_fit_errors": heldout_fit_errors,
         },
@@ -790,6 +792,7 @@ def main() -> None:
     parser.add_argument("--prt-init-lambda-t", type=float, default=0.25)
     parser.add_argument("--prt-init-opacity", type=float, default=0.35)
     parser.add_argument("--prt-alpha-threshold", type=float, default=1.0 / 255.0)
+    parser.add_argument("--prt-support-alpha-threshold", type=float)
     parser.add_argument("--splat-count", type=int, default=128)
     parser.add_argument("--splat-lr", type=float, default=0.002)
     parser.add_argument("--splat-renderer", choices=("dense", "fast_mac"), default="dense")

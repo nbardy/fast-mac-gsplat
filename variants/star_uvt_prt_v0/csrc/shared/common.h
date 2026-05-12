@@ -29,6 +29,7 @@ struct ParsedMeta {
   float bg_b;
   float eps;
   float max_alpha;
+  float support_alpha_threshold;
 };
 
 inline ParsedMeta parse_meta(const torch::Tensor& meta_i32, const torch::Tensor& meta_f32) {
@@ -60,6 +61,7 @@ inline ParsedMeta parse_meta(const torch::Tensor& meta_i32, const torch::Tensor&
   out.bg_b = fp[4];
   out.eps = fp[5];
   out.max_alpha = fp[6];
+  out.support_alpha_threshold = fp[7];
   return out;
 }
 

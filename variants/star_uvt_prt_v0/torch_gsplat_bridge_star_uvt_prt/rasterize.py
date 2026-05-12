@@ -30,6 +30,7 @@ class UVTRenderConfig:
     tile_t: int = 2
     tile_capacity: int = 128
     alpha_threshold: float = 1.0 / 255.0
+    support_alpha_threshold: float | None = None
     transmittance_threshold: float = 1.0e-4
     background: tuple[float, float, float] = (0.0, 0.0, 0.0)
     max_alpha: float = 0.99
@@ -107,6 +108,10 @@ def _runtime_validate(config: UVTRenderConfig) -> None:
         raise ValueError("tile_t must be 1, 2, or 4")
     if config.tile_capacity not in (32, 64, 128, 256, 512):
         raise ValueError("tile_capacity must be 32, 64, 128, 256, or 512")
+    if config.alpha_threshold <= 0.0:
+        raise ValueError("alpha_threshold must be positive")
+    if config.support_alpha_threshold is not None and config.support_alpha_threshold <= 0.0:
+        raise ValueError("support_alpha_threshold must be positive")
     if config.tile_x != _env_int("STAR_UVT_TILE_X", 8):
         raise ValueError("config.tile_x must match STAR_UVT_TILE_X")
     if config.tile_y != _env_int("STAR_UVT_TILE_Y", 8):
@@ -233,6 +238,7 @@ def _make_meta(
         device=device,
         dtype=torch.int32,
     )
+    support_alpha_threshold = config.alpha_threshold if config.support_alpha_threshold is None else config.support_alpha_threshold
     meta_f32 = torch.tensor(
         [
             float(config.alpha_threshold),
@@ -242,6 +248,7 @@ def _make_meta(
             float(config.background[2]),
             1.0e-8,
             float(config.max_alpha),
+            float(support_alpha_threshold),
         ],
         device=device,
         dtype=torch.float32,

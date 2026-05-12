@@ -59,6 +59,7 @@ struct MetaF32 {
   float bg_b;
   float eps;
   float max_alpha;
+  float support_alpha_threshold;
 };
 
 struct ReduceMeta {
@@ -1334,8 +1335,8 @@ kernel void bin_projective_rational_tubes_to_uvt_tiles(
   uint h_terms = uint(mi.reserved0);
 
   float op = opacity[tube_id];
-  if (!(op > mf.alpha_threshold)) return;
-  float support_tau = -2.0f * log(max(mf.alpha_threshold / max(op, mf.eps), mf.eps));
+  if (!(op > mf.support_alpha_threshold)) return;
+  float support_tau = -2.0f * log(max(mf.support_alpha_threshold / max(op, mf.eps), mf.eps));
   if (!isfinite(support_tau) || support_tau <= 0.0f) return;
 
   float time_precision = lambda_t[tube_id];
