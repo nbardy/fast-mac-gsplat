@@ -176,7 +176,7 @@ class PerFrameScreenGaussianModel(torch.nn.Module):
         )
         self.raw_color = torch.nn.Parameter(_logit(colors))
 
-    def render(self, *, height: int, width: int, max_alpha: float = 0.99) -> Tensor:
+    def render_loop(self, *, height: int, width: int, max_alpha: float = 0.99) -> Tensor:
         frames, splats, _ = self.center_uv.shape
         y = torch.arange(height, dtype=torch.float32, device=self.center_uv.device) + 0.5
         x = torch.arange(width, dtype=torch.float32, device=self.center_uv.device) + 0.5
@@ -200,6 +200,34 @@ class PerFrameScreenGaussianModel(torch.nn.Module):
                 trans = trans * (1.0 - alpha3)
             rows.append(accum)
         return torch.stack(rows, dim=0).contiguous()
+
+    def render_dense_vectorized(self, *, height: int, width: int, max_alpha: float = 0.99) -> Tensor:
+        frames = int(self.center_uv.shape[0])
+        y = torch.arange(height, dtype=torch.float32, device=self.center_uv.device) + 0.5
+        x = torch.arange(width, dtype=torch.float32, device=self.center_uv.device) + 0.5
+        yy, xx = torch.meshgrid(y, x, indexing="ij")
+        precision = torch.nn.functional.softplus(self.raw_precision_uv).clamp_min(1.0e-5)
+        opacity = (0.99 * torch.sigmoid(self.raw_opacity)).clamp(max=max_alpha)
+        color = torch.sigmoid(self.raw_color)
+
+        du = xx.view(1, 1, height, width) - self.center_uv[:, :, 0].view(frames, -1, 1, 1)
+        dv = yy.view(1, 1, height, width) - self.center_uv[:, :, 1].view(frames, -1, 1, 1)
+        exponent = 0.5 * (
+            precision[:, :, 0].view(frames, -1, 1, 1) * du.square()
+            + precision[:, :, 1].view(frames, -1, 1, 1) * dv.square()
+        )
+        alpha = (opacity.view(frames, -1, 1, 1) * torch.exp(-exponent)).clamp(max=max_alpha)
+        trans_inclusive = torch.cumprod(1.0 - alpha, dim=1)
+        trans = torch.cat((torch.ones_like(trans_inclusive[:, :1]), trans_inclusive[:, :-1]), dim=1)
+        weights = (trans * alpha).unsqueeze(-1)
+        return (weights * color.view(frames, -1, 1, 1, 3)).sum(dim=1).contiguous()
+
+    def render(self, *, height: int, width: int, mode: str, max_alpha: float = 0.99) -> Tensor:
+        if mode == "loop":
+            return self.render_loop(height=height, width=width, max_alpha=max_alpha)
+        if mode == "dense_vectorized":
+            return self.render_dense_vectorized(height=height, width=width, max_alpha=max_alpha)
+        raise ValueError("baseline render mode must be 'loop' or 'dense_vectorized'")
 
 
 def mse_to_psnr(mse: float) -> float:
@@ -236,10 +264,13 @@ def fit_model(
     return losses, (time.perf_counter() - started) * 1000.0
 
 
-def timed_render(render_fn, *, device: torch.device, repeats: int) -> tuple[Tensor, list[float]]:
+def timed_render(render_fn, *, device: torch.device, repeats: int, warmups: int) -> tuple[Tensor, list[float]]:
     samples = []
     image = None
     with torch.no_grad():
+        for _ in range(warmups):
+            image = render_fn()
+            _sync(device)
         for _ in range(repeats):
             _sync(device)
             started = time.perf_counter()
@@ -323,6 +354,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
         lambda: render_projective_rational_tubes_tiled(*prt_model.tensors(), config),
         device=device,
         repeats=args.render_repeats,
+        warmups=args.render_warmups,
     )
     aux = render_projective_rational_tubes_tiled(*prt_model.tensors(), config, return_aux=True)
 
@@ -339,18 +371,30 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
             opacity=args.opacity,
             seed=args.seed,
         ).to(device)
+        baseline_eval_render_mode = args.baseline_eval_render_mode or args.baseline_render_mode
+        baseline_train_render = lambda: baseline_model.render(
+            height=height,
+            width=width,
+            mode=args.baseline_render_mode,
+        )
+        baseline_eval_render = lambda: baseline_model.render(
+            height=height,
+            width=width,
+            mode=baseline_eval_render_mode,
+        )
         baseline_losses, baseline_train_ms = fit_model(
             baseline_model,
             target,
-            lambda: baseline_model.render(height=height, width=width),
+            baseline_train_render,
             steps=args.steps,
             lr=args.baseline_lr,
             device=device,
         )
         baseline_image, baseline_render_samples = timed_render(
-            lambda: baseline_model.render(height=height, width=width),
+            baseline_eval_render,
             device=device,
             repeats=args.render_repeats,
+            warmups=args.render_warmups,
         )
 
     if args.contact_sheet is not None:
@@ -370,6 +414,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
         "steps": args.steps,
         "device": str(device),
         "seed": args.seed,
+        "render_warmups": args.render_warmups,
         "tile_config_key": tile_config.key,
         "tile_config": tile_config.as_dict(),
         "prt": {
@@ -394,6 +439,8 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
             "splats_per_frame": args.per_frame_splats,
             "total_splats": args.per_frame_splats * frames,
             "parameter_count": parameter_count(baseline_model),
+            "train_render_mode": args.baseline_render_mode,
+            "eval_render_mode": args.baseline_eval_render_mode or args.baseline_render_mode,
             "lr": args.baseline_lr,
             "initial_loss": baseline_losses[0],
             "final_loss": baseline_losses[-1],
@@ -423,7 +470,10 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=0.03)
     parser.add_argument("--per-frame-splats", type=int, default=32)
     parser.add_argument("--baseline-lr", type=float, default=0.03)
+    parser.add_argument("--baseline-render-mode", choices=("loop", "dense_vectorized"), default="loop")
+    parser.add_argument("--baseline-eval-render-mode", choices=("loop", "dense_vectorized"))
     parser.add_argument("--skip-baseline", action="store_true")
+    parser.add_argument("--render-warmups", type=int, default=1)
     parser.add_argument("--render-repeats", type=int, default=3)
     parser.add_argument("--out-json", type=Path)
     parser.add_argument("--contact-sheet", type=Path)
