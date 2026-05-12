@@ -20,7 +20,8 @@ Last updated: 2026-05-13
 - [x] Gate B4: support tightening and tile-shape sweep.
 - [x] Gate B5a: production PRT tile config selector and process-static env contract.
 - [x] Gate B5b: timing launch integration applies selector before first Metal shader call.
-- [ ] Gate B5c: training integration applies selector before first Metal shader call.
+- [ ] Gate B5c: training integration applies selector after a real PRT train-step path exists.
+- [x] Gate C0: CPU PRT autograd-vs-finite-difference gradient reference.
 - [ ] Gate C: PRT backward parity.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -216,6 +217,20 @@ max tile count: 13
 overflow tiles: 0
 ```
 
+There is not yet a real PRT train-step entrypoint in this fork. B5c is therefore
+blocked on Gate C and a train-step path that actually calls PRT forward/backward;
+the selector contract is ready, but there is no honest training hook to wire yet.
+
+Gate C0 establishes the gradient target before writing Metal backward kernels:
+
+```text
+python3 research_project/benchmarks/projective_rational_gradient_reference_check.py --out-json research_project/benchmarks/results/projective_rational_gradient_reference_check.json
+pass: true
+max abs error: 2.7381349354982376e-05
+max rel error: 0.02855873424253072
+checked params: h_coeff, lambda_uv, lambda_t, center_t, opacity, color
+```
+
 The new idea added in this fork is the curvature-selective hybrid compiler:
 low-curvature tubes can stay on the old affine UVT path, while only high-curvature
 moving-camera tubes use PRT. That is meant to preserve STAR-UVT's cheap path
@@ -228,8 +243,8 @@ should be measured before splitting a camera window.
 
 ## Next Gates
 
-1. Wire the selector into the real training path so projective-rational runs do not hand-roll env flags.
-2. Add tile-load scaling scenes that stress moving-camera curvature.
-3. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
-4. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
-5. Only after forward timing, add direct-atomic exploratory backward plus a deterministic reporting fallback.
+1. Add PRT Metal backward against the C0 gradient reference.
+2. Wire the selector into the real training path once a PRT train-step path exists.
+3. Add tile-load scaling scenes that stress moving-camera curvature.
+4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
+5. Add timing flags for `--uvt-camera-sequence-mode projective_rational`.
