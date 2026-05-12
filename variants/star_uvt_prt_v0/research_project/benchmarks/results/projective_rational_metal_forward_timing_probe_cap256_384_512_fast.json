@@ -1,0 +1,81 @@
+{
+  "camera_motion_scale": 1.0,
+  "name": "projective_rational_metal_forward_timing_probe",
+  "note": "Metal timing is diagnostic. B2 does not by itself prove training speed.",
+  "pass": false,
+  "rows": [
+    {
+      "active_tile_count": 104,
+      "camera_fit_error": 5.984424689131629e-08,
+      "camera_motion_scale": 1.0,
+      "direct": {
+        "max_ms": 27.197540999623016,
+        "median_ms": 23.487124999519438,
+        "min_ms": 22.91858299577143,
+        "repeats": 3,
+        "warmups": 1
+      },
+      "frames": 8,
+      "height": 48,
+      "max_abs_error_vs_direct": 6.556510925292969e-07,
+      "max_tile_count": 221,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "tile_capacity": 256,
+      "tile_t": 2,
+      "tile_x": 8,
+      "tile_y": 8,
+      "tiled": {
+        "max_ms": 18.214209005236626,
+        "median_ms": 18.04949999495875,
+        "min_ms": 17.97745900694281,
+        "repeats": 3,
+        "warmups": 1
+      },
+      "tiled_to_direct_median_ratio": 0.7684848611879085,
+      "total_tile_pairs": 8339,
+      "tube_count": 384,
+      "width": 64
+    },
+    {
+      "active_tile_count": 117,
+      "camera_fit_error": 5.984424689131629e-08,
+      "camera_motion_scale": 1.0,
+      "direct": {
+        "max_ms": 42.73195799032692,
+        "median_ms": 39.54333301226143,
+        "min_ms": 38.00345800118521,
+        "repeats": 3,
+        "warmups": 1
+      },
+      "frames": 8,
+      "height": 48,
+      "max_abs_error_vs_direct": 0.14964935183525085,
+      "max_tile_count": 296,
+      "overflow_tile_count": 16,
+      "pass": false,
+      "tile_capacity": 256,
+      "tile_t": 2,
+      "tile_x": 8,
+      "tile_y": 8,
+      "tiled": {
+        "max_ms": 26.109250000445172,
+        "median_ms": 25.89733300555963,
+        "min_ms": 25.849875004496425,
+        "repeats": 3,
+        "warmups": 1
+      },
+      "tiled_to_direct_median_ratio": 0.6549102220981093,
+      "total_tile_pairs": 10714,
+      "tube_count": 512,
+      "width": 64
+    }
+  ],
+  "tile_config": {
+    "tile_capacity": 256,
+    "tile_t": 2,
+    "tile_x": 8,
+    "tile_y": 8
+  },
+  "tile_config_key": "8x8x2:256"
+}

@@ -157,6 +157,20 @@ hotspot shape, but only cap 256 keeps all active tile lists valid. `8x8` with
 cap 512 is valid but slower on this smoke, so shape splitting beats a pure
 capacity bump here.
 
+A small cap-256 occupancy matrix narrows the hotspot:
+
+```text
+8x8x2:256, 384 tubes, 64x48x8:  pass, max tile count 221, overflow 0
+8x8x2:256, 512 tubes, 64x48x8:  fail, max tile count 296, overflow 16
+8x8x2:256, 512 tubes, 128x96x8: pass, max tile count 227, overflow 0
+8x8x2:256, 512 tubes, 64x48x16: fail, max tile count 303, overflow 23
+```
+
+Read: the default 512-tube failure is a spatial tile-density hotspot, not a
+pure temporal-window problem. Doubling spatial resolution creates more spatial
+tiles and clears the overflow; doubling frames does not. This supports the
+existing `4x4x2:256` selector choice for 512 tubes.
+
 At 1024 tubes, the selected configuration moves to `4x4x2:512`:
 
 ```text
