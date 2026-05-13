@@ -74,6 +74,7 @@ Last updated: 2026-05-13
 - [x] Gate D3i: split train/eval support-threshold probe for 256px 2048-tube rows.
 - [x] Gate D3j: same-wall 256px PRT/splat row with multi-support eval on one PRT checkpoint.
 - [x] Gate D3k: `tile_t=1` forward presorted-order shortcut with parity and selected timing rows.
+- [x] Gate D3l: 2048-tube 256px train-wall profile after the forward shortcut.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2005,6 +2006,39 @@ keeping the same quality story. The 128px selected 1024 row shows the same
 pattern. This does not solve train wall by itself; it cleans up playback/bake
 render and makes the sublinear rasterizer story much stronger.
 
+Gate D3l profiles the remaining train-wall problem after D3k. The goal is to
+separate playback render speed from the fused train-step cost on the current
+2048-tube, 256px, 8-frame, support64 row.
+
+Validation:
+
+```text
+python3 setup.py build_ext --inplace
+python3 research_project/benchmarks/projective_rational_train_step_breakdown_probe.py --tube-counts 2048 --frames 8 --width 256 --height 256 --tile-config 4x4x1:512 --support-alpha-threshold 0.25098039215686274 --forward-mode tiled --backward-mode tile_pixel_atomic --warmups 1 --repeats 3 --out-json research_project/benchmarks/results/projective_rational_train_step_breakdown_probe_2048_256_8f_support64_tile4x4x1_forward_shortcut.json
+python3 research_project/benchmarks/projective_rational_fused_mse_timing_probe.py --tube-counts 2048 --frames 8 --width 256 --height 256 --tile-config 4x4x1:512 --support-alpha-threshold 0.25098039215686274 --warmups 1 --repeats 3 --out-json research_project/benchmarks/results/projective_rational_fused_mse_timing_probe_2048_256_8f_support64_tile4x4x1_forward_shortcut.json
+python3 -m py_compile research_project/benchmarks/projective_rational_fused_mse_timing_probe.py research_project/benchmarks/projective_rational_multicam_train_breakdown.py
+python3 research_project/benchmarks/projective_rational_multicam_train_breakdown.py --target-size 256 --max-frames 8 --steps 20 --prt-tubes 2048 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 1 --out-json research_project/benchmarks/results/projective_rational_multicam_train_breakdown_256_8f_2048t_20step_support64_fused_mse_forward_shortcut.json
+```
+
+Result:
+
+```text
+Projected separate train-step breakdown: forward 3.27 ms, loss 1.17 ms, backward 21.48 ms, optimizer 0.30 ms, total 26.04 ms, max tile 137, overflow 0.
+Projected fused-MSE timing: separate 22.91 ms, fused 19.04 ms, speedup 1.20x, max grad abs error 3.73e-09, max grad rel error 0.00493, overflow 0.
+Real multicam fused-MSE breakdown: median step 59.82 ms, fused MSE 49.59 ms, compile 4.04 ms, projected autograd backward 2.50 ms, clip 1.13 ms, optimizer 1.99 ms.
+Real multicam share of median step: fused MSE 82.9%, compile 6.7%, projected autograd 4.2%, optimizer 3.3%, clip 1.9%.
+Real multicam short row: 20 steps, loss 0.06337 -> 0.03240, eval PSNR 14.8884 / heldout 13.4261 dB, eval render 8.86 / 7.50 ms, max tile 119, overflow 0.
+```
+
+Read: D3k did its job for playback and bake render. The remaining 256px
+training wall is not camera compilation, not the world-tube autograd chain, and
+not optimizer overhead. It is the fused MSE Metal kernel itself, dominated by
+the same tile/sample replay and gradient accumulation work. The next train-speed
+work should therefore attack the fused train kernel directly: accumulation-only
+specialization, derivative-math simplification, trace/replay reuse, or a lower
+support schedule. Promoting cached compiler paths is still the right playback
+contract, but it will not close the training wall by itself.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -2029,6 +2063,6 @@ should be measured before splitting a camera window.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
 8. Treat split train/eval support as a diagnostic only; pursue support scheduling or residual-certified support inflation before making it a policy.
-9. Keep accumulation-only and derivative-math rewrites behind fused-train-step work unless a new profile changes the cost split.
+9. Move accumulation-only, derivative-math, and trace/replay reuse back to the front of the train-speed queue; D3l shows the fused MSE kernel is the 256px train-wall bottleneck.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
-11. Revisit train wall after separating playback speed from fused-train-step cost.
+11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3l says train speed still needs fused-kernel work.

@@ -108,11 +108,11 @@ def _time_call(fn, *, warmups: int, repeats: int) -> tuple[list[float], Any]:
 
 
 def _resolve_policy(args: argparse.Namespace) -> tuple[ProjectiveRationalTileConfig, float | None, str | None]:
+    if args.tile_config is not None:
+        return parse_projective_rational_tile_config(args.tile_config), args.support_alpha_threshold, None
     if args.prt_tile_policy == "train_speed":
         policy = recommend_projective_rational_train_speed_tile_policy(tube_count=max(args.tube_counts))
         return policy.tile_config, policy.support_alpha_threshold, policy.name
-    if args.tile_config is not None:
-        return parse_projective_rational_tile_config(args.tile_config), args.support_alpha_threshold, None
     return (
         ProjectiveRationalTileConfig(args.tile_x, args.tile_y, args.tile_t, args.tile_capacity),
         args.support_alpha_threshold,

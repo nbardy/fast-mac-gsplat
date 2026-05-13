@@ -31,6 +31,7 @@ from torch_gsplat_bridge_star_uvt_prt import (  # noqa: E402
     UVTRenderConfig,
     apply_projective_rational_tile_env,
     parse_projective_rational_tile_config,
+    projective_rational_tile_pixel_fused_mse_backward,
     recommend_projective_rational_tile_config,
 )
 
@@ -41,7 +42,9 @@ TIMING_KEYS = (
     "compile_s",
     "forward_s",
     "loss_s",
+    "fused_mse_s",
     "backward_s",
+    "clip_grad_s",
     "optimizer_s",
     "step_total_s",
 )
@@ -89,6 +92,36 @@ def _render_projected_train(projected, config: UVTRenderConfig) -> torch.Tensor:
     )
 
 
+def _backward_projected_fused_mse(projected, result) -> None:
+    backward_pairs = (
+        (projected.h_coeff, result.grad_h_coeff),
+        (projected.lambda_t, result.grad_lambda_t),
+        (projected.center_t, result.grad_center_t),
+        (projected.opacity, result.grad_opacity),
+        (projected.color, result.grad_color),
+    )
+    tensors = [tensor for tensor, _grad in backward_pairs if tensor.requires_grad]
+    grads = [grad for tensor, grad in backward_pairs if tensor.requires_grad]
+    torch.autograd.backward(tensors, grads)
+
+
+def _run_fused_mse_projected(projected, target: torch.Tensor, config: UVTRenderConfig):
+    result = projective_rational_tile_pixel_fused_mse_backward(
+        projected.h_coeff,
+        projected.lambda_uv,
+        projected.lambda_t,
+        projected.center_t,
+        projected.opacity,
+        projected.color,
+        target,
+        config,
+    )
+    if int((result.tile_overflow.detach().cpu() > 0).sum().item()) > 0:
+        raise RuntimeError("fused MSE PRT train step overflowed tile capacity")
+    loss_value = float((result.loss_sum.detach().cpu()[0] / float(target.numel())).item())
+    return result, loss_value
+
+
 def _fit_prt_with_breakdown(
     *,
     model: MulticamPRTWorldTubeModel,
@@ -98,11 +131,16 @@ def _fit_prt_with_breakdown(
     steps: int,
     lr: float,
     loss_mode: str,
+    train_mode: str,
     device: torch.device,
     seed: int,
 ) -> dict[str, Any]:
     if loss_mode not in {"sampled_frame", "sequence"}:
         raise ValueError("loss_mode must be one of: sampled_frame, sequence")
+    if train_mode not in {"separate", "fused_mse"}:
+        raise ValueError("train_mode must be one of: separate, fused_mse")
+    if train_mode == "fused_mse" and loss_mode != "sequence":
+        raise ValueError("fused_mse train mode currently requires --prt-loss-mode sequence")
     generator = torch.Generator(device=device).manual_seed(seed)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     losses = []
@@ -124,30 +162,40 @@ def _fit_prt_with_breakdown(
             device,
             lambda view=view: _compile_detached_footprint(model, train_camera_paths[view]),
         )
-        image, forward_s = _time_call(device, lambda: _render_projected_train(projected, config))
+        target = bundle.train_frames[view].permute(0, 2, 3, 1).contiguous()
+        forward_s = 0.0
+        loss_s = 0.0
+        fused_mse_s = 0.0
+        result = None
+        if train_mode == "fused_mse":
+            (result, loss_value), fused_mse_s = _time_call(
+                device,
+                lambda projected=projected, target=target: _run_fused_mse_projected(projected, target, config),
+            )
+        else:
+            image, forward_s = _time_call(device, lambda: _render_projected_train(projected, config))
 
-        def make_loss() -> torch.Tensor:
-            target = bundle.train_frames[view].permute(0, 2, 3, 1).contiguous()
-            if loss_mode == "sampled_frame":
-                return (image[frame] - target[frame]).square().mean()
-            return (image - target).square().mean()
+            def make_loss() -> torch.Tensor:
+                if loss_mode == "sampled_frame":
+                    return (image[frame] - target[frame]).square().mean()
+                return (image - target).square().mean()
 
-        loss, loss_s = _time_call(device, make_loss)
+            loss, loss_s = _time_call(device, make_loss)
+            loss_value = float(loss.detach().cpu())
+
         backward_s = 0.0
+        clip_grad_s = 0.0
         optimizer_s = 0.0
         if step < steps:
-            _unused, backward_s = _time_call(
-                device,
-                lambda: (
-                    loss.backward(),
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0),
-                ),
-            )
+            if train_mode == "fused_mse":
+                _unused, backward_s = _time_call(device, lambda: _backward_projected_fused_mse(projected, result))
+            else:
+                _unused, backward_s = _time_call(device, lambda: loss.backward())
+            _unused, clip_grad_s = _time_call(device, lambda: torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0))
             _unused, optimizer_s = _time_call(device, optimizer.step)
 
         _sync(device)
         step_total_s = time.perf_counter() - step_started
-        loss_value = float(loss.detach().cpu())
         losses.append({"step": step, "view": view, "frame": frame, "loss": loss_value})
         timing_rows.append(
             {
@@ -159,7 +207,9 @@ def _fit_prt_with_breakdown(
                 "compile_s": compile_s,
                 "forward_s": forward_s,
                 "loss_s": loss_s,
+                "fused_mse_s": fused_mse_s,
                 "backward_s": backward_s,
+                "clip_grad_s": clip_grad_s,
                 "optimizer_s": optimizer_s,
                 "step_total_s": step_total_s,
             }
@@ -168,6 +218,7 @@ def _fit_prt_with_breakdown(
     return {
         "steps": steps,
         "loss_mode": loss_mode,
+        "train_mode": train_mode,
         "train_loop_elapsed_s": time.perf_counter() - started,
         "diagnostic_sync_boundaries": True,
         "losses": losses,
@@ -245,6 +296,7 @@ def run_breakdown(args: argparse.Namespace) -> dict[str, Any]:
         frames=frames,
         background=(1.0, 1.0, 1.0),
         **tile_config.as_render_kwargs(),
+        support_alpha_threshold=args.prt_support_alpha_threshold,
     )
     model = MulticamPRTWorldTubeModel(
         bundle=bundle,
@@ -264,6 +316,7 @@ def run_breakdown(args: argparse.Namespace) -> dict[str, Any]:
         steps=args.steps,
         lr=args.prt_lr,
         loss_mode=args.prt_loss_mode,
+        train_mode=args.prt_train_mode,
         device=device,
         seed=args.seed + 17,
     )
@@ -298,6 +351,7 @@ def run_breakdown(args: argparse.Namespace) -> dict[str, Any]:
             "steps": args.steps,
             "render_warmups": args.render_warmups,
             "render_repeats": args.render_repeats,
+            "prt_support_alpha_threshold": args.prt_support_alpha_threshold,
             "train_cameras": bundle.train_camera_names,
             "heldout_cameras": bundle.heldout_camera_names,
             "pose_source": bundle.pose_source,
@@ -313,6 +367,8 @@ def run_breakdown(args: argparse.Namespace) -> dict[str, Any]:
             "tile_config": tile_config.as_dict(),
             "lr": args.prt_lr,
             "loss_mode": args.prt_loss_mode,
+            "train_mode": args.prt_train_mode,
+            "support_alpha_threshold": args.prt_support_alpha_threshold,
             "init_depth": args.init_depth,
             "init_precision_xy": args.prt_init_precision_xy,
             "init_lambda_t": args.prt_init_lambda_t,
@@ -336,9 +392,11 @@ def main() -> None:
     parser.add_argument("--prt-tubes", type=int, default=128)
     parser.add_argument("--prt-lr", type=float, default=0.02)
     parser.add_argument("--prt-loss-mode", choices=("sampled_frame", "sequence"), default="sampled_frame")
+    parser.add_argument("--prt-train-mode", choices=("separate", "fused_mse"), default="separate")
     parser.add_argument("--prt-init-precision-xy", type=float, default=36.0)
     parser.add_argument("--prt-init-lambda-t", type=float, default=0.25)
     parser.add_argument("--prt-init-opacity", type=float, default=0.35)
+    parser.add_argument("--prt-support-alpha-threshold", type=float)
     parser.add_argument("--init-depth", type=float, default=0.5)
     parser.add_argument("--render-warmups", type=int, default=1)
     parser.add_argument("--render-repeats", type=int, default=3)
