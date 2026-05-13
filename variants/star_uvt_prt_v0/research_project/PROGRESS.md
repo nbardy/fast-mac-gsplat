@@ -2323,6 +2323,37 @@ D3p as the cleaner same-budget recommendation and D3t as the boundary point
 showing the train72/eval64 schedule can spend up to roughly 195 steps before
 becoming an exact-step noise-band result.
 
+Gate D3u tested a tiny replay-reuse idea in the fused-MSE backward pass: reuse
+the stored differentiable alpha for the opacity gradient as
+`d_alpha * alpha / opacity` instead of recomputing `exp(-0.5 q)`. The source
+change passed parity but did not improve timing, so it was reverted and only
+the rejection artifacts are kept.
+
+Validation:
+
+```text
+python3 setup.py build_ext --inplace
+python3 research_project/benchmarks/projective_rational_tile_pixel_fused_mse_backward_check.py --out-json research_project/benchmarks/results/projective_rational_tile_pixel_fused_mse_backward_check_opacity_exp_reuse.json
+python3 research_project/benchmarks/projective_rational_fused_mse_timing_probe.py --tube-counts 2048 --frames 8 --width 256 --height 256 --tile-config 4x4x1:512 --support-alpha-threshold 0.25098039215686274 --warmups 1 --repeats 5 --out-json research_project/benchmarks/results/projective_rational_fused_mse_timing_probe_2048_256_8f_support64_tile4x4x1_opacity_exp_reuse.json
+python3 research_project/benchmarks/projective_rational_multicam_train_breakdown.py --target-size 256 --max-frames 8 --steps 20 --prt-tubes 2048 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 1 --out-json research_project/benchmarks/results/projective_rational_multicam_train_breakdown_256_8f_2048t_20step_support64_fused_mse_opacity_exp_reuse.json
+```
+
+Result:
+
+```text
+Parity: pass, loss abs error 0, max grad abs error 1.86e-09, overflow 0.
+Projected fused MSE with opacity exp reuse: 10.92 ms.
+Previous D3r projected fused MSE: 10.76 ms.
+20-step breakdown: median step 50.70 ms, fused MSE 41.31 ms, train loop 1.395 s.
+Previous D3r 20-step breakdown: median step 50.84 ms, fused MSE 41.46 ms, train loop 1.301 s.
+```
+
+Read: reject the source change. It removes an `exp` but adds a divide, and the
+focused timing probe was slightly slower while the real 20-step breakdown stayed
+noise-band. Keep this as evidence that isolated scalar algebra inside the replay
+loop is too small; the next speed attempt should change accumulation or replay
+structure rather than swapping one scalar op.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -2347,6 +2378,6 @@ should be measured before splitting a camera window.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
 8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p shows train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3t shows 195 steps is still under wall but not a quality improvement; D3q/D3r show exact 200-vs-200 steps is a quality/render win but still a train-wall near tie.
-9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, and D3s rejects isolated h-terms specialization, but the fused MSE path remains the 256px train-wall bottleneck.
+9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, and D3s/D3u reject isolated scalar-loop micro-specializations, but the fused MSE path remains the 256px train-wall bottleneck.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3l says train speed still needs fused-kernel work.
