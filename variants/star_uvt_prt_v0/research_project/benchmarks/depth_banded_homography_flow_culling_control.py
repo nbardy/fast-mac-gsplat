@@ -111,6 +111,7 @@ def _row(args: argparse.Namespace, *, seed: int, tile_size: int) -> dict[str, An
     residual = direct_centers - flow_centers
     _, residual_recon = _fit_poly(residual, times, degree=args.residual_degree)
     gauge_centers = flow_centers + residual_recon
+    reference_atlas_centers = direct_centers[ref_frame].view(1, -1, 2) + residual_recon
     fallback_mask = _per_tube_max_error(gauge_centers, direct_centers) > args.fallback_max_px
     nonfallback_mask = ~fallback_mask
     hybrid_centers = torch.where(fallback_mask.view(1, -1, 1), prt_centers, gauge_centers)
@@ -127,6 +128,16 @@ def _row(args: argparse.Namespace, *, seed: int, tile_size: int) -> dict[str, An
     )
     image_nonfallback = _tile_estimate(
         gauge_centers,
+        batch,
+        lambda_uv,
+        times,
+        args,
+        tile_size=tile_size,
+        clamp_to_image=True,
+        tube_mask=nonfallback_mask,
+    )
+    reference_atlas_nonfallback = _tile_estimate(
+        reference_atlas_centers,
         batch,
         lambda_uv,
         times,
@@ -165,6 +176,7 @@ def _row(args: argparse.Namespace, *, seed: int, tile_size: int) -> dict[str, An
     )
 
     flow_total = residual_nonfallback["total_tile_pairs"] + prt_fallback["total_tile_pairs"]
+    reference_atlas_total = reference_atlas_nonfallback["total_tile_pairs"] + prt_fallback["total_tile_pairs"]
     image_total = image_nonfallback["total_tile_pairs"] + prt_fallback["total_tile_pairs"]
     segmented_total = max(segmented["total_tile_pairs"], 1)
     image_total_safe = max(image_total, 1)
@@ -176,20 +188,27 @@ def _row(args: argparse.Namespace, *, seed: int, tile_size: int) -> dict[str, An
         "hybrid_center_p95_px": metrics["p95_px"],
         "hybrid_center_max_px": metrics["max_px"],
         "flow_sheared_hybrid_tile_pairs": flow_total,
+        "reference_atlas_hybrid_tile_pairs": reference_atlas_total,
         "image_space_hybrid_tile_pairs": image_total,
         "direct_image_tile_pairs": direct_all["total_tile_pairs"],
         "segmented_f4_tile_pairs": segmented["total_tile_pairs"],
         "flow_sheared_ratio_vs_segmented_f4": flow_total / segmented_total,
+        "reference_atlas_ratio_vs_segmented_f4": reference_atlas_total / segmented_total,
         "image_space_ratio_vs_segmented_f4": image_total / segmented_total,
         "direct_image_ratio_vs_segmented_f4": direct_all["total_tile_pairs"] / segmented_total,
         "flow_sheared_ratio_vs_image_space": flow_total / image_total_safe,
+        "reference_atlas_ratio_vs_image_space": reference_atlas_total / image_total_safe,
         "flow_sheared_saves_vs_image_space_tile_pairs": image_total - flow_total,
+        "reference_atlas_saves_vs_image_space_tile_pairs": image_total - reference_atlas_total,
         "residual_nonfallback_tile_pairs": residual_nonfallback["total_tile_pairs"],
+        "reference_atlas_nonfallback_tile_pairs": reference_atlas_nonfallback["total_tile_pairs"],
         "image_nonfallback_tile_pairs": image_nonfallback["total_tile_pairs"],
         "prt_fallback_tile_pairs": prt_fallback["total_tile_pairs"],
         "pass": metrics["max_px"] <= args.fallback_max_px
         and flow_total < segmented["total_tile_pairs"]
-        and flow_total < image_total,
+        and reference_atlas_total < segmented["total_tile_pairs"]
+        and flow_total < image_total
+        and reference_atlas_total < image_total,
     }
 
 
@@ -205,22 +224,32 @@ def run_control(args: argparse.Namespace) -> dict[str, Any]:
             "flow_sheared_ratio_vs_segmented_f4": _stats(
                 [float(row["flow_sheared_ratio_vs_segmented_f4"]) for row in tile_rows]
             ),
+            "reference_atlas_ratio_vs_segmented_f4": _stats(
+                [float(row["reference_atlas_ratio_vs_segmented_f4"]) for row in tile_rows]
+            ),
             "image_space_ratio_vs_segmented_f4": _stats(
                 [float(row["image_space_ratio_vs_segmented_f4"]) for row in tile_rows]
             ),
             "flow_sheared_ratio_vs_image_space": _stats(
                 [float(row["flow_sheared_ratio_vs_image_space"]) for row in tile_rows]
             ),
+            "reference_atlas_ratio_vs_image_space": _stats(
+                [float(row["reference_atlas_ratio_vs_image_space"]) for row in tile_rows]
+            ),
             "flow_sheared_saves_vs_image_space_tile_pairs": _stats(
                 [float(row["flow_sheared_saves_vs_image_space_tile_pairs"]) for row in tile_rows]
+            ),
+            "reference_atlas_saves_vs_image_space_tile_pairs": _stats(
+                [float(row["reference_atlas_saves_vs_image_space_tile_pairs"]) for row in tile_rows]
             ),
         }
     return {
         "name": "depth_banded_homography_flow_culling_control",
         "note": (
             "Tile-pair control for F0e. It separates the residual-coordinate culling claim from "
-            "ordinary image-space culling. This still estimates culling work only; it is not a "
-            "flow-sheared Metal render-time measurement."
+            "ordinary image-space culling, and includes a stricter reference-atlas-plus-residual "
+            "variant for the likely renderer coordinate system. This still estimates culling work "
+            "only; it is not a flow-sheared Metal render-time measurement."
         ),
         "config": {
             "seeds": seeds,
