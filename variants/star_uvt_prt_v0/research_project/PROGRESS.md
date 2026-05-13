@@ -62,6 +62,7 @@ Last updated: 2026-05-13
 - [x] Gate D2w: selected 1024 PRT backward replay workload shape.
 - [x] Gate D2x: isolate alpha/order replay as the PRT backward cost center.
 - [x] Gate D2y: trace-cache memory viability planner.
+- [x] Gate D2z: fused MSE train-step backward parity smoke.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1558,6 +1559,39 @@ bandwidth and scales linearly with visit count. The cleaner implementation bet
 is a fused training path that keeps forward compositing and backward adjacent
 without materializing a generic full-frame trace.
 
+Gate D2z adds a research-only
+`projective_rational_tile_pixel_fused_mse_backward` op. It bins once, performs
+the tiled PRT forward compositing inside the same per-pixel kernel, computes
+MSE target gradients, and immediately runs the reverse compositing and local
+PRT derivative path. This is the first concrete fused train-step kernel smoke;
+it is not yet wired into the trainer timing loop.
+
+Validation:
+
+```text
+python3 -m py_compile torch_gsplat_bridge_star_uvt_prt/rasterize.py torch_gsplat_bridge_star_uvt_prt/__init__.py research_project/benchmarks/projective_rational_tile_pixel_fused_mse_backward_check.py tests/projective_rational_tile_pixel_fused_mse_backward_check.py
+python3 setup.py build_ext --inplace
+python3 tests/projective_rational_tile_pixel_fused_mse_backward_check.py
+python3 research_project/benchmarks/projective_rational_tile_pixel_fused_mse_backward_check.py --out-json research_project/benchmarks/results/projective_rational_tile_pixel_fused_mse_backward_check.json
+```
+
+Result:
+
+```text
+pass true
+reference loss: 0.2951766551
+fused loss: 0.2951766849
+loss abs error: 2.98e-08
+max grad abs error: 9.31e-10
+max grad rel error: 1.47e-07
+overflow tiles: 0
+```
+
+Read: the fused train-step direction is now a real checked kernel path, not only
+a planner conclusion. The next gate should time this fused MSE path on the
+selected 1024 train-speed row against the current `render -> loss -> backward`
+step and only then decide how to expose it in the trainer harness.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1580,6 +1614,6 @@ should be measured before splitting a camera window.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
-7. Prototype a fused PRT train-step path before a generic cached-trace renderer; D2y shows dense traces are too large and sparse traces still have meaningful bandwidth cost.
+7. Time the fused MSE PRT path on the selected 1024 train-speed row against the current `render -> loss -> backward` step.
 8. Keep accumulation-only and derivative-math rewrites behind fused-train-step work unless a new profile changes the cost split.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.

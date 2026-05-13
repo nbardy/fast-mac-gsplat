@@ -144,6 +144,19 @@ metal_projective_rational_tile_pixel_atomic_backward(
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
            torch::Tensor, torch::Tensor, torch::Tensor>
+metal_projective_rational_tile_pixel_fused_mse_backward(
+    const torch::Tensor& h_coeff,
+    const torch::Tensor& lambda_uv,
+    const torch::Tensor& lambda_t,
+    const torch::Tensor& center_t,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& target_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
+           torch::Tensor, torch::Tensor, torch::Tensor>
 metal_profile_projective_rational_tile_pixel_atomic_backward(
     const torch::Tensor& h_coeff,
     const torch::Tensor& lambda_uv,
