@@ -69,6 +69,7 @@ Last updated: 2026-05-13
 - [x] Gate D3d: fused sequence 128px 1024 multicam scaling rows.
 - [x] Gate D3e: fused sequence 128px 8-frame 1024 multicam scaling rows.
 - [x] Gate D3f: explicit 2048-tube/2048-splat 128px 8-frame capacity rows.
+- [x] Gate D3g: 2048-tube support-threshold dial and rejected global policy promotion.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1791,6 +1792,56 @@ is that the next PRT work is not "add more tubes"; it is reducing tile pressure
 or improving initialization/capacity use so a larger tube set does not make the
 rasterizer pay for mostly redundant support.
 
+Gate D3g sweeps tighter support thresholds for the same 2048-tube 128px x 8f
+row. The goal is to find whether 2048 is bad because of capacity itself or
+because support `32/255` makes every tile carry too many mostly redundant tubes.
+
+Validation:
+
+```text
+python3 setup.py build_ext --inplace
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 128 --max-frames 8 --steps 72 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.18823529411764706 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_128_8f_2048t_2048s_72step_sequence_tile4x4x1cap512_support48_fused_mse.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 128 --max-frames 8 --steps 72 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.2196078431372549 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_128_8f_2048t_2048s_72step_sequence_tile4x4x1cap512_support56_fused_mse.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 128 --max-frames 8 --steps 72 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_128_8f_2048t_2048s_72step_sequence_tile4x4x1cap512_support64_fused_mse.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 128 --max-frames 8 --steps 200 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.18823529411764706 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_128_8f_2048t_2048s_200step_sequence_tile4x4x1cap512_support48_fused_mse.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 128 --max-frames 8 --steps 200 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.2196078431372549 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_128_8f_2048t_2048s_200step_sequence_tile4x4x1cap512_support56_fused_mse.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 128 --max-frames 8 --steps 200 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_128_8f_2048t_2048s_200step_sequence_tile4x4x1cap512_support64_fused_mse.json
+```
+
+Result:
+
+```text
+72-step support48:  PRT train wall 2.708 s, PSNR 15.8818 / heldout 13.5903 dB, render 26.14 / 26.61 ms, max tile 252, overflow 0.
+72-step support56:  PRT train wall 2.251 s, PSNR 16.5722 / heldout 13.3961 dB, render 17.70 / 16.66 ms, max tile 201, overflow 0.
+72-step support64:  PRT train wall 2.033 s, PSNR 17.0477 / heldout 13.2416 dB, render 17.07 / 17.54 ms, max tile 136, overflow 0.
+
+200-step support48: PRT train wall 6.195 s, PSNR 18.1871 / heldout 13.0447 dB, render 18.76 / 17.43 ms, max tile 233, overflow 0.
+200-step support56: PRT train wall 5.535 s, PSNR 18.3705 / heldout 12.7277 dB, render 16.17 / 15.77 ms, max tile 201, overflow 0.
+200-step support64: PRT train wall 5.637 s, PSNR 18.4041 / heldout 12.7391 dB, render 13.79 / 14.67 ms, max tile 126, overflow 0.
+```
+
+Read: support threshold is the 2048 dial. `48/255` is the balanced current row:
+at 200 steps it slightly beats the 1024-tube 200-step train PSNR, matches the
+1024 heldout PSNR, and is faster to train and render. `64/255` is the overfit
+speed row: it reaches 18.4041 dB train PSNR and 13.8 ms train render, but gives
+up heldout PSNR. This makes the previous D3f negative result more specific:
+2048 was not bad because the representation lacks capacity; it was bad because
+support `32/255` made the raster workload too dense.
+
+Rejected promotion: a global 2048 train-speed policy is not safe yet because
+the current selector only sees `tube_count` and `camera_motion_scale`, not
+target resolution or tube density. This smoke intentionally failed after trying
+to promote support `48/255` as the global 2048 train-speed policy:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 32 --max-frames 2 --steps 1 --prt-tubes 2048 --splat-count 16 --splat-renderer fast_mac --init-depth 0.5 --prt-tile-policy train_speed --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 0 --render-repeats 1 --prt-eval-cache-compiled --out-json /tmp/prt_multicam_2048_train_speed_policy_smoke.json
+RuntimeError: fused MSE PRT train step overflowed tile capacity
+```
+
+So the 2048 rows stay explicit for now. A real selector needs a density-aware
+signature, or the harness must keep requiring explicit tile config plus support
+threshold for 2048+ tube experiments.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1813,6 +1864,6 @@ should be measured before splitting a camera window.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
-7. Improve 2048 capacity use before promoting it: the explicit 2048 row passes capacity but loses the 1024 speed/quality point, so next test tile-pressure reduction, better initialization, or a tighter support schedule.
+7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row and `64/255` is the overfit-speed row, but the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
 8. Keep accumulation-only and derivative-math rewrites behind fused-train-step work unless a new profile changes the cost split.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
