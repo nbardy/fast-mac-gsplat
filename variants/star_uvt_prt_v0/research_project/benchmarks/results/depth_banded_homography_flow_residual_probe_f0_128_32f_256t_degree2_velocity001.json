@@ -1,0 +1,124 @@
+{
+  "config": {
+    "depth_bands": 4,
+    "dolly_z": 0.08,
+    "max_frames": 32,
+    "pan_x": 0.06,
+    "prt_degree": 2,
+    "residual_degree": 2,
+    "segments": 4,
+    "target_size": 128,
+    "tile_t": 4,
+    "tile_x": 8,
+    "tile_y": 8,
+    "tubes": 256,
+    "velocity_scale": 0.01,
+    "zoom": 0.02
+  },
+  "deferred_criteria": {
+    "actual_flow_sheared_render_time": "deferred until there is a flow-sheared tiled renderer; this probe reports tile-pair estimates only"
+  },
+  "depth_bands": {
+    "counts": [
+      78,
+      100,
+      45,
+      33
+    ],
+    "depths": [
+      7.950398921966553,
+      5.905290603637695,
+      4.697051525115967,
+      3.8992538452148438
+    ]
+  },
+  "homography_flow_residual": {
+    "center_metrics_vs_direct": {
+      "max_px": 0.9357805848121643,
+      "mean_px": 0.07087188959121704,
+      "p95_px": 0.2157461792230606
+    },
+    "flow_sheared_tile_pair_estimate": {
+      "active_tube_time_tiles": 1894,
+      "max_pairs_per_tube_time_tile": 20,
+      "total_tile_pairs": 16533
+    },
+    "image_metrics_vs_direct": {
+      "l1": 0.00031643128022551537,
+      "max_abs": 0.02072325348854065,
+      "mse": 1.0496131608306314e-06,
+      "psnr": 59.789707324269834
+    },
+    "rendered_tubes": 256
+  },
+  "kill_criteria": {
+    "center_residual_max_at_most_1px": true,
+    "center_residual_p95_clearly_below_projective_first_order": true,
+    "flow_sheared_tile_pairs_below_segmented_f4": true,
+    "render_psnr_at_least_50db": true,
+    "rendered_tubes_not_more_than_n": true
+  },
+  "name": "depth_banded_homography_flow_residual_probe",
+  "note": "Projection/render-only falsifier for depth-banded homography-flow gauge residual tubes. The homography flow is compiler state; rendered tube count remains N. Dense rendering uses exact direct depth for the gauge row to isolate center residual before any Metal/backward work.",
+  "pass": true,
+  "projective_first_order": {
+    "camera_fit_error": 0.09523177891969681,
+    "center_metrics_vs_direct": {
+      "max_px": 8.512928009033203,
+      "mean_px": 1.6290204524993896,
+      "p95_px": 3.6704299449920654
+    },
+    "image_metrics_vs_direct": {
+      "l1": 0.006484371144324541,
+      "max_abs": 0.2995024621486664,
+      "mse": 0.0004622572159860283,
+      "psnr": 33.35116300637252
+    },
+    "rendered_tubes": 256,
+    "tile_pair_estimate": {
+      "active_tube_time_tiles": 1894,
+      "max_pairs_per_tube_time_tile": 30,
+      "total_tile_pairs": 18552
+    }
+  },
+  "projective_rational": {
+    "camera_fit_error": 8.387046790403474e-08,
+    "center_metrics_vs_direct": {
+      "max_px": 2.412626417935826e-05,
+      "mean_px": 5.3011931413493585e-06,
+      "p95_px": 1.1444091796875e-05
+    },
+    "image_metrics_vs_direct": {
+      "l1": 2.068427740198331e-08,
+      "max_abs": 1.4901161193847656e-06,
+      "mse": 4.45608109331079e-15,
+      "psnr": 120.0
+    },
+    "rendered_tubes": 256
+  },
+  "segmented_f4": {
+    "camera_fit_errors": [
+      0.005038285627961159,
+      0.005228852387517691,
+      0.005149579606950283,
+      0.00398310087621212
+    ],
+    "center_metrics_vs_direct": {
+      "max_px": 0.38445281982421875,
+      "mean_px": 0.09882768243551254,
+      "p95_px": 0.21388433873653412
+    },
+    "image_metrics_vs_direct": {
+      "l1": 0.00043176478357054293,
+      "max_abs": 0.02588316798210144,
+      "mse": 2.0702946130768396e-06,
+      "psnr": 56.83967847910588
+    },
+    "rendered_tubes": 1024,
+    "tile_pair_estimate": {
+      "active_tube_time_tiles": 1894,
+      "max_pairs_per_tube_time_tile": 30,
+      "total_tile_pairs": 18529
+    }
+  }
+}

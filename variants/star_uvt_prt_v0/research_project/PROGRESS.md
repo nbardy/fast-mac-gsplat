@@ -91,6 +91,7 @@ Last updated: 2026-05-13
 - [x] Gate D3z: 240-step D3y same-wall boundary row rejects spending the whole train-wall margin.
 - [x] Gate D4a: 205/210/220-step D3y boundary sweep rejects replacing the accepted 200-step row.
 - [x] Gate F0: depth-banded homography-flow gauge residual-tube projection/render falsifier.
+- [x] Gate F0b: depth-banded residual robustness rows for object velocity and harder camera motion.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2597,6 +2598,32 @@ deferred until that renderer exists. Next work should turn the degree-2
 residual upper-bound into an actual flow-sheared tile renderer or test
 robustness with object velocity and harder camera paths.
 
+Gate F0b runs that robustness check:
+
+```text
+python3 research_project/benchmarks/depth_banded_homography_flow_residual_probe.py --residual-degree 2 --velocity-scale 0.01 --out-json research_project/benchmarks/results/depth_banded_homography_flow_residual_probe_f0_128_32f_256t_degree2_velocity001.json
+python3 research_project/benchmarks/depth_banded_homography_flow_residual_probe.py --residual-degree 2 --pan-x 0.09 --zoom 0.025 --dolly-z 0.12 --out-json research_project/benchmarks/results/depth_banded_homography_flow_residual_probe_f0_128_32f_256t_degree2_hardcam.json
+python3 research_project/benchmarks/depth_banded_homography_flow_residual_probe.py --residual-degree 3 --pan-x 0.09 --zoom 0.025 --dolly-z 0.12 --out-json research_project/benchmarks/results/depth_banded_homography_flow_residual_probe_f0_128_32f_256t_degree3_hardcam.json
+python3 research_project/benchmarks/depth_banded_homography_flow_residual_probe.py --residual-degree 3 --velocity-scale 0.01 --pan-x 0.09 --zoom 0.025 --dolly-z 0.12 --out-json research_project/benchmarks/results/depth_banded_homography_flow_residual_probe_f0_128_32f_256t_degree3_hardcam_velocity001.json
+```
+
+Result:
+
+```text
+Velocity 0.01, degree2: pass true. p95 0.2157 px, max 0.9358 px, PSNR 59.79 dB, tile pairs 16533 vs segmented 18529.
+Hard camera, degree2: pass false. p95 0.5392 px, max 2.8076 px, PSNR 53.81 dB, tile pairs 16634 vs segmented 19620.
+Hard camera, degree3: pass true. p95 0.1536 px, max 0.8581 px, PSNR 62.05 dB, tile pairs 16635 vs segmented 19620.
+Hard camera + velocity 0.01, degree3: pass false. p95 0.1993 px, max 1.2722 px, PSNR 58.54 dB, tile pairs 16586 vs segmented 19659.
+```
+
+Read: F0b gives a clean boundary. Degree-2 residual is robust to mild object
+motion under the original stress. Harder camera motion needs degree 3 to pass
+the max-residual gate. Combining hard camera motion with object motion breaks
+the strict max-residual gate even at degree 3, though p95, PSNR, and tile-pair
+estimates remain good. That argues for a hybrid policy: gauge-residual for low
+residual/common background tubes, PRT fallback or window split for high-max
+outliers and moving objects under hard camera motion.
+
 The separate representation idea tested by F0 is
 depth-banded homography-flow gauge residual tubes. Compile a small bank of
 camera-induced depth-band flows from `K_seq,w2c_seq`, let each world tube store
@@ -2643,4 +2670,4 @@ should be measured before splitting a camera window.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, D3x rejects naive replay caching, and D3y shows write-set pruning can turn exact 200-vs-200 into a train-wall win.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, and D3z/D4a are boundary results showing that more steps must still fit the train-wall budget and improve quality before replacing D3y.
-12. Continue depth-banded homography-flow gauge residual tubes after F0: degree-2 residual passed the projection/render falsifier, but the current implementation is still a dense upper-bound with exact direct depth, not a Metal flow-sheared renderer or training path.
+12. Continue depth-banded homography-flow gauge residual tubes after F0/F0b: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion needs PRT fallback/window split for max-residual outliers. The current implementation is still a dense upper-bound with exact direct depth, not a Metal flow-sheared renderer or training path.
