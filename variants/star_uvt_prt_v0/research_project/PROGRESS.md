@@ -94,6 +94,7 @@ Last updated: 2026-05-13
 - [x] Gate F0b: depth-banded residual robustness rows for object velocity and harder camera motion.
 - [x] Gate F0c: quantify PRT-fallback outliers for the hard-camera/object-motion residual row.
 - [x] Gate F0d: four-seed hybrid fallback robustness sweep.
+- [x] Gate F0e: tile-policy estimate sweep for the hybrid fallback row.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2677,6 +2678,33 @@ sampled seeds while still estimating fewer tile pairs than segmented_f4. The
 next implementation step should be an actual flow-sheared tiled forward path
 with fallback routing, not more dense upper-bound probes.
 
+Gate F0e keeps the F0d seed set fixed and sweeps estimated spatial tile size for
+the hybrid fallback upper bound:
+
+```text
+python3 research_project/benchmarks/depth_banded_homography_flow_hybrid_seed_sweep.py --tile-x 4 --tile-y 4 --out-json research_project/benchmarks/results/depth_banded_homography_flow_hybrid_seed_sweep_f0e_hardcam_velocity001_4seeds_tile4.json
+python3 research_project/benchmarks/depth_banded_homography_flow_hybrid_seed_sweep.py --tile-x 16 --tile-y 16 --out-json research_project/benchmarks/results/depth_banded_homography_flow_hybrid_seed_sweep_f0e_hardcam_velocity001_4seeds_tile16.json
+```
+
+The default F0d row is the matching 8x8 tile estimate.
+
+Result:
+
+```text
+4x4 tiles:  pass true, hybrid pass 4 / 4, tile-pair ratio vs segmented_f4 min 0.810, median 0.815, max 0.824.
+8x8 tiles:  pass true, hybrid pass 4 / 4, tile-pair ratio vs segmented_f4 min 0.830, median 0.847, max 0.848.
+16x16 tiles: pass true, hybrid pass 4 / 4, tile-pair ratio vs segmented_f4 min 0.880, median 0.895, max 0.908.
+Shared quality across tile estimates: fallback tubes min 0, median 3, max 6; hybrid max residual min 0.8084 px, median 0.9545 px, max 0.9978 px; hybrid p95 min 0.1695 px, median 0.1826 px, max 0.2007 px; hybrid PSNR min 59.81 dB, median 60.70 dB, max 61.30 dB.
+```
+
+Read: the residual/fallback decision is independent of the estimated tile size,
+as expected. On this hard-camera/object-motion stress, smaller 4x4 spatial tiles
+give the lowest tile-pair estimate against segmented_f4. That does not prove
+4x4 is the runtime winner, because a real Metal flow-sheared renderer will pay
+tile bookkeeping and dispatch costs. It does say the first implementation should
+make tile shape explicit and measure 4x4 against 8x8 in the actual renderer,
+rather than assuming the older 8x8 UVT tile shape is still best.
+
 The separate representation idea tested by F0 is
 depth-banded homography-flow gauge residual tubes. Compile a small bank of
 camera-induced depth-band flows from `K_seq,w2c_seq`, let each world tube store
@@ -2723,4 +2751,4 @@ should be measured before splitting a camera window.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, D3x rejects naive replay caching, and D3y shows write-set pruning can turn exact 200-vs-200 into a train-wall win.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, and D3z/D4a are boundary results showing that more steps must still fit the train-wall budget and improve quality before replacing D3y.
-12. Continue depth-banded homography-flow gauge residual tubes after F0-F0d: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion needs a small PRT fallback/window-split tail. Four hard-camera/object-motion seeds all pass the hybrid upper-bound. The current implementation is still a dense upper-bound with exact direct depth, not a Metal flow-sheared renderer or training path.
+12. Continue depth-banded homography-flow gauge residual tubes after F0-F0e: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion needs a small PRT fallback/window-split tail. Four hard-camera/object-motion seeds all pass the hybrid upper-bound. The tile-estimate sweep favors 4x4 over 8x8/16x16 on the synthetic stress, but the current implementation is still a dense upper-bound with exact direct depth, not a Metal flow-sheared renderer or training path.

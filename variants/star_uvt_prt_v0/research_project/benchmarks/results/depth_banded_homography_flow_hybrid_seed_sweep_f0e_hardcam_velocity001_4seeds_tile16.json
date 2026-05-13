@@ -1,0 +1,127 @@
+{
+  "config": {
+    "depth_bands": 4,
+    "dolly_z": 0.12,
+    "fallback_max_px": 1.0,
+    "frames": 32,
+    "pan_x": 0.09,
+    "residual_degree": 3,
+    "seeds": [
+      17,
+      23,
+      31,
+      47
+    ],
+    "target_size": 128,
+    "tubes": 256,
+    "velocity_scale": 0.01,
+    "zoom": 0.025
+  },
+  "name": "depth_banded_homography_flow_hybrid_seed_sweep",
+  "note": "Multi-seed robustness sweep for the F0c hybrid gauge-residual plus PRT fallback upper bound. This is still projection/render-only and reports tile-pair estimates, not actual flow-sheared render time.",
+  "pass": true,
+  "rows": [
+    {
+      "fallback_fraction": 0.0234375,
+      "fallback_tubes": 6,
+      "hybrid_max_px": 0.9977508783340454,
+      "hybrid_p95_px": 0.16951286792755127,
+      "hybrid_pass": true,
+      "hybrid_psnr": 59.813446736474006,
+      "hybrid_tile_pairs": 7489,
+      "pure_max_px": 1.2721831798553467,
+      "pure_p95_px": 0.19934634864330292,
+      "pure_pass": false,
+      "pure_psnr": 58.542614576464864,
+      "seed": 17,
+      "segmented_p95_px": 0.4346524178981781,
+      "segmented_psnr": 51.45021045809537,
+      "segmented_tile_pairs": 8252
+    },
+    {
+      "fallback_fraction": 0.0,
+      "fallback_tubes": 0,
+      "hybrid_max_px": 0.8084192276000977,
+      "hybrid_p95_px": 0.19211815297603607,
+      "hybrid_pass": true,
+      "hybrid_psnr": 60.6023317997297,
+      "hybrid_tile_pairs": 7297,
+      "pure_max_px": 0.8084192276000977,
+      "pure_p95_px": 0.19211815297603607,
+      "pure_pass": true,
+      "pure_psnr": 60.6023317997297,
+      "seed": 23,
+      "segmented_p95_px": 0.43499866127967834,
+      "segmented_psnr": 52.18647723384755,
+      "segmented_tile_pairs": 8294
+    },
+    {
+      "fallback_fraction": 0.01171875,
+      "fallback_tubes": 3,
+      "hybrid_max_px": 0.931444525718689,
+      "hybrid_p95_px": 0.20074263215065002,
+      "hybrid_pass": true,
+      "hybrid_psnr": 60.807139167659024,
+      "hybrid_tile_pairs": 7363,
+      "pure_max_px": 1.7124565839767456,
+      "pure_p95_px": 0.21650665998458862,
+      "pure_pass": false,
+      "pure_psnr": 57.779589149124256,
+      "seed": 31,
+      "segmented_p95_px": 0.4383571445941925,
+      "segmented_psnr": 51.35254828056165,
+      "segmented_tile_pairs": 8295
+    },
+    {
+      "fallback_fraction": 0.01171875,
+      "fallback_tubes": 3,
+      "hybrid_max_px": 0.9775803089141846,
+      "hybrid_p95_px": 0.17315368354320526,
+      "hybrid_pass": true,
+      "hybrid_psnr": 61.30457127215428,
+      "hybrid_tile_pairs": 7422,
+      "pure_max_px": 1.3700687885284424,
+      "pure_p95_px": 0.18500970304012299,
+      "pure_pass": false,
+      "pure_psnr": 58.91911840568535,
+      "seed": 47,
+      "segmented_p95_px": 0.4237697720527649,
+      "segmented_psnr": 51.232409601755926,
+      "segmented_tile_pairs": 8222
+    }
+  ],
+  "summary": {
+    "fallback_fraction": {
+      "max": 0.0234375,
+      "median": 0.01171875,
+      "min": 0.0
+    },
+    "fallback_tubes": {
+      "max": 6.0,
+      "median": 3.0,
+      "min": 0.0
+    },
+    "hybrid_max_px": {
+      "max": 0.9977508783340454,
+      "median": 0.9545124173164368,
+      "min": 0.8084192276000977
+    },
+    "hybrid_p95_px": {
+      "max": 0.20074263215065002,
+      "median": 0.18263591825962067,
+      "min": 0.16951286792755127
+    },
+    "hybrid_pass_count": 4,
+    "hybrid_psnr": {
+      "max": 61.30457127215428,
+      "median": 60.704735483694364,
+      "min": 59.813446736474006
+    },
+    "hybrid_tile_pair_ratio_vs_segmented_f4": {
+      "max": 0.907537566650509,
+      "median": 0.8951716157520899,
+      "min": 0.8797926211719315
+    },
+    "pure_pass_count": 1
+  }
+}
