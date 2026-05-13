@@ -64,6 +64,7 @@ Last updated: 2026-05-13
 - [x] Gate D2y: trace-cache memory viability planner.
 - [x] Gate D2z: fused MSE train-step backward parity smoke.
 - [x] Gate D3a: fused MSE timing on selected 1024 train-speed row.
+- [x] Gate D3b: fused MSE full multicam train/eval row.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1625,6 +1626,37 @@ and cuts the selected 1024 training kernel slice by about 72.5%. The next step
 is to put this behind an explicit research-harness mode and measure full train
 wall, PSNR, and render timing against the existing non-fused path.
 
+Gate D3b wires the fused path into the real multicam compare harness as
+`--prt-train-mode fused_mse`. It currently requires `--prt-loss-mode sequence`
+so the fused op can compute the exact full-sequence MSE without faking
+sampled-frame targets.
+
+Validation:
+
+```text
+python3 -m py_compile research_project/benchmarks/projective_rational_multicam_splat_compare.py
+python3 setup.py build_ext --inplace
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 32 --max-frames 2 --steps 1 --prt-tubes 16 --splat-count 16 --splat-renderer fast_mac --init-depth 0.5 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 0 --render-repeats 1 --prt-eval-cache-compiled --out-json /tmp/prt_multicam_fused_mse_smoke.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --prt-tile-policy train_speed --prt-loss-mode sequence --prt-train-mode separate --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_20step_sequence_train_speed_support32_separate.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --prt-tile-policy train_speed --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_64_4f_1024t_1024s_20step_sequence_train_speed_support32_fused_mse.json
+```
+
+Result:
+
+```text
+separate sequence PRT: pass true, train wall 1.393 s, loss 0.053215 -> 0.036405, PSNR 14.3438 / heldout 14.3879 dB, render 17.39 / 17.05 ms, max tile 467, overflow 0.
+fused_mse sequence PRT: pass true, train wall 0.590 s, loss 0.053215 -> 0.036177, PSNR 14.3413 / heldout 14.3494 dB, render 17.94 / 17.77 ms, max tile 466, overflow 0.
+PRT train-wall speedup: 2.36x.
+Fast-mac direct splat baseline in the same rows: PSNR 15.1065 / heldout 11.8419 dB, render about 25.95-28.31 ms.
+```
+
+Read: the fused path survives the real multicam harness and keeps the same
+quality surface on this 20-step sequence row while cutting PRT train wall by
+more than half. This does not make the overall representation "done"; it moves
+the training-speed bottleneck enough that the next comparison should use the
+fused mode by default for sequence-loss PRT rows and return to quality/capacity
+questions rather than backward replay.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1647,6 +1679,6 @@ should be measured before splitting a camera window.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
-7. Wire the fused MSE PRT path into an explicit research-harness train mode and measure full train wall, PSNR, and render timing against the non-fused path.
+7. Use `--prt-train-mode fused_mse --prt-loss-mode sequence` for the next 1024 PRT train-speed rows; D3b shows same quality and 2.36x lower PRT train wall on the 20-step row.
 8. Keep accumulation-only and derivative-math rewrites behind fused-train-step work unless a new profile changes the cost split.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.

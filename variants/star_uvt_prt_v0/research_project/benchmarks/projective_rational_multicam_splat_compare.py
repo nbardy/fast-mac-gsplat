@@ -48,6 +48,7 @@ from torch_gsplat_bridge_star_uvt_prt import (  # noqa: E402
     UVTRenderConfig,
     apply_projective_rational_tile_env,
     parse_projective_rational_tile_config,
+    projective_rational_tile_pixel_fused_mse_backward,
     recommend_projective_rational_train_speed_tile_policy,
     recommend_projective_rational_tile_config,
     render_projective_rational_tubes_tiled,
@@ -265,6 +266,39 @@ def _render_prt_train(model: MulticamPRTWorldTubeModel, camera_path: CameraPathP
     )
 
 
+def _fused_mse_prt_train_step(
+    *,
+    model: MulticamPRTWorldTubeModel,
+    camera_path: CameraPathPolynomial,
+    config: UVTRenderConfig,
+    target: Tensor,
+) -> float:
+    projected = _compile_detached_footprint(model, camera_path)
+    result = projective_rational_tile_pixel_fused_mse_backward(
+        projected.h_coeff,
+        projected.lambda_uv,
+        projected.lambda_t,
+        projected.center_t,
+        projected.opacity,
+        projected.color,
+        target,
+        config,
+    )
+    if int((result.tile_overflow.detach().cpu() > 0).sum().item()) > 0:
+        raise RuntimeError("fused MSE PRT train step overflowed tile capacity")
+    backward_pairs = (
+        (projected.h_coeff, result.grad_h_coeff),
+        (projected.lambda_t, result.grad_lambda_t),
+        (projected.center_t, result.grad_center_t),
+        (projected.opacity, result.grad_opacity),
+        (projected.color, result.grad_color),
+    )
+    tensors = [tensor for tensor, _grad in backward_pairs if tensor.requires_grad]
+    grads = [grad for tensor, grad in backward_pairs if tensor.requires_grad]
+    torch.autograd.backward(tensors, grads)
+    return float((result.loss_sum.detach().cpu()[0] / float(target.numel())).item())
+
+
 def _render_prt_eval(model: MulticamPRTWorldTubeModel, camera_path: CameraPathPolynomial, config: UVTRenderConfig):
     projected = _compile_detached_footprint(model, camera_path)
     return _render_prt_projected_eval(projected, config)
@@ -334,11 +368,16 @@ def _fit_prt(
     steps: int,
     lr: float,
     loss_mode: str,
+    train_mode: str,
     device: torch.device,
     seed: int,
 ) -> dict[str, Any]:
     if loss_mode not in {"sampled_frame", "sequence"}:
         raise ValueError("loss_mode must be one of: sampled_frame, sequence")
+    if train_mode not in {"separate", "fused_mse"}:
+        raise ValueError("train_mode must be one of: separate, fused_mse")
+    if train_mode == "fused_mse" and loss_mode != "sequence":
+        raise ValueError("fused_mse train mode currently requires --prt-loss-mode sequence")
     generator = torch.Generator(device=device).manual_seed(seed)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     losses = []
@@ -347,22 +386,34 @@ def _fit_prt(
         view = int(torch.randint(0, bundle.train_view_count, (1,), generator=generator, device=device).item())
         frame = int(torch.randint(0, bundle.frame_count, (1,), generator=generator, device=device).item())
         optimizer.zero_grad(set_to_none=True)
-        image = _render_prt_train(model, train_camera_paths[view], config)
         target = bundle.train_frames[view].permute(0, 2, 3, 1).contiguous()
-        if loss_mode == "sampled_frame":
-            loss = (image[frame] - target[frame]).square().mean()
+        if train_mode == "fused_mse":
+            loss_value = _fused_mse_prt_train_step(
+                model=model,
+                camera_path=train_camera_paths[view],
+                config=config,
+                target=target,
+            )
+            losses.append({"step": step, "view": view, "frame": frame, "loss": loss_value})
+            if step == steps:
+                break
         else:
-            loss = (image - target).square().mean()
-        losses.append({"step": step, "view": view, "frame": frame, "loss": float(loss.detach().cpu())})
-        if step == steps:
-            break
-        loss.backward()
+            image = _render_prt_train(model, train_camera_paths[view], config)
+            if loss_mode == "sampled_frame":
+                loss = (image[frame] - target[frame]).square().mean()
+            else:
+                loss = (image - target).square().mean()
+            losses.append({"step": step, "view": view, "frame": frame, "loss": float(loss.detach().cpu())})
+            if step == steps:
+                break
+            loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         _sync(device)
     return {
         "steps": steps,
         "loss_mode": loss_mode,
+        "train_mode": train_mode,
         "train_loop_elapsed_s": time.perf_counter() - started,
         "losses": losses,
         "initial_loss": losses[0]["loss"],
@@ -688,6 +739,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
         steps=args.steps,
         lr=args.prt_lr,
         loss_mode=args.prt_loss_mode,
+        train_mode=args.prt_train_mode,
         device=device,
         seed=args.seed + 17,
     )
@@ -767,6 +819,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
             "tile_config": tile_config.as_dict(),
             "lr": args.prt_lr,
             "loss_mode": args.prt_loss_mode,
+            "train_mode": args.prt_train_mode,
             "init_depth": args.init_depth,
             "init_precision_xy": args.prt_init_precision_xy,
             "init_lambda_t": args.prt_init_lambda_t,
@@ -807,6 +860,7 @@ def main() -> None:
     parser.add_argument("--prt-tubes", type=int, default=128)
     parser.add_argument("--prt-lr", type=float, default=0.02)
     parser.add_argument("--prt-loss-mode", choices=("sampled_frame", "sequence"), default="sampled_frame")
+    parser.add_argument("--prt-train-mode", choices=("separate", "fused_mse"), default="separate")
     parser.add_argument("--prt-init-precision-xy", type=float, default=36.0)
     parser.add_argument("--prt-init-lambda-t", type=float, default=0.25)
     parser.add_argument("--prt-init-opacity", type=float, default=0.35)
