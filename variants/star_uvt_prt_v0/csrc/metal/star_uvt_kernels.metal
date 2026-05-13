@@ -16,6 +16,9 @@ using namespace metal;
 #ifndef STAR_THREADS
 #define STAR_THREADS 128u
 #endif
+#ifndef STAR_ATLAS_MAX_PIXEL_CANDIDATES
+#define STAR_ATLAS_MAX_PIXEL_CANDIDATES 128u
+#endif
 #ifndef STAR_FIXEDPOINT_SCALE
 #define STAR_FIXEDPOINT_SCALE 1000000.0f
 #endif
@@ -1628,6 +1631,108 @@ kernel void render_inverse_homography_atlas_residual_tiles(
     if (alpha < mf.alpha_threshold) continue;
 
     uint cb = best_id * 3u;
+    float3 rgb = float3(color[cb + 0u], color[cb + 1u], color[cb + 2u]);
+    accum += transmittance * alpha * rgb;
+    transmittance *= (1.0f - alpha);
+    if (transmittance <= mf.transmittance_threshold) break;
+  }
+
+  float3 bg = float3(mf.bg_r, mf.bg_g, mf.bg_b);
+  float3 out = accum + transmittance * bg;
+  uint out_base = pixel_id * 3u;
+  out_rgb[out_base + 0u] = out.x;
+  out_rgb[out_base + 1u] = out.y;
+  out_rgb[out_base + 2u] = out.z;
+}
+
+kernel void render_inverse_homography_atlas_residual_tiles_cached(
+    const device float* atlas_ref_uv [[buffer(0)]],
+    const device float* atlas_residual_coeff [[buffer(1)]],
+    const device float* homographies [[buffer(2)]],
+    const device float* inv_homographies [[buffer(3)]],
+    const device float* depth [[buffer(4)]],
+    const device float* lambda_uv [[buffer(5)]],
+    const device float* lambda_t [[buffer(6)]],
+    const device float* center_t [[buffer(7)]],
+    const device float* opacity [[buffer(8)]],
+    const device float* color [[buffer(9)]],
+    const device int* band_ids [[buffer(10)]],
+    constant MetaI32& mi [[buffer(11)]],
+    constant MetaF32& mf [[buffer(12)]],
+    const device atomic_uint* tile_counts [[buffer(13)]],
+    const device uint* tile_tube_ids [[buffer(14)]],
+    device float* out_rgb [[buffer(15)]],
+    uint pixel_id [[thread_position_in_grid]]) {
+  uint pixels_per_frame = uint(mi.width) * uint(mi.height);
+  uint total_pixels = pixels_per_frame * uint(mi.frames);
+  if (pixel_id >= total_pixels) return;
+
+  uint frame = pixel_id / pixels_per_frame;
+  uint rem = pixel_id - frame * pixels_per_frame;
+  uint y = rem / uint(mi.width);
+  uint x = rem - y * uint(mi.width);
+  float2 pixel = float2(float(x) + 0.5f, float(y) + 0.5f);
+  float t = frame_time(frame, mi);
+  uint tz = frame / uint(mi.tile_t);
+  uint residual_terms = uint(mi.reserved0);
+  uint band_count = uint(mi.reserved1);
+  float h_eps = max(mf.eps, 1.0e-6f);
+  constexpr float depth_tie_eps = 1.0e-7f;
+
+  uint candidate_ids[STAR_ATLAS_MAX_PIXEL_CANDIDATES];
+  float candidate_depths[STAR_ATLAS_MAX_PIXEL_CANDIDATES];
+  uint candidate_count = 0u;
+  for (uint band = 0u; band < band_count; ++band) {
+    float2 atlas = apply_homography(inv_homographies, frame, band, band_count, pixel, h_eps);
+    uint tx = uint(clamp(int(floor(atlas.x / float(mi.tile_x))), 0, mi.tiles_x - 1));
+    uint ty = uint(clamp(int(floor(atlas.y / float(mi.tile_y))), 0, mi.tiles_y - 1));
+    uint tile_id = encode_atlas_tile(band, tx, ty, tz, mi);
+    uint raw_count = atomic_load_explicit(tile_counts + tile_id, memory_order_relaxed);
+    uint count = min(raw_count, uint(STAR_TILE_CAPACITY));
+    for (uint slot = 0u; slot < count && candidate_count < STAR_ATLAS_MAX_PIXEL_CANDIDATES; ++slot) {
+      uint tube_id = tile_tube_ids[tile_id * uint(STAR_TILE_CAPACITY) + slot];
+      if (tube_id >= uint(mi.tube_count)) continue;
+      float d = depth[frame * uint(mi.tube_count) + tube_id];
+      uint pos = candidate_count;
+      while (pos > 0u) {
+        uint prev_id = candidate_ids[pos - 1u];
+        float prev_depth = candidate_depths[pos - 1u];
+        bool prev_after =
+            prev_depth > d + depth_tie_eps ||
+            (fabs(prev_depth - d) <= depth_tie_eps && prev_id > tube_id);
+        if (!prev_after) break;
+        candidate_ids[pos] = prev_id;
+        candidate_depths[pos] = prev_depth;
+        --pos;
+      }
+      candidate_ids[pos] = tube_id;
+      candidate_depths[pos] = d;
+      ++candidate_count;
+    }
+  }
+
+  float3 accum = float3(0.0f);
+  float transmittance = 1.0f;
+  for (uint i = 0u; i < candidate_count; ++i) {
+    uint tube_id = candidate_ids[i];
+    int raw_band = band_ids[tube_id];
+    if (raw_band < 0 || uint(raw_band) >= band_count) continue;
+    uint tube_band = uint(raw_band);
+    float2 ref = float2(atlas_ref_uv[tube_id * 2u + 0u], atlas_ref_uv[tube_id * 2u + 1u]);
+    float2 atlas_center = ref + eval_atlas_residual(atlas_residual_coeff, tube_id, residual_terms, t);
+    float2 screen_center = apply_homography(homographies, frame, tube_band, band_count, atlas_center, h_eps);
+
+    float2 delta = pixel - screen_center;
+    uint lb = tube_id * 3u;
+    float spatial = lambda_uv[lb + 0u] * delta.x * delta.x +
+                    2.0f * lambda_uv[lb + 1u] * delta.x * delta.y +
+                    lambda_uv[lb + 2u] * delta.y * delta.y;
+    float dt = t - center_t[tube_id];
+    float temporal = lambda_t[tube_id] * dt * dt;
+    float alpha = clamp(opacity[tube_id] * exp(-0.5f * (spatial + temporal)), 0.0f, mf.max_alpha);
+    if (alpha < mf.alpha_threshold) continue;
+
+    uint cb = tube_id * 3u;
     float3 rgb = float3(color[cb + 0u], color[cb + 1u], color[cb + 2u]);
     accum += transmittance * alpha * rgb;
     transmittance *= (1.0f - alpha);

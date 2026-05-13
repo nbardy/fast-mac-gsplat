@@ -121,6 +121,21 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> metal_render_inverse_hom
     const torch::Tensor& meta_i32,
     const torch::Tensor& meta_f32);
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> metal_render_inverse_homography_atlas_residual_tiles_cached(
+    const torch::Tensor& atlas_ref_uv,
+    const torch::Tensor& atlas_residual_coeff,
+    const torch::Tensor& homographies,
+    const torch::Tensor& inv_homographies,
+    const torch::Tensor& depth,
+    const torch::Tensor& lambda_uv,
+    const torch::Tensor& lambda_t,
+    const torch::Tensor& center_t,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& band_ids,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 metal_profile_projective_rational_tiled(
     const torch::Tensor& h_coeff,

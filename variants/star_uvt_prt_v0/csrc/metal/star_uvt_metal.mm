@@ -99,6 +99,7 @@ struct MetalKernels {
   std::shared_ptr<MetalKernelFunction> render_projective_rational_tiles;
   std::shared_ptr<MetalKernelFunction> bin_inverse_homography_atlas_residual_tiles;
   std::shared_ptr<MetalKernelFunction> render_inverse_homography_atlas_residual_tiles;
+  std::shared_ptr<MetalKernelFunction> render_inverse_homography_atlas_residual_tiles_cached;
   std::shared_ptr<MetalKernelFunction> projective_rational_direct_serial_backward;
   std::shared_ptr<MetalKernelFunction> projective_rational_tile_pair_atomic_backward;
   std::shared_ptr<MetalKernelFunction> projective_rational_tile_pixel_atomic_backward;
@@ -150,6 +151,8 @@ MetalKernels& kernels() {
         lib->getKernelFunction("bin_inverse_homography_atlas_residual_tubes_to_atlas_tiles");
     out.render_inverse_homography_atlas_residual_tiles =
         lib->getKernelFunction("render_inverse_homography_atlas_residual_tiles");
+    out.render_inverse_homography_atlas_residual_tiles_cached =
+        lib->getKernelFunction("render_inverse_homography_atlas_residual_tiles_cached");
     out.projective_rational_direct_serial_backward =
         lib->getKernelFunction("projective_rational_direct_serial_backward");
     out.projective_rational_tile_pair_atomic_backward =
@@ -610,6 +613,103 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> metal_render_inverse_hom
   });
 
   launch(k.render_inverse_homography_atlas_residual_tiles, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, atlas_ref_uv);
+    fn.setArg(1, atlas_residual_coeff);
+    fn.setArg(2, homographies);
+    fn.setArg(3, inv_homographies);
+    fn.setArg(4, depth);
+    fn.setArg(5, lambda_uv);
+    fn.setArg(6, lambda_t);
+    fn.setArg(7, center_t);
+    fn.setArg(8, opacity);
+    fn.setArg(9, color);
+    fn.setArg(10, band_ids);
+    fn.setArg(11, meta_i32);
+    fn.setArg(12, meta_f32);
+    fn.setArg(13, tile_counts);
+    fn.setArg(14, tile_tube_ids);
+    fn.setArg(15, out);
+    fn.dispatch((uint64_t)meta.frames * (uint64_t)meta.height * (uint64_t)meta.width, 256);
+  });
+
+  return std::make_tuple(out, tile_counts, tile_overflow);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> metal_render_inverse_homography_atlas_residual_tiles_cached(
+    const torch::Tensor& atlas_ref_uv,
+    const torch::Tensor& atlas_residual_coeff,
+    const torch::Tensor& homographies,
+    const torch::Tensor& inv_homographies,
+    const torch::Tensor& depth,
+    const torch::Tensor& lambda_uv,
+    const torch::Tensor& lambda_t,
+    const torch::Tensor& center_t,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& band_ids,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32) {
+  check_float_mps_2d(atlas_ref_uv, "atlas_ref_uv", 2);
+  check_float_mps_3d(atlas_residual_coeff, "atlas_residual_coeff", 2);
+  check_float_mps_2d(lambda_uv, "lambda_uv", 3);
+  check_float_mps_1d(lambda_t, "lambda_t");
+  check_float_mps_1d(center_t, "center_t");
+  check_float_mps_1d(opacity, "opacity");
+  check_float_mps_2d(color, "color", 3);
+  check_int_mps_1d(band_ids, "band_ids");
+  TORCH_CHECK(atlas_ref_uv.size(0) == atlas_residual_coeff.size(0) &&
+                  atlas_ref_uv.size(0) == lambda_uv.size(0) && atlas_ref_uv.size(0) == lambda_t.size(0) &&
+                  atlas_ref_uv.size(0) == center_t.size(0) && atlas_ref_uv.size(0) == opacity.size(0) &&
+                  atlas_ref_uv.size(0) == color.size(0) && atlas_ref_uv.size(0) == band_ids.size(0),
+              "all cached inverse-homography atlas residual render inputs must agree on N");
+
+  auto meta = parse_meta(meta_i32, meta_f32);
+  auto& sc = shader_config();
+  check_inverse_homography_atlas_meta(meta, atlas_ref_uv.size(0), atlas_residual_coeff.size(1), sc);
+  TORCH_CHECK(meta.reserved1 * meta.tile_capacity <= 128,
+              "cached atlas render currently requires band_count * tile_capacity <= 128");
+  check_float_mps_homographies(homographies, "homographies", meta.frames, meta.reserved1);
+  check_float_mps_homographies(inv_homographies, "inv_homographies", meta.frames, meta.reserved1);
+  TORCH_CHECK(depth.device().is_mps(), "depth must be on MPS");
+  TORCH_CHECK(depth.scalar_type() == torch::kFloat32, "depth must be float32");
+  TORCH_CHECK(depth.dim() == 2 && depth.size(0) == meta.frames && depth.size(1) == atlas_ref_uv.size(0),
+              "depth must have shape [frames,N]");
+  TORCH_CHECK(depth.is_contiguous(), "depth must be contiguous");
+  auto& k = kernels();
+
+  auto opts_f = atlas_ref_uv.options().dtype(torch::kFloat32);
+  auto opts_i32 = atlas_ref_uv.options().dtype(torch::kInt32);
+  auto out = torch::empty({meta.frames, meta.height, meta.width, 3}, opts_f);
+  auto tile_counts = torch::empty({meta.tile_count}, opts_i32);
+  auto tile_overflow = torch::empty({meta.tile_count}, opts_i32);
+  auto tile_unstable_unused = torch::empty({meta.tile_count}, opts_i32);
+  auto tile_tube_ids = torch::empty({meta.tile_count * meta.tile_capacity}, opts_i32);
+
+  launch(k.clear_tiles, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, tile_counts);
+    fn.setArg(1, tile_overflow);
+    fn.setArg(2, tile_unstable_unused);
+    fn.setArg(3, meta_i32);
+    fn.dispatch((uint64_t)meta.tile_count, 256);
+  });
+
+  launch(k.bin_inverse_homography_atlas_residual_tiles, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, atlas_ref_uv);
+    fn.setArg(1, atlas_residual_coeff);
+    fn.setArg(2, lambda_uv);
+    fn.setArg(3, lambda_t);
+    fn.setArg(4, center_t);
+    fn.setArg(5, opacity);
+    fn.setArg(6, band_ids);
+    fn.setArg(7, meta_i32);
+    fn.setArg(8, meta_f32);
+    fn.setArg(9, tile_counts);
+    fn.setArg(10, tile_tube_ids);
+    fn.setArg(11, tile_overflow);
+    fn.dispatch((uint64_t)meta.tube_count, 256);
+  });
+
+  launch(k.render_inverse_homography_atlas_residual_tiles_cached, [&](MetalKernelFunction& fn) {
     fn.setArg(0, atlas_ref_uv);
     fn.setArg(1, atlas_residual_coeff);
     fn.setArg(2, homographies);
