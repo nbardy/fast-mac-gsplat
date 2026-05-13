@@ -3568,6 +3568,12 @@ max tile count / overflow: 87 / 0
 media: train_render.mp4, train_gt_render.mp4, heldout_render.mp4, heldout_gt_render.mp4
 ```
 
+W&B rerun for hosted videos:
+
+```text
+https://wandb.ai/nbardy/dynaworld/runs/g46kbhez
+```
+
 Read: this is now training on real clips with world tubes and learnable train
 camera residuals, and it has video artifact/W&B hooks. It is still a wiring
 gate, not an overfit-quality row: 20 steps and 128 tubes are too small to judge
