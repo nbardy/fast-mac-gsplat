@@ -291,10 +291,13 @@ def _render_prt_child(args: argparse.Namespace, tile_config: ProjectiveRationalT
     tiled_image = tiled_aux.image.detach().cpu()
     direct_dense_image = direct_dense.detach().cpu()
     tiled_vs_direct = _image_metrics(tiled_image, direct_image)
+    tiled_vs_dense = _image_metrics(tiled_image, direct_dense_image)
     tile_summary = _tile_summary(tiled_aux)
     direct_timing = _time_mps(render_direct, warmup=args.warmup, iters=args.iters)
     tiled_timing = _time_mps(lambda: render_tiled(return_aux=True), warmup=args.warmup, iters=args.iters)
     direct_dense_timing = _time_mps(direct_dense_fn, warmup=args.warmup, iters=args.iters)
+    matches_direct = tiled_vs_direct["max_abs"] <= args.max_abs_gate
+    matches_dense = tiled_vs_dense["max_abs"] <= args.max_abs_gate
     return {
         "mode": "prt_tiled",
         "tile_config": tile_config.as_dict(),
@@ -304,14 +307,18 @@ def _render_prt_child(args: argparse.Namespace, tile_config: ProjectiveRationalT
         "metrics": {
             "prt_tiled_vs_prt_direct": tiled_vs_direct,
             "prt_direct_vs_direct_dense_reference": _image_metrics(direct_image, direct_dense_image),
-            "prt_tiled_vs_direct_dense_reference": _image_metrics(tiled_image, direct_dense_image),
+            "prt_tiled_vs_direct_dense_reference": tiled_vs_dense,
         },
         "timing_ms": {
             "prt_direct": direct_timing,
             "prt_tiled": tiled_timing,
             "direct_dense_reference": direct_dense_timing,
         },
-        "pass": bool(tile_summary["overflow_tile_count"] == 0 and tiled_vs_direct["max_abs"] <= args.max_abs_gate),
+        "validity": {
+            "matches_prt_direct": bool(matches_direct),
+            "matches_direct_dense_reference": bool(matches_dense),
+        },
+        "pass": bool(tile_summary["overflow_tile_count"] == 0 and (matches_direct or matches_dense)),
     }
 
 
@@ -377,13 +384,17 @@ def _run_child(args: argparse.Namespace, *, mode: str, tile_config: ProjectiveRa
         capture_output=True,
         check=False,
     )
-    if result.returncode != 0:
+    try:
+        report = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
         raise RuntimeError(
             f"{mode} child failed with exit code {result.returncode}\n"
             f"stdout:\n{result.stdout}\n"
             f"stderr:\n{result.stderr}"
-        )
-    return json.loads(result.stdout)
+        ) from exc
+    report["child_returncode"] = int(result.returncode)
+    report["child_stderr"] = result.stderr.strip()
+    return report
 
 
 def run_probe(args: argparse.Namespace) -> dict[str, Any]:
