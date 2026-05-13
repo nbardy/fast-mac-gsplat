@@ -1,0 +1,171 @@
+{
+  "name": "projective_rational_trace_cache_planner",
+  "note": "Trace-cache memory estimates are linear projections from measured tile-pixel-tube visits; sparse rows are upper bounds because not every binned tube survives alpha/transmittance replay.",
+  "observed": {
+    "active_tile_count": 32768,
+    "frames": 8,
+    "height": 256,
+    "mean_active_tile_count": 29.329010009765625,
+    "tile_count_percentiles": {
+      "p50": 23.0,
+      "p90": 63.0,
+      "p95": 75.0,
+      "p99": 94.0
+    },
+    "tile_pixel_tube_visits": 15376848,
+    "total_tile_count": 32768,
+    "trace_pixels": 524288,
+    "width": 256
+  },
+  "pass": true,
+  "policy": "explicit_tile_config",
+  "profile_json": "research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_256_8f_2048t_20step_support64_tile4x4x1_current_d3r.json",
+  "projection_rows": [
+    {
+      "frames": 8,
+      "height": 256,
+      "label": "observed",
+      "layouts": {
+        "id_alpha_tbefore": {
+          "bytes_per_visit": 12,
+          "dense_slot_bytes": 3223322624,
+          "dense_slot_mib": 3074.0,
+          "sparse_upper_bound_bytes": 188716480,
+          "sparse_upper_bound_mib": 179.97406005859375
+        },
+        "id_alpha_tbefore_center_depth": {
+          "bytes_per_visit": 24,
+          "dense_slot_bytes": 6444548096,
+          "dense_slot_mib": 6146.0,
+          "sparse_upper_bound_bytes": 373238656,
+          "sparse_upper_bound_mib": 355.9481201171875
+        },
+        "id_alpha_tbefore_flags": {
+          "bytes_per_visit": 16,
+          "dense_slot_bytes": 4297064448,
+          "dense_slot_mib": 4098.0,
+          "sparse_upper_bound_bytes": 250223872,
+          "sparse_upper_bound_mib": 238.632080078125
+        }
+      },
+      "linear_pixel_scale": 1.0,
+      "projected_tile_pixel_tube_visits": 15376848,
+      "projected_trace_pixels": 524288,
+      "width": 256
+    },
+    {
+      "frames": 8,
+      "height": 256,
+      "label": "current",
+      "layouts": {
+        "id_alpha_tbefore": {
+          "bytes_per_visit": 12,
+          "dense_slot_bytes": 3223322624,
+          "dense_slot_mib": 3074.0,
+          "sparse_upper_bound_bytes": 188716480,
+          "sparse_upper_bound_mib": 179.97406005859375
+        },
+        "id_alpha_tbefore_center_depth": {
+          "bytes_per_visit": 24,
+          "dense_slot_bytes": 6444548096,
+          "dense_slot_mib": 6146.0,
+          "sparse_upper_bound_bytes": 373238656,
+          "sparse_upper_bound_mib": 355.9481201171875
+        },
+        "id_alpha_tbefore_flags": {
+          "bytes_per_visit": 16,
+          "dense_slot_bytes": 4297064448,
+          "dense_slot_mib": 4098.0,
+          "sparse_upper_bound_bytes": 250223872,
+          "sparse_upper_bound_mib": 238.632080078125
+        }
+      },
+      "linear_pixel_scale": 1.0,
+      "projected_tile_pixel_tube_visits": 15376848,
+      "projected_trace_pixels": 524288,
+      "width": 256
+    },
+    {
+      "frames": 16,
+      "height": 128,
+      "label": "halfres16",
+      "layouts": {
+        "id_alpha_tbefore": {
+          "bytes_per_visit": 12,
+          "dense_slot_bytes": 1611661312,
+          "dense_slot_mib": 1537.0,
+          "sparse_upper_bound_bytes": 94358240,
+          "sparse_upper_bound_mib": 89.98703002929688
+        },
+        "id_alpha_tbefore_center_depth": {
+          "bytes_per_visit": 24,
+          "dense_slot_bytes": 3222274048,
+          "dense_slot_mib": 3073.0,
+          "sparse_upper_bound_bytes": 186619328,
+          "sparse_upper_bound_mib": 177.97406005859375
+        },
+        "id_alpha_tbefore_flags": {
+          "bytes_per_visit": 16,
+          "dense_slot_bytes": 2148532224,
+          "dense_slot_mib": 2049.0,
+          "sparse_upper_bound_bytes": 125111936,
+          "sparse_upper_bound_mib": 119.3160400390625
+        }
+      },
+      "linear_pixel_scale": 0.5,
+      "projected_tile_pixel_tube_visits": 7688424,
+      "projected_trace_pixels": 262144,
+      "width": 128
+    },
+    {
+      "frames": 16,
+      "height": 512,
+      "label": "full512_16",
+      "layouts": {
+        "id_alpha_tbefore": {
+          "bytes_per_visit": 12,
+          "dense_slot_bytes": 25786580992,
+          "dense_slot_mib": 24592.0,
+          "sparse_upper_bound_bytes": 1509731840,
+          "sparse_upper_bound_mib": 1439.79248046875
+        },
+        "id_alpha_tbefore_center_depth": {
+          "bytes_per_visit": 24,
+          "dense_slot_bytes": 51556384768,
+          "dense_slot_mib": 49168.0,
+          "sparse_upper_bound_bytes": 2985909248,
+          "sparse_upper_bound_mib": 2847.5849609375
+        },
+        "id_alpha_tbefore_flags": {
+          "bytes_per_visit": 16,
+          "dense_slot_bytes": 34376515584,
+          "dense_slot_mib": 32784.0,
+          "sparse_upper_bound_bytes": 2001790976,
+          "sparse_upper_bound_mib": 1909.056640625
+        }
+      },
+      "linear_pixel_scale": 8.0,
+      "projected_tile_pixel_tube_visits": 123014784,
+      "projected_trace_pixels": 4194304,
+      "width": 512
+    }
+  ],
+  "read": "Dense per-pixel slot traces are too large even on the 64x64x4 row. A compact sparse trace is plausible at this scale, but its memory grows linearly with visit count and still carries write/read overhead. A fused train-step path is the cleaner speed target if we can keep forward and backward adjacent.",
+  "support_alpha_threshold": 0.25098039215686274,
+  "tile_config": {
+    "tile_capacity": 512,
+    "tile_t": 1,
+    "tile_x": 4,
+    "tile_y": 4
+  },
+  "tile_config_key": "4x4x1:512",
+  "timing_ms": {
+    "atomic_write_estimate": 22.705748999999997,
+    "backward_kernel": 35.600916,
+    "compute_only_kernel": 12.895167,
+    "derivative_math_estimate": 3.0288760000000003,
+    "optimistic_cached_backward_floor": 25.734624999999998,
+    "optimistic_replay_savings": 9.866291,
+    "replay_only_kernel": 9.866291
+  }
+}

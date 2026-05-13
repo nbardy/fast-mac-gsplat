@@ -83,6 +83,10 @@ Last updated: 2026-05-13
 - [x] Gate D3r: fused-MSE tile-level loss reduction micro-kernel cleanup.
 - [x] Gate D3s: reject fused-MSE `h_terms == 3` specialization after timing regression.
 - [x] Gate D3t: 195-step same-wall schedule boundary after D3r.
+- [x] Gate D3u: reject fused-MSE opacity exp reuse after timing no-op.
+- [x] Gate D3v: current-code 190-step same-wall rerun after D3r.
+- [x] Gate D3w: reject tile-slot threadgroup gradient reductions.
+- [x] Gate D3x: current D3r backward phase profile and trace-cache viability read.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2420,6 +2424,38 @@ train-speed attempt should avoid per-slot threadgroup reductions and instead
 look for fewer replay passes, cheaper ordering/support, or a separate compact
 sample-gradient path with an actually cheap reducer.
 
+Gate D3x reran the backward phase profile on the current accepted D3r
+loss-reduction kernel and added `--prt-train-mode` to the profile CLI so it can
+exercise the same fused-MSE path as the real comparison rows.
+
+Validation:
+
+```text
+python3 research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py --target-size 256 --max-frames 8 --steps 20 --prt-tubes 2048 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-loss-mode sequence --prt-train-mode fused_mse --profile-warmups 1 --profile-repeats 5 --out-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_256_8f_2048t_20step_support64_tile4x4x1_current_d3r.json
+python3 research_project/benchmarks/projective_rational_trace_cache_planner.py --profile-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_256_8f_2048t_20step_support64_tile4x4x1_current_d3r.json --out-json research_project/benchmarks/results/projective_rational_trace_cache_planner_256_8f_2048t_support64_tile4x4x1_current_d3r.json --projection current=256x256x8 --projection halfres16=128x128x16 --projection full512_16=512x512x16
+```
+
+Result:
+
+```text
+Current D3r profile: active tiles 32768, tile-pixel-tube visits 15376848, max tile count 119, p50/p90/p95/p99 tile counts 23/63/75/94, overflow 0.
+Diagnostic profile medians: total 40.79 ms, bin tubes 4.65 ms, backward kernel 35.60 ms, compute-only kernel 12.90 ms, replay-only kernel 9.87 ms.
+Fused trainer row in same run: median step 52.81 ms, fused MSE 41.44 ms, train loop 1.838 s, loss 0.06337 -> 0.03225.
+
+Trace-cache planner current 256x256x8: sparse id+alpha+t_before upper bound 179.97 MiB; dense slots 3074 MiB.
+Trace-cache planner full512x16 projection: sparse id+alpha+t_before upper bound 1439.79 MiB; dense slots 24592 MiB.
+Timing decomposition: derivative math estimate 3.03 ms, replay-only 9.87 ms, atomic write estimate 22.71 ms, optimistic cached-backward floor 25.73 ms.
+```
+
+Read: D3x says a naive replay trace cache is not the next clean unlock. Dense
+traces are far too large, compact sparse traces are plausible only at current
+scale and become multi-GiB at fuller rows, and even a perfect replay cache
+leaves a roughly 25.7 ms backward floor because gradient atomics dominate. The
+next structural train-speed idea should either change the gradient write shape
+without per-slot tile barriers, reduce the number of visited tile-pixel-tube
+pairs, or fuse a cheaper sample-gradient accumulation path instead of caching
+all replay state.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -2444,6 +2480,6 @@ should be measured before splitting a camera window.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
 8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p and current-code D3v show train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3t shows 195 steps is still under wall but not a quality improvement; D3q/D3r show exact 200-vs-200 steps is a quality/render win but still a train-wall near tie.
-9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, and D3w rejects per-slot threadgroup reductions at 4x4x1, but the fused MSE path remains the 256px train-wall bottleneck.
+9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, and D3x shows naive replay caching leaves a large atomic-write floor, so the fused MSE path remains the 256px train-wall bottleneck.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3l says train speed still needs fused-kernel work.
