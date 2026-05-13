@@ -1,0 +1,166 @@
+{
+  "config": {
+    "depth_bands": 4,
+    "frames": 16,
+    "iters": 5,
+    "prt_camera_fit_error": 1.0264926686431863e-07,
+    "seed": 23,
+    "support_scale": 1.4,
+    "target_size": 64,
+    "tile_capacity": 32,
+    "tile_size": 4,
+    "tile_t": 4,
+    "tubes": 128,
+    "warmup": 2
+  },
+  "fallback_tubes": 0,
+  "metrics": {
+    "cached_atlas_vs_dense_atlas_reference": {
+      "l1": 2.715824898302799e-09,
+      "max_abs": 4.3958425521850586e-07,
+      "mse": 1.1030563317979971e-16,
+      "psnr": 120.0
+    },
+    "cached_atlas_vs_direct_dense_reference": {
+      "l1": 2.481781166352448e-06,
+      "max_abs": 0.0036947941407561302,
+      "mse": 2.4008775523221004e-10,
+      "psnr": 96.19629988925433
+    },
+    "cached_atlas_vs_scan_atlas": {
+      "l1": 0.0,
+      "max_abs": 0.0,
+      "mse": 0.0,
+      "psnr": 120.0
+    },
+    "prt_direct_vs_direct_dense_reference": {
+      "l1": 3.05955367707611e-08,
+      "max_abs": 1.3709068298339844e-06,
+      "mse": 7.881507742995598e-15,
+      "psnr": 120.0
+    },
+    "prt_tiled_vs_direct_dense_reference": {
+      "l1": 0.0054908632300794125,
+      "max_abs": 0.6511022448539734,
+      "mse": 0.0012451697839424014,
+      "psnr": 29.047714267192845
+    },
+    "prt_tiled_vs_prt_direct": {
+      "l1": 0.005490852985531092,
+      "max_abs": 0.6511020660400391,
+      "mse": 0.0012451695511117578,
+      "psnr": 29.047715079267427
+    },
+    "scan_atlas_vs_dense_atlas_reference": {
+      "l1": 2.715824898302799e-09,
+      "max_abs": 4.3958425521850586e-07,
+      "mse": 1.1030563317979971e-16,
+      "psnr": 120.0
+    },
+    "scan_atlas_vs_direct_dense_reference": {
+      "l1": 2.481781166352448e-06,
+      "max_abs": 0.0036947941407561302,
+      "mse": 2.4008775523221004e-10,
+      "psnr": 96.19629988925433
+    }
+  },
+  "name": "depth_banded_homography_flow_atlas_render_compare_probe",
+  "note": "F1d same-scene render comparison for inverse-homography atlas-residual cached render. This is a forward-render speed/validity row, not a training-quality or production direct-splat gate.",
+  "pass": true,
+  "speed_read": {
+    "cached_beats_direct_dense_reference": true,
+    "cached_beats_prt_direct": true,
+    "cached_beats_prt_tiled_under_cached_cap": false,
+    "cached_beats_scan": true
+  },
+  "speedups": {
+    "cached_vs_direct_dense_reference": 61.07954033515541,
+    "cached_vs_prt_direct": 1.540827182997701,
+    "cached_vs_prt_tiled": 0.3981897094409116,
+    "cached_vs_scan": 1.4883690035606243,
+    "prt_tiled_vs_prt_direct": 3.869580620657271
+  },
+  "tile_summaries": {
+    "atlas_cached": {
+      "active_tile_count": 1508,
+      "max_tile_count": 26,
+      "overflow_sum": 0,
+      "overflow_tile_count": 0,
+      "tile_pairs": 9338
+    },
+    "prt_tiled": {
+      "active_tile_count": 464,
+      "max_tile_count": 84,
+      "overflow_sum": 80,
+      "overflow_tile_count": 80,
+      "tile_pairs": 7386
+    }
+  },
+  "timing_ms": {
+    "atlas_cached": {
+      "max_ms": 5.590291984844953,
+      "median_ms": 5.224791006185114,
+      "min_ms": 4.762541997479275,
+      "samples_ms": [
+        5.224791006185114,
+        4.970249981852248,
+        4.762541997479275,
+        5.590291984844953,
+        5.34629198955372
+      ]
+    },
+    "atlas_scan": {
+      "max_ms": 8.015166007680818,
+      "median_ms": 7.77641698368825,
+      "min_ms": 7.558458979474381,
+      "samples_ms": [
+        8.015166007680818,
+        7.615667011123151,
+        7.968833000632003,
+        7.77641698368825,
+        7.558458979474381
+      ]
+    },
+    "direct_dense_reference": {
+      "max_ms": 417.71208299905993,
+      "median_ms": 319.1278330050409,
+      "min_ms": 215.14891600236297,
+      "samples_ms": [
+        388.96920799743384,
+        314.32895798934624,
+        215.14891600236297,
+        319.1278330050409,
+        417.71208299905993
+      ]
+    },
+    "prt_direct": {
+      "max_ms": 8.173042006092146,
+      "median_ms": 8.050500007811934,
+      "min_ms": 7.124209019821137,
+      "samples_ms": [
+        8.173042006092146,
+        7.6774589833803475,
+        8.050500007811934,
+        7.124209019821137,
+        8.05625002249144
+      ]
+    },
+    "prt_tiled": {
+      "max_ms": 2.3482919787056744,
+      "median_ms": 2.080458012642339,
+      "min_ms": 2.0185000030323863,
+      "samples_ms": [
+        2.080458012642339,
+        2.3482919787056744,
+        2.0185000030323863,
+        2.0655409898608923,
+        2.2945000091567636
+      ]
+    }
+  },
+  "validity": {
+    "cached_candidate_capacity": 128,
+    "cached_path_valid": true,
+    "prt_tiled_valid_under_cached_cap": false
+  }
+}

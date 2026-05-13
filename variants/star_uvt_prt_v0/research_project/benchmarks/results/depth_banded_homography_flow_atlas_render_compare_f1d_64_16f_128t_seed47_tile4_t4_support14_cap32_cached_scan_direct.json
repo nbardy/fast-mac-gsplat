@@ -1,0 +1,166 @@
+{
+  "config": {
+    "depth_bands": 4,
+    "frames": 16,
+    "iters": 5,
+    "prt_camera_fit_error": 1.0264926686431863e-07,
+    "seed": 47,
+    "support_scale": 1.4,
+    "target_size": 64,
+    "tile_capacity": 32,
+    "tile_size": 4,
+    "tile_t": 4,
+    "tubes": 128,
+    "warmup": 2
+  },
+  "fallback_tubes": 0,
+  "metrics": {
+    "cached_atlas_vs_dense_atlas_reference": {
+      "l1": 2.96517832509835e-09,
+      "max_abs": 7.599592208862305e-07,
+      "mse": 1.766918801255249e-16,
+      "psnr": 120.0
+    },
+    "cached_atlas_vs_direct_dense_reference": {
+      "l1": 2.684897481231019e-06,
+      "max_abs": 0.003350641578435898,
+      "mse": 1.748140104895768e-10,
+      "psnr": 97.5742376372406
+    },
+    "cached_atlas_vs_scan_atlas": {
+      "l1": 0.0,
+      "max_abs": 0.0,
+      "mse": 0.0,
+      "psnr": 120.0
+    },
+    "prt_direct_vs_direct_dense_reference": {
+      "l1": 3.0591799315971e-08,
+      "max_abs": 1.430511474609375e-06,
+      "mse": 7.822033324604138e-15,
+      "psnr": 120.0
+    },
+    "prt_tiled_vs_direct_dense_reference": {
+      "l1": 0.005237663630396128,
+      "max_abs": 0.5584290623664856,
+      "mse": 0.000990574830211699,
+      "psnr": 30.041127113213037
+    },
+    "prt_tiled_vs_prt_direct": {
+      "l1": 0.005237655248492956,
+      "max_abs": 0.5584291815757751,
+      "mse": 0.000990574830211699,
+      "psnr": 30.041127113213037
+    },
+    "scan_atlas_vs_dense_atlas_reference": {
+      "l1": 2.96517832509835e-09,
+      "max_abs": 7.599592208862305e-07,
+      "mse": 1.766918801255249e-16,
+      "psnr": 120.0
+    },
+    "scan_atlas_vs_direct_dense_reference": {
+      "l1": 2.684897481231019e-06,
+      "max_abs": 0.003350641578435898,
+      "mse": 1.748140104895768e-10,
+      "psnr": 97.5742376372406
+    }
+  },
+  "name": "depth_banded_homography_flow_atlas_render_compare_probe",
+  "note": "F1d same-scene render comparison for inverse-homography atlas-residual cached render. This is a forward-render speed/validity row, not a training-quality or production direct-splat gate.",
+  "pass": true,
+  "speed_read": {
+    "cached_beats_direct_dense_reference": true,
+    "cached_beats_prt_direct": true,
+    "cached_beats_prt_tiled_under_cached_cap": false,
+    "cached_beats_scan": true
+  },
+  "speedups": {
+    "cached_vs_direct_dense_reference": 33.014819318735825,
+    "cached_vs_prt_direct": 1.4320711823636554,
+    "cached_vs_prt_tiled": 0.3962399725060017,
+    "cached_vs_scan": 1.4838402018758747,
+    "prt_tiled_vs_prt_direct": 3.6141512258508053
+  },
+  "tile_summaries": {
+    "atlas_cached": {
+      "active_tile_count": 1527,
+      "max_tile_count": 25,
+      "overflow_sum": 0,
+      "overflow_tile_count": 0,
+      "tile_pairs": 8983
+    },
+    "prt_tiled": {
+      "active_tile_count": 502,
+      "max_tile_count": 78,
+      "overflow_sum": 77,
+      "overflow_tile_count": 77,
+      "tile_pairs": 7207
+    }
+  },
+  "timing_ms": {
+    "atlas_cached": {
+      "max_ms": 7.580624980619177,
+      "median_ms": 6.099207996157929,
+      "min_ms": 4.545707983197644,
+      "samples_ms": [
+        7.580624980619177,
+        5.396874999860302,
+        6.099207996157929,
+        6.914749974384904,
+        4.545707983197644
+      ]
+    },
+    "atlas_scan": {
+      "max_ms": 11.267958005191758,
+      "median_ms": 9.050250024301931,
+      "min_ms": 8.514041983289644,
+      "samples_ms": [
+        9.050250024301931,
+        8.918999985326082,
+        8.514041983289644,
+        11.267958005191758,
+        10.432625014800578
+      ]
+    },
+    "direct_dense_reference": {
+      "max_ms": 222.16599999228492,
+      "median_ms": 201.3642499805428,
+      "min_ms": 191.95679199765436,
+      "samples_ms": [
+        222.16599999228492,
+        197.6620410277974,
+        201.3642499805428,
+        202.8654999739956,
+        191.95679199765436
+      ]
+    },
+    "prt_direct": {
+      "max_ms": 9.513041994068772,
+      "median_ms": 8.734500006539747,
+      "min_ms": 8.184874983271584,
+      "samples_ms": [
+        9.513041994068772,
+        8.358916995348409,
+        8.734500006539747,
+        8.184874983271584,
+        8.967417001258582
+      ]
+    },
+    "prt_tiled": {
+      "max_ms": 2.731541986577213,
+      "median_ms": 2.4167500087060034,
+      "min_ms": 2.022832981310785,
+      "samples_ms": [
+        2.022832981310785,
+        2.0719169988296926,
+        2.4167500087060034,
+        2.731541986577213,
+        2.6009170105680823
+      ]
+    }
+  },
+  "validity": {
+    "cached_candidate_capacity": 128,
+    "cached_path_valid": true,
+    "prt_tiled_valid_under_cached_cap": false
+  }
+}
