@@ -66,6 +66,7 @@ Last updated: 2026-05-13
 - [x] Gate D3a: fused MSE timing on selected 1024 train-speed row.
 - [x] Gate D3b: fused MSE full multicam train/eval row.
 - [x] Gate D3c: fused sequence 72/200-step 1024 multicam rows.
+- [x] Gate D3d: fused sequence 128px 1024 multicam scaling rows.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1687,6 +1688,39 @@ obviously too slow"; it is deciding whether this sequence-loss fused path is the
 right default and then scaling resolution/frame count without losing capacity
 margin.
 
+Gate D3d scales the fused sequence path from the 64x64x4 gate to 128px while
+keeping the same 4-frame window, 1024 PRT tubes, 1024 direct splats, and
+train-speed support policy.
+
+Validation:
+
+```text
+python3 setup.py build_ext --inplace
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 128 --max-frames 4 --steps 20 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --prt-tile-policy train_speed --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_128_4f_1024t_1024s_20step_sequence_train_speed_support32_fused_mse.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 128 --max-frames 4 --steps 72 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --prt-tile-policy train_speed --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_128_4f_1024t_1024s_72step_sequence_train_speed_support32_fused_mse.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 128 --max-frames 4 --steps 200 --prt-tubes 1024 --splat-count 1024 --splat-renderer fast_mac --init-depth 0.5 --prt-tile-policy train_speed --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_128_4f_1024t_1024s_200step_sequence_train_speed_support32_fused_mse.json
+```
+
+Result:
+
+```text
+20-step 128px PRT:  train wall 1.013 s, PSNR 14.1146 / heldout 13.8874 dB, render 38.26 / 36.43 ms, max tile 402, overflow 0.
+20-step 128px splat: train wall 1.176 s, PSNR 14.6958 / heldout 11.6551 dB, render 29.79 / 31.35 ms.
+
+72-step 128px PRT:  train wall 3.024 s, PSNR 15.6588 / heldout 13.8785 dB, render 26.56 / 27.04 ms, max tile 360, overflow 0.
+72-step 128px splat: train wall 1.779 s, PSNR 15.0143 / heldout 12.2189 dB, render 34.60 / 22.92 ms.
+
+200-step 128px PRT:  train wall 6.479 s, PSNR 17.9687 / heldout 13.3233 dB, render 18.01 / 17.96 ms, max tile 275, overflow 0.
+200-step 128px splat: train wall 5.720 s, PSNR 17.6388 / heldout 12.3287 dB, render 32.63 / 33.45 ms.
+```
+
+Read: the fused 1024 PRT path scales to 128px without capacity failures. It
+keeps a heldout PSNR lead at all measured step counts and beats direct splats on
+train PSNR by 72/200 steps. The speed story is mixed but useful: PRT train wall
+is faster at 20 steps, slower by 72/200, and PRT render becomes faster again by
+200 steps as support shrinks during training. The next scaling gate should vary
+frame count or tube count, not return to 64px.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1709,6 +1743,6 @@ should be measured before splitting a camera window.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
-7. Scale the fused sequence path beyond the 64x64x4 gate: first 128px or more frames, with the same 1024 PRT vs direct-splat metrics.
+7. Scale the fused sequence path in time: 128px passed at 4 frames, so test more frames or a higher tube count next.
 8. Keep accumulation-only and derivative-math rewrites behind fused-train-step work unless a new profile changes the cost split.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.

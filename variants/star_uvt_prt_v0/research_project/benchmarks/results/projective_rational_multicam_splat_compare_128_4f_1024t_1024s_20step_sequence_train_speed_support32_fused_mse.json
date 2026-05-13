@@ -1,0 +1,418 @@
+{
+  "free_dynamic_splats": {
+    "camera_projection": "legacy_pinhole",
+    "eval": {
+      "camera_projection": "legacy_pinhole",
+      "heldout_render_seconds": {
+        "max_s": 0.03513487499731127,
+        "median_s": 0.03134966699872166,
+        "min_s": 0.031267416998161934,
+        "samples_s": [
+          0.03513487499731127,
+          0.03134966699872166,
+          0.031267416998161934
+        ]
+      },
+      "metrics": {
+        "heldout_l1": 0.19565701484680176,
+        "heldout_mse": 0.06831049919128418,
+        "heldout_psnr": 11.655125409684008,
+        "l1": 0.15987533703446388,
+        "mse": 0.05518616363406181,
+        "psnr": 14.695758925611361
+      },
+      "train_render_seconds": {
+        "max_s": 0.03389362499001436,
+        "median_s": 0.02978552049899008,
+        "min_s": 0.02882937500544358,
+        "samples_s": [
+          0.02991216599184554,
+          0.029449499998008832,
+          0.02882937500544358,
+          0.030997499998193234,
+          0.029658875006134622,
+          0.03389362499001436
+        ]
+      }
+    },
+    "init_depth": 0.5,
+    "init_scale": 0.035,
+    "lr": 0.002,
+    "parameter_count": 57344,
+    "renderer": "fast_mac",
+    "splat_count": 1024,
+    "train": {
+      "final_loss": 0.09356769919395447,
+      "initial_loss": 0.012936845421791077,
+      "losses": [
+        {
+          "frame": 3,
+          "loss": 0.012936845421791077,
+          "step": 0,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.01284206472337246,
+          "step": 1,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.012011597864329815,
+          "step": 2,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.013001085259020329,
+          "step": 3,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.012850821949541569,
+          "step": 4,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.01204084511846304,
+          "step": 5,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.010931747034192085,
+          "step": 6,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.012558944523334503,
+          "step": 7,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.012421331368386745,
+          "step": 8,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.010350248776376247,
+          "step": 9,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.1072210818529129,
+          "step": 10,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.1072617694735527,
+          "step": 11,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.10791605710983276,
+          "step": 12,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.01148670632392168,
+          "step": 13,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.01058134064078331,
+          "step": 14,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.10072111338376999,
+          "step": 15,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.010339552536606789,
+          "step": 16,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.10119915753602982,
+          "step": 17,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.010094370692968369,
+          "step": 18,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.09779753535985947,
+          "step": 19,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.09356769919395447,
+          "step": 20,
+          "view": 1
+        }
+      ],
+      "sampled_loss_decreased": false,
+      "steps": 20,
+      "train_loop_elapsed_s": 1.176142374999472
+    }
+  },
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "camera_poly_degree": 1,
+    "device": "mps",
+    "frames": 4,
+    "height": 128,
+    "heldout_camera_fit_errors": [
+      0.0
+    ],
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "max_frames": 4,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "prt_alpha_threshold": 0.00392156862745098,
+    "prt_eval_cache_compiled": true,
+    "prt_support_alpha_threshold": 0.12549019607843137,
+    "prt_tile_policy": "train_speed_support32_1024",
+    "render_repeats": 3,
+    "render_warmups": 1,
+    "sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+    "seed": 31,
+    "steps": 20,
+    "target_size": 128,
+    "train_camera_fit_errors": [
+      0.0,
+      0.0
+    ],
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "width": 128
+  },
+  "name": "projective_rational_multicam_splat_compare",
+  "note": "Small real-multicam gate. PRT trains world tubes with the projective-rational tiled Metal path. The baseline is the existing FreeDynamic3DGS per-frame direct-splat model.",
+  "pass": true,
+  "projective_rational": {
+    "eval": {
+      "cache_compiled": true,
+      "compile_seconds": {
+        "max_s": 0.004665457992814481,
+        "median_s": 0.0025265419972129166,
+        "min_s": 0.001799249992473051,
+        "samples_s": [
+          0.004665457992814481,
+          0.001799249992473051,
+          0.0025265419972129166
+        ]
+      },
+      "heldout_render_seconds": {
+        "max_s": 0.036499790992820635,
+        "median_s": 0.03642754099564627,
+        "min_s": 0.036374749994138256,
+        "samples_s": [
+          0.036499790992820635,
+          0.036374749994138256,
+          0.03642754099564627
+        ]
+      },
+      "max_tile_count": 402,
+      "metrics": {
+        "heldout_l1": 0.15898394584655762,
+        "heldout_mse": 0.040856704115867615,
+        "heldout_psnr": 13.887366705480293,
+        "l1": 0.15632489323616028,
+        "mse": 0.03888890892267227,
+        "psnr": 14.114578828441473
+      },
+      "overflow_tile_count": 0,
+      "train_render_seconds": {
+        "max_s": 0.03872020900598727,
+        "median_s": 0.03825531250186032,
+        "min_s": 0.037751416995888576,
+        "samples_s": [
+          0.037751416995888576,
+          0.03831033399910666,
+          0.03872020900598727,
+          0.03820029100461397,
+          0.03811758299707435,
+          0.03854587500973139
+        ]
+      }
+    },
+    "init_depth": 0.5,
+    "init_lambda_t": 0.25,
+    "init_opacity": 0.35,
+    "init_precision_xy": 36.0,
+    "loss_mode": "sequence",
+    "lr": 0.02,
+    "parameter_count": 11264,
+    "tile_config": {
+      "tile_capacity": 512,
+      "tile_t": 1,
+      "tile_x": 4,
+      "tile_y": 4
+    },
+    "tile_config_key": "4x4x1:512",
+    "train": {
+      "final_loss": 0.04187453165650368,
+      "initial_loss": 0.055835429579019547,
+      "loss_mode": "sequence",
+      "losses": [
+        {
+          "frame": 3,
+          "loss": 0.055835429579019547,
+          "step": 0,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.044419508427381516,
+          "step": 1,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.06184625253081322,
+          "step": 2,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.04108935222029686,
+          "step": 3,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.060504913330078125,
+          "step": 4,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.0644148737192154,
+          "step": 5,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.04137688875198364,
+          "step": 6,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.04068779572844505,
+          "step": 7,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.0388668030500412,
+          "step": 8,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.05975934490561485,
+          "step": 9,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.03758654370903969,
+          "step": 10,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.03709423169493675,
+          "step": 11,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.05523981153964996,
+          "step": 12,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.053177136927843094,
+          "step": 13,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.03619427606463432,
+          "step": 14,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.03638986498117447,
+          "step": 15,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.036075983196496964,
+          "step": 16,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.047765765339136124,
+          "step": 17,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.046662598848342896,
+          "step": 18,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.044440556317567825,
+          "step": 19,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.04187453165650368,
+          "step": 20,
+          "view": 0
+        }
+      ],
+      "sampled_loss_decreased": true,
+      "steps": 20,
+      "train_loop_elapsed_s": 1.0130307919898769,
+      "train_mode": "fused_mse"
+    },
+    "train_mode": "fused_mse",
+    "tube_count": 1024
+  }
+}
