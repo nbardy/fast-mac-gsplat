@@ -87,6 +87,8 @@ Last updated: 2026-05-13
 - [x] Gate D3v: current-code 190-step same-wall rerun after D3r.
 - [x] Gate D3w: reject tile-slot threadgroup gradient reductions.
 - [x] Gate D3x: current D3r backward phase profile and trace-cache viability read.
+- [ ] Gate D3y: train-used-gradient fused-MSE kernel that skips unused gradient families.
+- [ ] Gate F0: depth-banded homography-flow gauge residual-tube projection/render falsifier.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2456,6 +2458,41 @@ without per-slot tile barriers, reduce the number of visited tile-pixel-tube
 pairs, or fuse a cheaper sample-gradient accumulation path instead of caching
 all replay state.
 
+Gate D3y is the next focused train-speed candidate from the three-agent review:
+add an explicit train-used-gradient fused-MSE op that writes only the gradient
+families the current training harness actually consumes. The current train path
+does not train `lambda_uv`, and `center_t` is effectively fixed by the world
+tube `t0`, but the D3r fused kernel still computes and atomically writes those
+gradients. Unlike D3s/D3u, this changes the write set; unlike D3w, it does not
+add per-slot threadgroup reductions or barriers.
+
+Smallest accept/reject gate:
+
+```text
+Parity: compare against the current fused op on training-used grads only; loss abs <= 1e-7, max used-grad abs <= 5e-9, overflow 0.
+Timing: rerun the D3x 20-step 256px x 8f 2048-tube support64 breakdown; accept only if median fused_mse_s improves >=10% and median step_total_s improves >=8%.
+Reject if the win is under 5% or only appears in the synthetic timing probe.
+```
+
+The separate representation idea queued after the three-agent review is
+depth-banded homography-flow gauge residual tubes. Compile a small bank of
+camera-induced depth-band flows from `K_seq,w2c_seq`, let each world tube store
+only a low-degree residual,
+
+```text
+p_i(tau) = F_b(u_i0, v_i0, tau) + r_i(tau),
+```
+
+and route low-residual tubes back through the cheap affine UVT path while
+falling back to PRT for high residual/high curvature tubes. This preserves the
+world-object contract because `F_b` is render-time compiler state, not learned
+camera-specific scene state. First gate should be projection/render only:
+128px, 32 frames, 256 tubes, 4 depth bands, residual degree 1 first, compared
+against per-frame reference, projective first-order, segmented_f4, and PRT.
+Kill it before Metal/backward if it needs more than `N` rendered tubes, render
+PSNR versus per-frame reference is below 50 dB, center residual max stays above
+1 px, or tile-pair estimates are not below segmented_f4.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -2480,6 +2517,7 @@ should be measured before splitting a camera window.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
 8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p and current-code D3v show train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3t shows 195 steps is still under wall but not a quality improvement; D3q/D3r show exact 200-vs-200 steps is a quality/render win but still a train-wall near tie.
-9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, and D3x shows naive replay caching leaves a large atomic-write floor, so the fused MSE path remains the 256px train-wall bottleneck.
+9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, and D3x shows naive replay caching leaves a large atomic-write floor, so D3y should test a train-used-gradient fused kernel before another trace-cache attempt.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3l says train speed still needs fused-kernel work.
+12. Test depth-banded homography-flow gauge residual tubes as the next moving-camera representation branch: if shared camera flow makes most background tubes affine again, it can preserve STAR's cheap path for common moving-camera video while reserving PRT for hard residuals.
