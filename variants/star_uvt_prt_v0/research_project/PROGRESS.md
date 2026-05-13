@@ -58,6 +58,7 @@ Last updated: 2026-05-13
 - [x] Gate D2s: explicit 1024 train-speed tile policy API.
 - [x] Gate D2t: support-aware backward phase profile for the 1024 train-speed policy.
 - [x] Gate D2u: reject existing PRT `tile_pair_atomic` as the lower-contention shortcut.
+- [x] Gate D2v: profile PRT backward compute-only vs atomic writes.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1407,6 +1408,43 @@ segment, so the next lower-contention attempt should not be a direct switch to
 `tile_pair_atomic`. It needs a new PRT-specific two-pass/reduction design that
 avoids both pixel-level atomic contention and per-tube serial replay.
 
+Gate D2v adds a profile-only `projective_rational_tile_pixel_compute_only_backward`
+kernel. It runs the same per-pixel ordering, alpha replay, and local gradient
+math as `projective_rational_tile_pixel_atomic_backward`, but writes a per-pixel
+debug scalar instead of atomically accumulating gradients. This is not a
+training path; it isolates arithmetic/replay cost from atomic-write cost.
+
+Validation:
+
+```text
+python3 -m py_compile torch_gsplat_bridge_star_uvt_prt/rasterize.py research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py
+python3 setup.py build_ext --inplace
+python3 tests/projective_rational_tile_pixel_atomic_backward_check.py
+python3 research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 1024 --prt-tile-policy train_speed --profile-warmups 1 --profile-repeats 5 --out-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_64_4f_1024t_20step_train_speed_support32_computeonly.json
+```
+
+Result:
+
+```text
+pass true, policy train_speed_support32_1024, support 32/255, tile 4x4x1:512, max tile 459, overflow 0, grad finite true.
+median total 19.168 ms:
+  alloc tiles 0.009 ms
+  clear tiles 0.219 ms
+  bin tubes 0.501 ms
+  alloc grads 0.011 ms
+  clear grads 0.210 ms
+  backward kernel 18.216 ms
+  compute-only kernel 17.541 ms
+```
+
+Read: atomics are not the main remaining cost. The compute-only kernel is 96%
+of the full backward kernel time, leaving only about `0.676 ms` as the measured
+atomic-write ceiling in this profile. A two-pass accumulation rewrite will not
+move the selected 1024 policy much unless it also reduces the per-pixel replay
+and local gradient arithmetic. The next kernel idea should focus on reusing
+per-pixel alpha/order state or reducing repeated `eval_prt_h` / `exp` work, not
+just changing the final accumulation destination.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1429,6 +1467,6 @@ should be measured before splitting a camera window.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
-7. Design a new lower-atomic or two-pass accumulation structure inside `projective_rational_tile_pixel_atomic_backward`; D2u rejects the existing `tile_pair_atomic` shortcut as far too slow.
-8. Profile alpha replay vs atomic accumulation inside `projective_rational_tile_pixel_atomic_backward` if the next kernel split is ambiguous.
+7. Design a PRT backward kernel that reduces per-pixel replay/local math; D2v shows atomic writes are only about 4% of selected-policy backward time.
+8. Test cached per-pixel alpha/order state or a fused forward/backward training-step path before spending more effort on accumulation-only rewrites.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.

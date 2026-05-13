@@ -100,6 +100,7 @@ struct MetalKernels {
   std::shared_ptr<MetalKernelFunction> projective_rational_direct_serial_backward;
   std::shared_ptr<MetalKernelFunction> projective_rational_tile_pair_atomic_backward;
   std::shared_ptr<MetalKernelFunction> projective_rational_tile_pixel_atomic_backward;
+  std::shared_ptr<MetalKernelFunction> projective_rational_tile_pixel_compute_only_backward;
   std::shared_ptr<MetalKernelFunction> simple_backward_samples;
   std::shared_ptr<MetalKernelFunction> stable_backward_samples;
   std::shared_ptr<MetalKernelFunction> direct_atomic_backward;
@@ -146,6 +147,8 @@ MetalKernels& kernels() {
         lib->getKernelFunction("projective_rational_tile_pair_atomic_backward");
     out.projective_rational_tile_pixel_atomic_backward =
         lib->getKernelFunction("projective_rational_tile_pixel_atomic_backward");
+    out.projective_rational_tile_pixel_compute_only_backward =
+        lib->getKernelFunction("projective_rational_tile_pixel_compute_only_backward");
     out.simple_backward_samples = lib->getKernelFunction("simple_backward_samples");
     out.stable_backward_samples = lib->getKernelFunction("stable_backward_samples");
     out.direct_atomic_backward = lib->getKernelFunction("direct_atomic_backward");
@@ -860,7 +863,7 @@ metal_profile_projective_rational_tile_pixel_atomic_backward(
               "grad_image shape must match meta");
   auto& k = kernels();
 
-  auto timings = torch::empty({7}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
+  auto timings = torch::empty({8}, torch::TensorOptions().dtype(torch::kFloat64).device(torch::kCPU));
   auto timing_ptr = timings.data_ptr<double>();
   auto total_start = Clock::now();
 
@@ -954,13 +957,36 @@ metal_profile_projective_rational_tile_pixel_atomic_backward(
   torch::mps::synchronize();
   auto backward_end = Clock::now();
 
+  auto debug_sink = torch::empty({entry_count}, opts_f);
+  auto compute_only_start = Clock::now();
+  launch(k.projective_rational_tile_pixel_compute_only_backward, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, h_coeff);
+    fn.setArg(1, lambda_uv);
+    fn.setArg(2, lambda_t);
+    fn.setArg(3, center_t);
+    fn.setArg(4, opacity);
+    fn.setArg(5, color);
+    fn.setArg(6, grad_image);
+    fn.setArg(7, meta_i32);
+    fn.setArg(8, meta_f32);
+    fn.setArg(9, tile_counts);
+    fn.setArg(10, tile_tube_ids);
+    fn.setArg(11, tile_depths);
+    fn.setArg(12, tile_unstable);
+    fn.setArg(13, debug_sink);
+    fn.dispatch((uint64_t)entry_count, 256);
+  });
+  torch::mps::synchronize();
+  auto compute_only_end = Clock::now();
+
   timing_ptr[0] = elapsed_ms(alloc_tiles_start, alloc_tiles_end);
   timing_ptr[1] = elapsed_ms(clear_tiles_start, clear_tiles_end);
   timing_ptr[2] = elapsed_ms(bin_start, bin_end);
   timing_ptr[3] = elapsed_ms(alloc_grads_start, alloc_grads_end);
   timing_ptr[4] = elapsed_ms(clear_grads_start, clear_grads_end);
   timing_ptr[5] = elapsed_ms(backward_start, backward_end);
-  timing_ptr[6] = elapsed_ms(total_start, backward_end);
+  timing_ptr[6] = elapsed_ms(compute_only_start, compute_only_end);
+  timing_ptr[7] = elapsed_ms(total_start, backward_end);
 
   return std::make_tuple(grad_h_coeff, grad_lambda_uv, grad_lambda_t, grad_center_t, grad_opacity, grad_color,
                          tile_counts, tile_overflow, tile_unstable, timings);
