@@ -1,0 +1,1042 @@
+{
+  "free_dynamic_splats": {
+    "camera_projection": "legacy_pinhole",
+    "eval": {
+      "camera_projection": "legacy_pinhole",
+      "heldout_render_seconds": {
+        "max_s": 0.061330625001573935,
+        "median_s": 0.059639583007083274,
+        "min_s": 0.057914250006433576,
+        "samples_s": [
+          0.057914250006433576,
+          0.059639583007083274,
+          0.061330625001573935
+        ]
+      },
+      "metrics": {
+        "heldout_l1": 0.18379424512386322,
+        "heldout_mse": 0.05917287990450859,
+        "heldout_psnr": 12.278772933865003,
+        "l1": 0.1508064717054367,
+        "mse": 0.046689980663359165,
+        "psnr": 14.304602857224618
+      },
+      "train_render_seconds": {
+        "max_s": 0.05662441700405907,
+        "median_s": 0.05152039600216085,
+        "min_s": 0.048158332996536046,
+        "samples_s": [
+          0.048158332996536046,
+          0.05175200001394842,
+          0.051288791990373284,
+          0.049956583010498434,
+          0.051828416995704174,
+          0.05662441700405907
+        ]
+      }
+    },
+    "init_depth": 0.5,
+    "init_scale": 0.035,
+    "lr": 0.002,
+    "parameter_count": 229376,
+    "renderer": "fast_mac",
+    "splat_count": 2048,
+    "train": {
+      "final_loss": 0.06890014559030533,
+      "initial_loss": 0.01307331770658493,
+      "losses": [
+        {
+          "frame": 3,
+          "loss": 0.01307331770658493,
+          "step": 0,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.016535812988877296,
+          "step": 1,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.011340571567416191,
+          "step": 2,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.014327269978821278,
+          "step": 3,
+          "view": 0
+        },
+        {
+          "frame": 4,
+          "loss": 0.013531239703297615,
+          "step": 4,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.01344587467610836,
+          "step": 5,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.01502937637269497,
+          "step": 6,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.012949114665389061,
+          "step": 7,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.014674571342766285,
+          "step": 8,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.012446927838027477,
+          "step": 9,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.10669998824596405,
+          "step": 10,
+          "view": 1
+        },
+        {
+          "frame": 4,
+          "loss": 0.10784405469894409,
+          "step": 11,
+          "view": 1
+        },
+        {
+          "frame": 6,
+          "loss": 0.10796750336885452,
+          "step": 12,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.013747778721153736,
+          "step": 13,
+          "view": 0
+        },
+        {
+          "frame": 5,
+          "loss": 0.013030373491346836,
+          "step": 14,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.09958422183990479,
+          "step": 15,
+          "view": 1
+        },
+        {
+          "frame": 4,
+          "loss": 0.018624570220708847,
+          "step": 16,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.10704423487186432,
+          "step": 17,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.01205056719481945,
+          "step": 18,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.10345276445150375,
+          "step": 19,
+          "view": 1
+        },
+        {
+          "frame": 7,
+          "loss": 0.10769418627023697,
+          "step": 20,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.10646359622478485,
+          "step": 21,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.015571275725960732,
+          "step": 22,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.020968060940504074,
+          "step": 23,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.0881684273481369,
+          "step": 24,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.08661367744207382,
+          "step": 25,
+          "view": 1
+        },
+        {
+          "frame": 6,
+          "loss": 0.09310556203126907,
+          "step": 26,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.08298581093549728,
+          "step": 27,
+          "view": 1
+        },
+        {
+          "frame": 5,
+          "loss": 0.012948337942361832,
+          "step": 28,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.019880954176187515,
+          "step": 29,
+          "view": 0
+        },
+        {
+          "frame": 6,
+          "loss": 0.03144030645489693,
+          "step": 30,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.00952411349862814,
+          "step": 31,
+          "view": 0
+        },
+        {
+          "frame": 4,
+          "loss": 0.017949435859918594,
+          "step": 32,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.10575160384178162,
+          "step": 33,
+          "view": 1
+        },
+        {
+          "frame": 6,
+          "loss": 0.027944663539528847,
+          "step": 34,
+          "view": 0
+        },
+        {
+          "frame": 4,
+          "loss": 0.09282614290714264,
+          "step": 35,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.08589504659175873,
+          "step": 36,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.08464585244655609,
+          "step": 37,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.08288159221410751,
+          "step": 38,
+          "view": 1
+        },
+        {
+          "frame": 6,
+          "loss": 0.022625766694545746,
+          "step": 39,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.07879403233528137,
+          "step": 40,
+          "view": 1
+        },
+        {
+          "frame": 4,
+          "loss": 0.01625698059797287,
+          "step": 41,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.09197421371936798,
+          "step": 42,
+          "view": 1
+        },
+        {
+          "frame": 5,
+          "loss": 0.013221394270658493,
+          "step": 43,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.013740470632910728,
+          "step": 44,
+          "view": 0
+        },
+        {
+          "frame": 6,
+          "loss": 0.08406972140073776,
+          "step": 45,
+          "view": 1
+        },
+        {
+          "frame": 6,
+          "loss": 0.08320704847574234,
+          "step": 46,
+          "view": 1
+        },
+        {
+          "frame": 5,
+          "loss": 0.011654195375740528,
+          "step": 47,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.017469841986894608,
+          "step": 48,
+          "view": 0
+        },
+        {
+          "frame": 6,
+          "loss": 0.0792163610458374,
+          "step": 49,
+          "view": 1
+        },
+        {
+          "frame": 5,
+          "loss": 0.010441630147397518,
+          "step": 50,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.08990823477506638,
+          "step": 51,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.017011528834700584,
+          "step": 52,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.03136644884943962,
+          "step": 53,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.06421977281570435,
+          "step": 54,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.0340433269739151,
+          "step": 55,
+          "view": 0
+        },
+        {
+          "frame": 4,
+          "loss": 0.08311931043863297,
+          "step": 56,
+          "view": 1
+        },
+        {
+          "frame": 4,
+          "loss": 0.08188053220510483,
+          "step": 57,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.061834052205085754,
+          "step": 58,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.0303221195936203,
+          "step": 59,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.015355213545262814,
+          "step": 60,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.013751986436545849,
+          "step": 61,
+          "view": 0
+        },
+        {
+          "frame": 5,
+          "loss": 0.10547003895044327,
+          "step": 62,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.014690961688756943,
+          "step": 63,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.02562536858022213,
+          "step": 64,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.05711594223976135,
+          "step": 65,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.031057914718985558,
+          "step": 66,
+          "view": 0
+        },
+        {
+          "frame": 4,
+          "loss": 0.02066936157643795,
+          "step": 67,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.015849528834223747,
+          "step": 68,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.02172280102968216,
+          "step": 69,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.01171368733048439,
+          "step": 70,
+          "view": 0
+        },
+        {
+          "frame": 5,
+          "loss": 0.013786233961582184,
+          "step": 71,
+          "view": 0
+        },
+        {
+          "frame": 4,
+          "loss": 0.06890014559030533,
+          "step": 72,
+          "view": 1
+        }
+      ],
+      "sampled_loss_decreased": false,
+      "steps": 72,
+      "train_loop_elapsed_s": 1.3312546250090236
+    }
+  },
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "camera_poly_degree": 1,
+    "device": "mps",
+    "frames": 8,
+    "height": 128,
+    "heldout_camera_fit_errors": [
+      0.0
+    ],
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "max_frames": 8,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "prt_alpha_threshold": 0.00392156862745098,
+    "prt_eval_cache_compiled": true,
+    "prt_support_alpha_threshold": 0.12549019607843137,
+    "prt_tile_policy": "explicit_tile_config",
+    "render_repeats": 3,
+    "render_warmups": 1,
+    "sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+    "seed": 31,
+    "steps": 72,
+    "target_size": 128,
+    "train_camera_fit_errors": [
+      0.0,
+      0.0
+    ],
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "width": 128
+  },
+  "name": "projective_rational_multicam_splat_compare",
+  "note": "Small real-multicam gate. PRT trains world tubes with the projective-rational tiled Metal path. The baseline is the existing FreeDynamic3DGS per-frame direct-splat model.",
+  "pass": true,
+  "projective_rational": {
+    "eval": {
+      "cache_compiled": true,
+      "compile_seconds": {
+        "max_s": 0.004305166003177874,
+        "median_s": 0.002311000003828667,
+        "min_s": 0.0019401669997023419,
+        "samples_s": [
+          0.004305166003177874,
+          0.0019401669997023419,
+          0.002311000003828667
+        ]
+      },
+      "heldout_render_seconds": {
+        "max_s": 0.06542370900569949,
+        "median_s": 0.06541879101132508,
+        "min_s": 0.06531816600181628,
+        "samples_s": [
+          0.06542370900569949,
+          0.06541879101132508,
+          0.06531816600181628
+        ]
+      },
+      "max_tile_count": 429,
+      "metrics": {
+        "heldout_l1": 0.16361795365810394,
+        "heldout_mse": 0.04079560190439224,
+        "heldout_psnr": 13.89386654841739,
+        "l1": 0.13753318786621094,
+        "mse": 0.029165783897042274,
+        "psnr": 15.353673564941673
+      },
+      "overflow_tile_count": 0,
+      "train_render_seconds": {
+        "max_s": 0.06638316699536517,
+        "median_s": 0.06398022950452287,
+        "min_s": 0.06230804100050591,
+        "samples_s": [
+          0.06239195799571462,
+          0.06230804100050591,
+          0.0625162500073202,
+          0.06638316699536517,
+          0.06544420900172554,
+          0.06584866599587258
+        ]
+      }
+    },
+    "init_depth": 0.5,
+    "init_lambda_t": 0.25,
+    "init_opacity": 0.35,
+    "init_precision_xy": 36.0,
+    "loss_mode": "sequence",
+    "lr": 0.02,
+    "parameter_count": 22528,
+    "tile_config": {
+      "tile_capacity": 512,
+      "tile_t": 1,
+      "tile_x": 4,
+      "tile_y": 4
+    },
+    "tile_config_key": "4x4x1:512",
+    "train": {
+      "final_loss": 0.02819431759417057,
+      "initial_loss": 0.05864414572715759,
+      "loss_mode": "sequence",
+      "losses": [
+        {
+          "frame": 7,
+          "loss": 0.05864414572715759,
+          "step": 0,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.04696469381451607,
+          "step": 1,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.06702320277690887,
+          "step": 2,
+          "view": 0
+        },
+        {
+          "frame": 6,
+          "loss": 0.044495731592178345,
+          "step": 3,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.06838799268007278,
+          "step": 4,
+          "view": 0
+        },
+        {
+          "frame": 4,
+          "loss": 0.06957834213972092,
+          "step": 5,
+          "view": 0
+        },
+        {
+          "frame": 5,
+          "loss": 0.046264369040727615,
+          "step": 6,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.0443045012652874,
+          "step": 7,
+          "view": 1
+        },
+        {
+          "frame": 4,
+          "loss": 0.042039986699819565,
+          "step": 8,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.061343882232904434,
+          "step": 9,
+          "view": 0
+        },
+        {
+          "frame": 4,
+          "loss": 0.03966164216399193,
+          "step": 10,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.03841553255915642,
+          "step": 11,
+          "view": 1
+        },
+        {
+          "frame": 4,
+          "loss": 0.05446856841444969,
+          "step": 12,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.05142498016357422,
+          "step": 13,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.039205074310302734,
+          "step": 14,
+          "view": 1
+        },
+        {
+          "frame": 7,
+          "loss": 0.03927646949887276,
+          "step": 15,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.03857338801026344,
+          "step": 16,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.04743346944451332,
+          "step": 17,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.04618948698043823,
+          "step": 18,
+          "view": 0
+        },
+        {
+          "frame": 6,
+          "loss": 0.044706929475069046,
+          "step": 19,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.042698416858911514,
+          "step": 20,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.04071192815899849,
+          "step": 21,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.04088727384805679,
+          "step": 22,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.04030059278011322,
+          "step": 23,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.03943336755037308,
+          "step": 24,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.03820604458451271,
+          "step": 25,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.03664318472146988,
+          "step": 26,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.0405682809650898,
+          "step": 27,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.03940925747156143,
+          "step": 28,
+          "view": 1
+        },
+        {
+          "frame": 6,
+          "loss": 0.03549041226506233,
+          "step": 29,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.03810315206646919,
+          "step": 30,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.03520623967051506,
+          "step": 31,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.037205345928668976,
+          "step": 32,
+          "view": 1
+        },
+        {
+          "frame": 6,
+          "loss": 0.03595917671918869,
+          "step": 33,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.035177554935216904,
+          "step": 34,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.03666074946522713,
+          "step": 35,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.03608104959130287,
+          "step": 36,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.03425225615501404,
+          "step": 37,
+          "view": 0
+        },
+        {
+          "frame": 6,
+          "loss": 0.03369497135281563,
+          "step": 38,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.03834563121199608,
+          "step": 39,
+          "view": 1
+        },
+        {
+          "frame": 7,
+          "loss": 0.03289839252829552,
+          "step": 40,
+          "view": 0
+        },
+        {
+          "frame": 6,
+          "loss": 0.03715577349066734,
+          "step": 41,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.03210031986236572,
+          "step": 42,
+          "view": 0
+        },
+        {
+          "frame": 4,
+          "loss": 0.0315297432243824,
+          "step": 43,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.030916815623641014,
+          "step": 44,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.03702495992183685,
+          "step": 45,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.030672036111354828,
+          "step": 46,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.03567678481340408,
+          "step": 47,
+          "view": 1
+        },
+        {
+          "frame": 4,
+          "loss": 0.030344529077410698,
+          "step": 48,
+          "view": 0
+        },
+        {
+          "frame": 2,
+          "loss": 0.030148304998874664,
+          "step": 49,
+          "view": 0
+        },
+        {
+          "frame": 4,
+          "loss": 0.03409842774271965,
+          "step": 50,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.03344324603676796,
+          "step": 51,
+          "view": 1
+        },
+        {
+          "frame": 3,
+          "loss": 0.032200999557971954,
+          "step": 52,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.03213820233941078,
+          "step": 53,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.03147384896874428,
+          "step": 54,
+          "view": 1
+        },
+        {
+          "frame": 0,
+          "loss": 0.03097519464790821,
+          "step": 55,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.031576212495565414,
+          "step": 56,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.030835604295134544,
+          "step": 57,
+          "view": 0
+        },
+        {
+          "frame": 6,
+          "loss": 0.031084822490811348,
+          "step": 58,
+          "view": 1
+        },
+        {
+          "frame": 5,
+          "loss": 0.030818618834018707,
+          "step": 59,
+          "view": 0
+        },
+        {
+          "frame": 3,
+          "loss": 0.0303961094468832,
+          "step": 60,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.029914245009422302,
+          "step": 61,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.03331246227025986,
+          "step": 62,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.03223339840769768,
+          "step": 63,
+          "view": 1
+        },
+        {
+          "frame": 6,
+          "loss": 0.029495447874069214,
+          "step": 64,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.031360842287540436,
+          "step": 65,
+          "view": 1
+        },
+        {
+          "frame": 2,
+          "loss": 0.03055853210389614,
+          "step": 66,
+          "view": 1
+        },
+        {
+          "frame": 1,
+          "loss": 0.02972465567290783,
+          "step": 67,
+          "view": 1
+        },
+        {
+          "frame": 4,
+          "loss": 0.03171656280755997,
+          "step": 68,
+          "view": 0
+        },
+        {
+          "frame": 7,
+          "loss": 0.029122045263648033,
+          "step": 69,
+          "view": 1
+        },
+        {
+          "frame": 7,
+          "loss": 0.030638284981250763,
+          "step": 70,
+          "view": 0
+        },
+        {
+          "frame": 1,
+          "loss": 0.029408462345600128,
+          "step": 71,
+          "view": 0
+        },
+        {
+          "frame": 0,
+          "loss": 0.02819431759417057,
+          "step": 72,
+          "view": 0
+        }
+      ],
+      "sampled_loss_decreased": true,
+      "steps": 72,
+      "train_loop_elapsed_s": 6.596065417004866,
+      "train_mode": "fused_mse"
+    },
+    "train_mode": "fused_mse",
+    "tube_count": 2048
+  }
+}
