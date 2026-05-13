@@ -90,7 +90,7 @@ Last updated: 2026-05-13
 - [x] Gate D3y: train-used-gradient fused-MSE kernel that skips unused gradient families.
 - [x] Gate D3z: 240-step D3y same-wall boundary row rejects spending the whole train-wall margin.
 - [x] Gate D4a: 205/210/220-step D3y boundary sweep rejects replacing the accepted 200-step row.
-- [ ] Gate F0: depth-banded homography-flow gauge residual-tube projection/render falsifier.
+- [x] Gate F0: depth-banded homography-flow gauge residual-tube projection/render falsifier.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2558,7 +2558,46 @@ the PSNR/render win over splats, but both miss the paired train wall. The useful
 next path is not blind extra steps; it is either a better optimizer/support
 schedule or the next representation/rasterizer branch.
 
-The separate representation idea queued after the three-agent review is
+Gate F0 implements the first projection/render-only falsifier for the separate
+depth-banded homography-flow gauge residual-tube idea. The script keeps the
+learned object as `N` world tubes, compiles four representative depth-band
+homography flows from the render camera path, assigns each tube by reference
+depth, and stores/renders only a low-degree residual center path:
+
+```text
+p_i(tau) = F_b(u_i0, v_i0, tau) + r_i(tau)
+```
+
+The dense render uses exact direct depth for the gauge row so this gate isolates
+center residual before any Metal/backward work.
+
+Command:
+
+```text
+python3 research_project/benchmarks/depth_banded_homography_flow_residual_probe.py --out-json research_project/benchmarks/results/depth_banded_homography_flow_residual_probe_f0_128_32f_256t_degree1.json
+python3 research_project/benchmarks/depth_banded_homography_flow_residual_probe.py --residual-degree 2 --out-json research_project/benchmarks/results/depth_banded_homography_flow_residual_probe_f0_128_32f_256t_degree2.json
+```
+
+Result:
+
+```text
+F0 degree1: pass false. Center p95 0.6911 px vs projective_first_order 3.6731 px; max 2.6097 px; render PSNR 50.34 dB; flow-sheared tile pairs 16575 vs segmented_f4 18455; rendered tubes 256 vs segmented_f4 1024.
+F0 degree2: pass true.  Center p95 0.1419 px vs projective_first_order 3.6731 px; max 0.6357 px; render PSNR 64.55 dB; flow-sheared tile pairs 16586 vs segmented_f4 18455; rendered tubes 256 vs segmented_f4 1024.
+Segmented_f4: center p95 0.2147 px; render PSNR 56.80 dB; rendered tubes 1024.
+PRT degree2: center p95 1.08e-05 px; render PSNR 120 dB; rendered tubes 256.
+```
+
+Read: F0 does not replace PRT as the exact fallback; PRT is still the correctness
+anchor. It does show the gauge-residual branch is worth keeping alive. Degree 1
+fails the max-residual gate despite beating projective-first-order on p95 and
+PSNR. Degree 2 passes the implemented residual, PSNR, tile-estimate, and
+rendered-tube gates, and beats segmented f4 on p95, render PSNR, tile-pair
+estimate, and rendered-tube count. The actual flow-sheared render-time gate is
+deferred until that renderer exists. Next work should turn the degree-2
+residual upper-bound into an actual flow-sheared tile renderer or test
+robustness with object velocity and harder camera paths.
+
+The separate representation idea tested by F0 is
 depth-banded homography-flow gauge residual tubes. Compile a small bank of
 camera-induced depth-band flows from `K_seq,w2c_seq`, let each world tube store
 only a low-degree residual,
@@ -2604,4 +2643,4 @@ should be measured before splitting a camera window.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, D3x rejects naive replay caching, and D3y shows write-set pruning can turn exact 200-vs-200 into a train-wall win.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, and D3z/D4a are boundary results showing that more steps must still fit the train-wall budget and improve quality before replacing D3y.
-12. Test depth-banded homography-flow gauge residual tubes as the next moving-camera representation branch: if shared camera flow makes most background tubes affine again, it can preserve STAR's cheap path for common moving-camera video while reserving PRT for hard residuals.
+12. Continue depth-banded homography-flow gauge residual tubes after F0: degree-2 residual passed the projection/render falsifier, but the current implementation is still a dense upper-bound with exact direct depth, not a Metal flow-sheared renderer or training path.
