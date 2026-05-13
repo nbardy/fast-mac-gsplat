@@ -711,13 +711,27 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
             else parse_projective_rational_tile_config(args.tile_config)
         )
         prt_tile_policy = "generic_auto" if args.tile_config == "auto" else "explicit_tile_config"
+    prt_eval_support_alpha_threshold = (
+        prt_support_alpha_threshold
+        if args.prt_eval_support_alpha_threshold is None
+        else args.prt_eval_support_alpha_threshold
+    )
     apply_projective_rational_tile_env(tile_config)
-    prt_config = UVTRenderConfig(
+    prt_train_config = UVTRenderConfig(
         height=height,
         width=width,
         frames=frames,
         alpha_threshold=args.prt_alpha_threshold,
         support_alpha_threshold=prt_support_alpha_threshold,
+        background=(1.0, 1.0, 1.0),
+        **tile_config.as_render_kwargs(),
+    )
+    prt_eval_config = UVTRenderConfig(
+        height=height,
+        width=width,
+        frames=frames,
+        alpha_threshold=args.prt_alpha_threshold,
+        support_alpha_threshold=prt_eval_support_alpha_threshold,
         background=(1.0, 1.0, 1.0),
         **tile_config.as_render_kwargs(),
     )
@@ -735,7 +749,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
         model=prt_model,
         bundle=bundle,
         train_camera_paths=train_camera_paths,
-        config=prt_config,
+        config=prt_train_config,
         steps=args.steps,
         lr=args.prt_lr,
         loss_mode=args.prt_loss_mode,
@@ -748,7 +762,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
         bundle=bundle,
         train_camera_paths=train_camera_paths,
         heldout_camera_paths=heldout_camera_paths,
-        config=prt_config,
+        config=prt_eval_config,
         device=device,
         render_warmups=args.render_warmups,
         render_repeats=args.render_repeats,
@@ -808,6 +822,8 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
             "camera_poly_degree": args.camera_poly_degree,
             "prt_alpha_threshold": args.prt_alpha_threshold,
             "prt_support_alpha_threshold": prt_support_alpha_threshold,
+            "prt_train_support_alpha_threshold": prt_support_alpha_threshold,
+            "prt_eval_support_alpha_threshold": prt_eval_support_alpha_threshold,
             "prt_tile_policy": prt_tile_policy,
             "train_camera_fit_errors": train_fit_errors,
             "heldout_camera_fit_errors": heldout_fit_errors,
@@ -817,6 +833,8 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
             "parameter_count": sum(parameter.numel() for parameter in prt_model.parameters()),
             "tile_config_key": tile_config.key,
             "tile_config": tile_config.as_dict(),
+            "train_support_alpha_threshold": prt_support_alpha_threshold,
+            "eval_support_alpha_threshold": prt_eval_support_alpha_threshold,
             "lr": args.prt_lr,
             "loss_mode": args.prt_loss_mode,
             "train_mode": args.prt_train_mode,
@@ -866,6 +884,7 @@ def main() -> None:
     parser.add_argument("--prt-init-opacity", type=float, default=0.35)
     parser.add_argument("--prt-alpha-threshold", type=float, default=1.0 / 255.0)
     parser.add_argument("--prt-support-alpha-threshold", type=float)
+    parser.add_argument("--prt-eval-support-alpha-threshold", type=float)
     parser.add_argument("--splat-count", type=int, default=128)
     parser.add_argument("--splat-lr", type=float, default=0.002)
     parser.add_argument("--splat-renderer", choices=("dense", "fast_mac"), default="dense")

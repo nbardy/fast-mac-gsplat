@@ -71,6 +71,7 @@ Last updated: 2026-05-13
 - [x] Gate D3f: explicit 2048-tube/2048-splat 128px 8-frame capacity rows.
 - [x] Gate D3g: 2048-tube support-threshold dial and rejected global policy promotion.
 - [x] Gate D3h: 256px x 8-frame 2048-tube scaling rows.
+- [x] Gate D3i: split train/eval support-threshold probe for 256px 2048-tube rows.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1878,6 +1879,62 @@ dense at 256px for speed despite the stronger heldout PSNR. This points the next
 engineering target back at train-step cost and support scheduling, not basic
 render correctness.
 
+Gate D3i adds a split train/eval support-threshold flag so the fast 256px
+support `64/255` train row can be evaluated with looser support. This tests
+whether heldout PSNR can be recovered at render/eval time without paying the
+full support `48/255` train cost.
+
+Validation:
+
+```text
+python3 setup.py build_ext --inplace
+python3 -m py_compile research_project/benchmarks/projective_rational_multicam_splat_compare.py
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 72 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-eval-support-alpha-threshold 0.18823529411764706 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_72step_sequence_tile4x4x1cap512_train64_eval48_fused_mse.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 72 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-eval-support-alpha-threshold 0.2196078431372549 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_72step_sequence_tile4x4x1cap512_train64_eval56_fused_mse.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 200 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-eval-support-alpha-threshold 0.2196078431372549 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_200step_sequence_tile4x4x1cap512_train64_eval56_fused_mse.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 200 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-eval-support-alpha-threshold 0.18823529411764706 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_200step_sequence_tile4x4x1cap512_train64_eval48_fused_mse.json
+```
+
+Result:
+
+```text
+72-step train64/eval48 PRT:  train wall 3.753 s, PSNR 14.7623 / heldout 13.4184 dB, render 81.11 / 87.42 ms, max tile 229, overflow 0.
+72-step train64/eval48 splat: train wall 1.944 s, PSNR 13.9928 / heldout 12.2259 dB, render 75.75 / 69.52 ms.
+
+72-step train64/eval56 PRT:  train wall 3.802 s, PSNR 15.5118 / heldout 13.2977 dB, render 48.80 / 58.40 ms, max tile 185, overflow 0.
+72-step train64/eval56 splat: train wall 1.760 s, PSNR 13.9928 / heldout 12.2259 dB, render 76.46 / 61.42 ms.
+
+200-step train64/eval56 PRT: train wall 8.042 s, PSNR 16.2980 / heldout 13.0979 dB, render 30.75 / 42.15 ms, max tile 168, overflow 0.
+200-step train64/eval56 splat: train wall 6.022 s, PSNR 15.6136 / heldout 12.4152 dB, render 80.34 / 89.75 ms.
+
+200-step train64/eval48 PRT: train wall 7.732 s, PSNR 14.9961 / heldout 13.1349 dB, render 55.16 / 73.11 ms, max tile 221, overflow 0.
+200-step train64/eval48 splat: train wall 5.734 s, PSNR 15.6136 / heldout 12.4151 dB, render 78.87 / 83.14 ms.
+```
+
+Read: split support is useful diagnostically but should not become the next
+default. Looser eval support recovers only a small amount of heldout PSNR while
+it destroys overfit PSNR and, at eval48, most of the render-speed story. Eval56
+is the only plausible compromise: it keeps a speed win over direct splats and
+raises heldout versus eval64, but it still gives up much of the support64 train
+PSNR. The better direction is support scheduling or residual-certified support
+inflation, not a static train/eval mismatch.
+
+Benchmark caveat: these rows are same data, same train/heldout camera split,
+same 8-frame window, and same nominal primitive count, so they are useful for
+the current overfit question. They are not yet a broad representation claim:
+PRT has far fewer learned parameters than per-frame splats, PRT fused sequence
+loss is not the same objective as sampled-frame splat training, and cached
+compiled PRT render timing is fair for repeated fixed camera paths but less fair
+for constantly changing camera edits.
+
+Rasterizer read: the fast path is tiled PRT with support pruning, cached eval
+compile, and fused sequence MSE. The direct PRT reference path is not the speed
+story. Compiler overhead is mostly under control in cached playback rows; the
+remaining render cost is inside the Metal shade/blend path, especially
+per-pixel sample-order replay. Backward and fused MSE already have a `tile_t=1`
+presorted-order shortcut, so the next rasterizer experiment should test the same
+shortcut in forward render with parity and cached-eval timing rows.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1901,5 +1958,8 @@ should be measured before splitting a camera window.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
-8. Keep accumulation-only and derivative-math rewrites behind fused-train-step work unless a new profile changes the cost split.
-9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
+8. Treat split train/eval support as a diagnostic only; pursue support scheduling or residual-certified support inflation before making it a policy.
+9. Add a same-wall 256px row: train PRT support64 for roughly the 2048-splat 200-step wall budget, then evaluate that checkpoint at support64/56/48 against one fixed splat baseline.
+10. Add a parity-gated `tile_t=1` presorted-order shortcut to the forward render kernel and rerun cached eval timing on the selected 1024 and 2048 rows.
+11. Keep accumulation-only and derivative-math rewrites behind fused-train-step work unless a new profile changes the cost split.
+12. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
