@@ -99,6 +99,7 @@ Last updated: 2026-05-13
 - [x] Gate F0g: stricter reference-atlas-plus-residual culling control.
 - [x] Gate F0h: inverse-homography atlas-residual representation probe.
 - [x] Gate F0i: CPU atlas-tiled render coverage reference.
+- [x] Gate F0j: four-seed CPU atlas-tiled render coverage sweep.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2835,6 +2836,34 @@ atlas support covers the dense reference exactly on the 64px/16f/128t smoke
 while still visiting only 7.4% of dense tube-pixel candidates. This is the
 first correctness target for the Metal kernel.
 
+Gate F0j checks that the F0i `1.5x` atlas support is not a one-seed accident.
+It also vectorizes the dense active-candidate audit inside the CPU tiled
+reference, reducing the support-1.5 seed-17 smoke from an opaque minute-scale
+run to a bounded short check with the same numbers.
+
+Command:
+
+```text
+python3 research_project/benchmarks/depth_banded_homography_flow_atlas_tiled_seed_sweep.py --out-json research_project/benchmarks/results/depth_banded_homography_flow_atlas_tiled_seed_sweep_f0j_64_16f_128t_4seeds_tile4_support15.json
+```
+
+Result:
+
+```text
+Seeds 17, 23, 31, 47: pass true for all rows.
+Missing active candidates: min 0, median 0, max 0.
+PSNR vs dense atlas-residual render: min 120.0 dB, median 120.0 dB, max 120.0 dB.
+Fallback tubes: min 0, median 0, max 0.
+Candidate eval ratio vs dense: min 0.0743, median 0.0780, max 0.0812.
+Tile pairs: min 9646, median 10041, max 10362.
+Max candidates per pixel: min 75, median 80, max 83.
+```
+
+Read: `support_scale=1.5` is the current CPU reference contract for the first
+Metal atlas-tiled path. It exactly covers dense active candidates across the
+four hard-camera/object-motion seeds at the 64px/16f/128t smoke scale while
+keeping candidate evals around 8% of dense.
+
 The separate representation idea tested by F0 is
 depth-banded homography-flow gauge residual tubes. Compile a small bank of
 camera-induced depth-band flows from `K_seq,w2c_seq`, let each world tube store
@@ -2881,4 +2910,4 @@ should be measured before splitting a camera window.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, D3x rejects naive replay caching, and D3y shows write-set pruning can turn exact 200-vs-200 into a train-wall win.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, and D3z/D4a are boundary results showing that more steps must still fit the train-wall budget and improve quality before replacing D3y.
-12. Continue depth-banded homography-flow gauge residual tubes after F0-F0i: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion originally needed a small PRT fallback/window-split tail under screen-additive residuals. F0h is now the better representation target: inverse-homography atlas residuals pass all four hard-camera/object-motion seeds with no fallback tubes, high PSNR, and the same 4x4 culling advantage. F0i adds the first CPU atlas-tiled render reference and shows that 1.5x conservative atlas support covers dense exactly on the smoke while preserving a 7.4% candidate-eval ratio. The current implementation is still not a Metal renderer or training path.
+12. Continue depth-banded homography-flow gauge residual tubes after F0-F0j: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion originally needed a small PRT fallback/window-split tail under screen-additive residuals. F0h is now the better representation target: inverse-homography atlas residuals pass all four hard-camera/object-motion seeds with no fallback tubes, high PSNR, and the same 4x4 culling advantage. F0i/F0j add the CPU atlas-tiled render reference and show that 1.5x conservative atlas support covers dense exactly across four hard-camera/object-motion seeds at 64px/16f/128t while preserving an about 8% candidate-eval ratio. The current implementation is still not a Metal renderer or training path.

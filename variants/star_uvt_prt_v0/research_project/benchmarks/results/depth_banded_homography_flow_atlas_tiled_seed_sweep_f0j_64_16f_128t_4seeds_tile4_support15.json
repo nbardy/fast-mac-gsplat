@@ -1,0 +1,108 @@
+{
+  "config": {
+    "depth_bands": 4,
+    "dolly_z": 0.12,
+    "frames": 16,
+    "pan_x": 0.09,
+    "residual_degree": 3,
+    "seeds": [
+      17,
+      23,
+      31,
+      47
+    ],
+    "support_scale": 1.5,
+    "target_size": 64,
+    "tile_size": 4,
+    "tile_t": 4,
+    "tubes": 128,
+    "velocity_scale": 0.01,
+    "zoom": 0.025
+  },
+  "name": "depth_banded_homography_flow_atlas_tiled_seed_sweep",
+  "note": "Multi-seed CPU tiled render coverage check for inverse-homography atlas-residual tubes. This is a correctness reference for the planned Metal path, not a runtime benchmark.",
+  "pass": true,
+  "rows": [
+    {
+      "candidate_eval_ratio_vs_dense": 0.07428514957427979,
+      "candidate_evals": 623149,
+      "fallback_tubes": 0,
+      "max_abs": 0.0,
+      "max_candidates_per_pixel": 77,
+      "missing_active_candidates": 0,
+      "pass": true,
+      "psnr": 120.0,
+      "seed": 17,
+      "tile_pairs": 9646
+    },
+    {
+      "candidate_eval_ratio_vs_dense": 0.08117759227752686,
+      "candidate_evals": 680967,
+      "fallback_tubes": 0,
+      "max_abs": 0.0,
+      "max_candidates_per_pixel": 83,
+      "missing_active_candidates": 0,
+      "pass": true,
+      "psnr": 120.0,
+      "seed": 23,
+      "tile_pairs": 10362
+    },
+    {
+      "candidate_eval_ratio_vs_dense": 0.07848465442657471,
+      "candidate_evals": 658377,
+      "fallback_tubes": 0,
+      "max_abs": 0.0,
+      "max_candidates_per_pixel": 75,
+      "missing_active_candidates": 0,
+      "pass": true,
+      "psnr": 120.0,
+      "seed": 31,
+      "tile_pairs": 10097
+    },
+    {
+      "candidate_eval_ratio_vs_dense": 0.07749581336975098,
+      "candidate_evals": 650082,
+      "fallback_tubes": 0,
+      "max_abs": 0.0,
+      "max_candidates_per_pixel": 83,
+      "missing_active_candidates": 0,
+      "pass": true,
+      "psnr": 120.0,
+      "seed": 47,
+      "tile_pairs": 9985
+    }
+  ],
+  "summary": {
+    "candidate_eval_ratio_vs_dense": {
+      "max": 0.08117759227752686,
+      "median": 0.07799023389816284,
+      "min": 0.07428514957427979
+    },
+    "fallback_tubes": {
+      "max": 0.0,
+      "median": 0.0,
+      "min": 0.0
+    },
+    "max_candidates_per_pixel": {
+      "max": 83.0,
+      "median": 80.0,
+      "min": 75.0
+    },
+    "missing_active_candidates": {
+      "max": 0.0,
+      "median": 0.0,
+      "min": 0.0
+    },
+    "pass_count": 4,
+    "psnr": {
+      "max": 120.0,
+      "median": 120.0,
+      "min": 120.0
+    },
+    "tile_pairs": {
+      "max": 10362.0,
+      "median": 10041.0,
+      "min": 9646.0
+    }
+  }
+}

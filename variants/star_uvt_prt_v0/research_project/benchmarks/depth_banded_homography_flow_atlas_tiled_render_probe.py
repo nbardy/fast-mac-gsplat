@@ -138,11 +138,29 @@ def _render_atlas_tiled_cpu(
     max_alpha: float,
 ) -> tuple[Tensor, dict[str, int]]:
     frames = int(times.numel())
+    tube_count = int(atlas_centers.shape[1])
     bands = int(homographies.shape[1])
     tiles_x = math.ceil(width / tile_size)
     tiles_y = math.ceil(height / tile_size)
     tiles_t = math.ceil(frames / tile_t)
     inv_h = torch.linalg.inv(homographies)
+    pixel_y = torch.arange(height, dtype=torch.float32).repeat_interleave(width) + 0.5
+    pixel_x = torch.arange(width, dtype=torch.float32).repeat(height) + 0.5
+    dense_active_by_frame: list[list[set[int]]] = []
+    for frame in range(frames):
+        du = pixel_x.view(-1, 1) - warped_centers[frame, :, 0].view(1, -1)
+        dv = pixel_y.view(-1, 1) - warped_centers[frame, :, 1].view(1, -1)
+        spatial = (
+            lambda_uv[:, 0].view(1, -1) * du.square()
+            + 2.0 * lambda_uv[:, 1].view(1, -1) * du * dv
+            + lambda_uv[:, 2].view(1, -1) * dv.square()
+        )
+        temporal = batch.lambda_t.view(1, -1) * (times[frame] - batch.t0).view(1, -1).square()
+        alpha = (batch.opacity.view(1, -1) * torch.exp(-0.5 * (spatial + temporal))).clamp(max=max_alpha)
+        active = alpha >= alpha_threshold
+        dense_active_by_frame.append(
+            [set(torch.nonzero(active[pixel], as_tuple=False).flatten().tolist()) for pixel in range(width * height)]
+        )
     image = torch.zeros((frames, height, width, 3), dtype=torch.float32)
     total_candidate_evals = 0
     max_candidates_per_pixel = 0
@@ -182,18 +200,9 @@ def _render_atlas_tiled_cpu(
                     trans = trans * (1.0 - alpha)
                 image[frame, y, x] = accum
 
-                active_dense = []
-                for tube in range(int(warped_centers.shape[1])):
-                    lambda_uu, lambda_uv_cross, lambda_vv = lambda_uv[tube]
-                    du = torch.tensor(px, dtype=torch.float32) - warped_centers[frame, tube, 0]
-                    dv = torch.tensor(py, dtype=torch.float32) - warped_centers[frame, tube, 1]
-                    spatial = lambda_uu * du.square() + 2.0 * lambda_uv_cross * du * dv + lambda_vv * dv.square()
-                    temporal = batch.lambda_t[tube] * (t - batch.t0[tube]).square()
-                    alpha = (batch.opacity[tube] * torch.exp(-0.5 * (spatial + temporal))).clamp(max=max_alpha)
-                    if float(alpha) >= alpha_threshold and tube not in candidates:
-                        active_dense.append(tube)
-                missing_active_candidates += len(active_dense)
-    dense_evals = frames * height * width * int(atlas_centers.shape[1])
+                active_dense = dense_active_by_frame[frame][y * width + x]
+                missing_active_candidates += len(active_dense.difference(candidates))
+    dense_evals = frames * height * width * tube_count
     return image, {
         "candidate_evals": int(total_candidate_evals),
         "dense_candidate_evals": int(dense_evals),
