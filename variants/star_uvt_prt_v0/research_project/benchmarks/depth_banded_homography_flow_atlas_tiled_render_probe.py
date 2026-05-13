@@ -328,7 +328,7 @@ def main() -> None:
     parser.add_argument("--tile-t", type=int, default=4)
     parser.add_argument("--alpha-threshold", type=float, default=1.0 / 255.0)
     parser.add_argument("--fallback-max-px", type=float, default=1.0)
-    parser.add_argument("--support-scale", type=float, default=1.5)
+    parser.add_argument("--support-scale", type=float, default=1.4)
     parser.add_argument("--max-alpha", type=float, default=0.99)
     parser.add_argument("--psnr-gate", type=float, default=80.0)
     parser.add_argument("--out-json", type=Path)
