@@ -94,6 +94,7 @@ _PRT_BACKWARD_PROFILE_TIMING_KEYS = (
     "clear_grads_ms",
     "backward_kernel_ms",
     "compute_only_kernel_ms",
+    "replay_only_kernel_ms",
     "total_ms",
 )
 

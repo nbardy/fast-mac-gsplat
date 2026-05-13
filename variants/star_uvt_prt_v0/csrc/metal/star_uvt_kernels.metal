@@ -2432,6 +2432,121 @@ kernel void projective_rational_tile_pixel_compute_only_backward(
   debug_sink[gid] = debug_value;
 }
 
+kernel void projective_rational_tile_pixel_replay_only_backward(
+    const device float* h_coeff [[buffer(0)]],
+    const device float* lambda_uv [[buffer(1)]],
+    const device float* lambda_t [[buffer(2)]],
+    const device float* center_t [[buffer(3)]],
+    const device float* opacity [[buffer(4)]],
+    const device float* color [[buffer(5)]],
+    const device float* grad_image [[buffer(6)]],
+    constant MetaI32& mi [[buffer(7)]],
+    constant MetaF32& mf [[buffer(8)]],
+    const device atomic_uint* tile_counts [[buffer(9)]],
+    const device uint* tile_tube_ids [[buffer(10)]],
+    const device float* tile_depths [[buffer(11)]],
+    device atomic_uint* tile_unstable [[buffer(12)]],
+    device float* debug_sink [[buffer(13)]],
+    uint gid [[thread_position_in_grid]]) {
+  uint pixels_per_tile = uint(STAR_TILE_X * STAR_TILE_Y * STAR_TILE_T);
+  uint tile_id = gid / pixels_per_tile;
+  uint local_pixel = gid - tile_id * pixels_per_tile;
+  if (tile_id >= uint(mi.tile_count)) return;
+  uint h_terms = uint(mi.reserved0);
+
+  uint raw_count = atomic_load_explicit(tile_counts + tile_id, memory_order_relaxed);
+  uint count = min(raw_count, STAR_TILE_CAPACITY);
+  if (count == 0u) {
+    debug_sink[gid] = 0.0f;
+    return;
+  }
+
+  uint tx, ty, tz;
+  decode_tile(tile_id, mi, tx, ty, tz);
+  uint local_xy = local_pixel % uint(STAR_TILE_X * STAR_TILE_Y);
+  uint lt = local_pixel / uint(STAR_TILE_X * STAR_TILE_Y);
+  uint lx = local_xy % uint(STAR_TILE_X);
+  uint ly = local_xy / uint(STAR_TILE_X);
+  uint f = tz * STAR_TILE_T + lt;
+  uint x = tx * STAR_TILE_X + lx;
+  uint y = ty * STAR_TILE_Y + ly;
+  if (f >= uint(mi.frames) || x >= uint(mi.width) || y >= uint(mi.height)) {
+    debug_sink[gid] = 0.0f;
+    return;
+  }
+
+  uint local_ids[STAR_TILE_CAPACITY];
+  float local_depths[STAR_TILE_CAPACITY];
+  for (uint i = 0u; i < count; ++i) {
+    uint idx = tile_id * STAR_TILE_CAPACITY + i;
+    local_ids[i] = tile_tube_ids[idx];
+    local_depths[i] = tile_depths[idx];
+  }
+  sort_by_depth_thread(local_ids, local_depths, count);
+  if (count > 1u) {
+    atomic_store_explicit(tile_unstable + tile_id, 1u, memory_order_relaxed);
+  }
+
+  float t = frame_time(f, mi);
+  float2 pixel = float2(float(x) + 0.5f, float(y) + 0.5f);
+  uint ordered_ids[STAR_TILE_CAPACITY];
+
+  uint ordered_count = 0u;
+  if (uint(STAR_TILE_T) == 1u) {
+    ordered_count = count;
+    for (uint i = 0u; i < count; ++i) {
+      ordered_ids[i] = local_ids[i];
+    }
+  } else {
+    float last_depth = -INFINITY;
+    uint last_id = 0xFFFFFFFFu;
+    for (uint rank = 0u; rank < count; ++rank) {
+      float selected_depth;
+      uint tube_id = select_prt_sample_order_id_thread(
+          local_ids,
+          count,
+          h_coeff,
+          center_t,
+          h_terms,
+          t,
+          last_depth,
+          last_id,
+          mf,
+          selected_depth);
+      if (tube_id == 0xFFFFFFFFu) break;
+      ordered_ids[ordered_count] = tube_id;
+      ordered_count += 1u;
+      last_depth = selected_depth;
+      last_id = tube_id;
+    }
+  }
+
+  float debug_value = 0.0f;
+  float T = 1.0f;
+  for (uint i = 0u; i < ordered_count; ++i) {
+    uint tube_id = ordered_ids[i];
+    float tau = t - center_t[tube_id];
+    float3 h = eval_prt_h(h_coeff, tube_id, h_terms, tau);
+    float depth = max(h.z, mf.eps);
+    float2 center = h.xy / depth;
+    float2 d = pixel - center;
+    uint qbase = tube_id * 3u;
+    float spatial = lambda_uv[qbase + 0u] * d.x * d.x +
+                    2.0f * lambda_uv[qbase + 1u] * d.x * d.y +
+                    lambda_uv[qbase + 2u] * d.y * d.y;
+    float temporal = lambda_t[tube_id] * tau * tau;
+    float qv = spatial + temporal;
+    if (!isfinite(qv)) continue;
+    float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+    float alpha = min(mf.max_alpha, alpha_raw);
+    if (!(alpha >= mf.alpha_threshold)) continue;
+    debug_value += T * alpha + center.x * 1.0e-6f + center.y * 1.0e-6f;
+    T *= (1.0f - alpha);
+    if (T <= mf.transmittance_threshold) break;
+  }
+  debug_sink[gid] = debug_value + T * 1.0e-6f;
+}
+
 kernel void simple_backward_samples(
     const device float* ma [[buffer(0)]],
     const device float* q_uvt [[buffer(1)]],
