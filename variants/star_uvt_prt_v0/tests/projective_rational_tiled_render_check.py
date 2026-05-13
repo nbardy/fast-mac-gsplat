@@ -22,7 +22,7 @@ from torch_gsplat_bridge_star_uvt_prt import render_projective_rational_tubes_ti
 from torch_gsplat_bridge_star_uvt_prt import UVTRenderConfig  # noqa: E402
 
 
-def _scene() -> tuple:
+def _scene(*, tile_t: int) -> tuple:
     frames = 4
     times = centered_frame_times(frames)
     batch = _batch()
@@ -33,16 +33,17 @@ def _scene() -> tuple:
         frame_times=times,
     )
     projected = compile_projective_rational_tubes(batch, camera_path)
-    config = UVTRenderConfig(height=24, width=32, frames=frames, tile_t=2, tile_capacity=128)
+    config = UVTRenderConfig(height=24, width=32, frames=frames, tile_t=tile_t, tile_capacity=128)
     return projected, times, config
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--tile-t", type=int, default=2)
     parser.add_argument("--out-json", type=Path)
     args = parser.parse_args()
 
-    projected, times, config = _scene()
+    projected, times, config = _scene(tile_t=args.tile_t)
     dense = dense_render_projective_rational_tubes(
         projected,
         height=config.height,

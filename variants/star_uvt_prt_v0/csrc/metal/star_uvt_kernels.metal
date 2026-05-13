@@ -1533,39 +1533,59 @@ kernel void render_projective_rational_tiles(
   float2 pixel = float2(float(x) + 0.5f, float(y) + 0.5f);
   float3 accum = float3(0.0f);
   float T = 1.0f;
-  float last_depth = -INFINITY;
-  uint last_id = 0xFFFFFFFFu;
-  for (uint rank = 0u; rank < count; ++rank) {
-    float selected_depth;
-    uint tube_id = select_prt_sample_order_id(
-        local_ids,
-        count,
-        h_coeff,
-        center_t,
-        h_terms,
-        t,
-        last_depth,
-        last_id,
-        mf,
-        selected_depth);
-    if (tube_id == 0xFFFFFFFFu) break;
-    composite_prt_tube(
-        tube_id,
-        pixel,
-        t,
-        h_coeff,
-        lambda_uv,
-        lambda_t,
-        center_t,
-        opacity,
-        color,
-        h_terms,
-        mf,
-        accum,
-        T);
-    last_depth = selected_depth;
-    last_id = tube_id;
-    if (T <= mf.transmittance_threshold) break;
+  if (uint(STAR_TILE_T) == 1u) {
+    for (uint i = 0u; i < count; ++i) {
+      composite_prt_tube(
+          local_ids[i],
+          pixel,
+          t,
+          h_coeff,
+          lambda_uv,
+          lambda_t,
+          center_t,
+          opacity,
+          color,
+          h_terms,
+          mf,
+          accum,
+          T);
+      if (T <= mf.transmittance_threshold) break;
+    }
+  } else {
+    float last_depth = -INFINITY;
+    uint last_id = 0xFFFFFFFFu;
+    for (uint rank = 0u; rank < count; ++rank) {
+      float selected_depth;
+      uint tube_id = select_prt_sample_order_id(
+          local_ids,
+          count,
+          h_coeff,
+          center_t,
+          h_terms,
+          t,
+          last_depth,
+          last_id,
+          mf,
+          selected_depth);
+      if (tube_id == 0xFFFFFFFFu) break;
+      composite_prt_tube(
+          tube_id,
+          pixel,
+          t,
+          h_coeff,
+          lambda_uv,
+          lambda_t,
+          center_t,
+          opacity,
+          color,
+          h_terms,
+          mf,
+          accum,
+          T);
+      last_depth = selected_depth;
+      last_id = tube_id;
+      if (T <= mf.transmittance_threshold) break;
+    }
   }
 
   uint pix = (f * uint(mi.height) * uint(mi.width) + y * uint(mi.width) + x) * 3u;
