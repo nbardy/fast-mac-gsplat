@@ -1,0 +1,50 @@
+{
+  "cached_render": {
+    "max_ms": 11.364875012077391,
+    "median_ms": 10.499166994122788,
+    "min_ms": 9.400832990650088,
+    "samples_ms": [
+      9.400832990650088,
+      10.910916986176744,
+      10.487332998309284,
+      10.499166994122788,
+      11.364875012077391
+    ]
+  },
+  "cached_speedup_vs_scan": 1.0667989173879915,
+  "cached_vs_scan": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "config": {
+    "depth_bands": 4,
+    "frames": 16,
+    "iters": 5,
+    "seed": 17,
+    "support_scale": 1.4,
+    "target_size": 64,
+    "tile_capacity": 64,
+    "tile_size": 4,
+    "tile_t": 4,
+    "tubes": 256,
+    "warmup": 2
+  },
+  "fallback_tubes": 0,
+  "name": "depth_banded_homography_flow_atlas_metal_render_timing_probe",
+  "note": "F1c timing probe for inverse-homography atlas-residual render kernels. The cached variant stores per-pixel candidate ids/depths before compositing; it is still a correctness-preserving intermediate, not the final optimized renderer.",
+  "pass": true,
+  "scan_render": {
+    "max_ms": 11.918375006644055,
+    "median_ms": 11.200499982805923,
+    "min_ms": 9.753834019647911,
+    "samples_ms": [
+      9.765249997144565,
+      9.753834019647911,
+      11.918375006644055,
+      11.200499982805923,
+      11.86974998563528
+    ]
+  }
+}
