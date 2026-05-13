@@ -90,6 +90,7 @@ Last updated: 2026-05-13
 - [x] Gate D3y: train-used-gradient fused-MSE kernel that skips unused gradient families.
 - [x] Gate D3z: 240-step D3y same-wall boundary row rejects spending the whole train-wall margin.
 - [x] Gate D4a: 205/210/220-step D3y boundary sweep rejects replacing the accepted 200-step row.
+- [x] Gate D4b: three-seed real multicam same-step rerun confirms the PRT-vs-direct-splat row.
 - [x] Gate F0: depth-banded homography-flow gauge residual-tube projection/render falsifier.
 - [x] Gate F0b: depth-banded residual robustness rows for object velocity and harder camera motion.
 - [x] Gate F0c: quantify PRT-fallback outliers for the hard-camera/object-motion residual row.
@@ -2574,8 +2575,8 @@ Result:
 D3y accepted row: PRT 200 steps 5.622 s vs splat 200 steps 6.851 s; eval64 PSNR 16.0183 / heldout 13.1600 dB; render 7.22 / 8.40 ms.
 
 D4a 220-step row: PRT 6.210 s vs splat 5.888 s; delta +0.321 s. Eval64 PSNR 16.0298 / heldout 13.2719 dB; render 7.88 / 13.04 ms; max tile 110; overflow 0.
-D4b 210-step row: PRT 5.945 s vs splat 5.834 s; delta +0.111 s. Eval64 PSNR 15.9993 / heldout 13.2027 dB; render 11.25 / 14.15 ms; max tile 118; overflow 0.
-D4c 205-step row: PRT 5.669 s vs splat 5.842 s; delta -0.173 s. Eval64 PSNR 15.9945 / heldout 13.0611 dB; render 7.83 / 10.53 ms; max tile 115; overflow 0.
+D4a 210-step subrow: PRT 5.945 s vs splat 5.834 s; delta +0.111 s. Eval64 PSNR 15.9993 / heldout 13.2027 dB; render 11.25 / 14.15 ms; max tile 118; overflow 0.
+D4a 205-step subrow: PRT 5.669 s vs splat 5.842 s; delta -0.173 s. Eval64 PSNR 15.9945 / heldout 13.0611 dB; render 7.83 / 10.53 ms; max tile 115; overflow 0.
 ```
 
 Read: do not replace D3y with a step-spend row. Under the faster current
@@ -2584,6 +2585,40 @@ quality than D3y on both balanced train PSNR and heldout PSNR. 210 and 220 keep
 the PSNR/render win over splats, but both miss the paired train wall. The useful
 next path is not blind extra steps; it is either a better optimizer/support
 schedule or the next representation/rasterizer branch.
+
+Gate D4b reruns the clean real-multicam same-step comparison as a robustness
+check instead of relying on a single old D3y artifact. This is PRT world tubes
+against `FreeDynamic3DGS` direct per-frame splats on the DeepView good-set row:
+train cameras `camera_0006,camera_0014`, heldout camera `camera_0005`, 256px,
+8 frames, 2048 PRT tubes, 2048 direct splats, and exactly 200 train steps each.
+PRT uses the D3y fused train-used MSE path, explicit `4x4x1:512` tiles, train
+support `72/255`, eval support `64/255`, cached compiled eval, and the fast-mac
+direct-splat renderer with dataset-lens projection.
+
+Command:
+
+```text
+PYTHONPATH=dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0 dynaworld/.venv/bin/python dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 200 --prt-steps 200 --splat-steps 200 --seed <17|31|47> --prt-tubes 2048 --splat-count 2048 --prt-train-mode fused_mse_train_used --prt-loss-mode sequence --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.2823529411764706 --prt-eval-support-alpha-threshold 0.25098039215686274 --prt-extra-eval-support-alpha-thresholds 0.2823529411764706,0.2196078431372549,0.18823529411764706 --prt-eval-cache-compiled --splat-renderer fast_mac --splat-camera-projection dataset_lens --render-warmups 1 --render-repeats 3 --out-json dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_samesteps_prt200_splat200_seed<seed>_20260513.json
+```
+
+Result:
+
+```text
+seed  pass  PRT train/heldout PSNR  splat train/heldout PSNR  PRT render train/heldout  splat render train/heldout  PRT/splat train wall  max tile  overflow
+17    true  16.0044 / 12.9783       15.6405 / 12.4093          8.57 / 13.09 ms          65.23 / 58.47 ms            5.440 / 6.112 s       100       0
+31    true  16.1444 / 13.1077       15.6132 / 12.4148          10.14 / 17.73 ms         63.22 / 57.14 ms            5.150 / 6.342 s       113       0
+47    true  15.8028 / 13.2074       15.5945 / 12.4251          8.85 / 8.74 ms           57.36 / 57.48 ms            5.253 / 5.256 s       112       0
+```
+
+Read: the real same-step D3y comparison is not a one-seed accident. Across all
+three rerun seeds, PRT beats direct splats on train PSNR, heldout PSNR, and
+render speed with zero tile overflow. Heldout PSNR deltas are +0.57/+0.69/+0.78
+dB, train render speedups are 6.2x-7.6x, and heldout render speedups are
+3.2x-6.6x. Training wall is also under or effectively tied with the paired
+direct-splat run in these reruns. This supports the existing PRT world-tube
+same-step baseline; it still does not prove the newer atlas-residual renderer on
+real heldout data, because atlas currently has synthetic forward/timing evidence
+and no overfit-quality training harness.
 
 Gate F0 implements the first projection/render-only falsifier for the separate
 depth-banded homography-flow gauge residual-tube idea. The script keeps the
@@ -3479,8 +3514,8 @@ should be measured before splitting a camera window.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
-8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p and current-code D3v show train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3t shows 195 steps is still under wall but not a quality improvement; D3q/D3r show exact 200-vs-200 steps was a quality/render win but a train-wall near tie before D3y; D3z shows 240 D3y PRT steps overspend the wall margin for little balanced-quality gain; D4a shows 205 is the only under-wall point in the 205/210/220 sweep and does not beat D3y quality.
+8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p and current-code D3v show train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3t shows 195 steps is still under wall but not a quality improvement; D3q/D3r show exact 200-vs-200 steps was a quality/render win but a train-wall near tie before D3y; D3z shows 240 D3y PRT steps overspend the wall margin for little balanced-quality gain; D4a shows 205 is the only under-wall point in the 205/210/220 sweep and does not beat D3y quality; D4b reruns the exact 200-step row on three seeds and confirms the PRT-vs-direct-splat train/heldout PSNR plus render-speed win is robust on that real multicam slice.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, D3x rejects naive replay caching, and D3y shows write-set pruning can turn exact 200-vs-200 into a train-wall win.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
-11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, and D3z/D4a are boundary results showing that more steps must still fit the train-wall budget and improve quality before replacing D3y.
+11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, D4b confirms that exact-step row across three real multicam seeds, and D3z/D4a are boundary results showing that more steps must still fit the train-wall budget and improve quality before replacing D3y.
 12. Continue depth-banded homography-flow gauge residual tubes after F0-F1q: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion originally needed a small PRT fallback/window-split tail under screen-additive residuals. F0h is now the better representation target: inverse-homography atlas residuals pass all four hard-camera/object-motion seeds with no fallback tubes, high PSNR, and the same 4x4 culling advantage. F0i/F0j add the CPU atlas-tiled render reference; F0k dials conservative atlas support to 1.4x, which covers dense exactly across four hard-camera/object-motion seeds at 64px/16f/128t while preserving an about 7% candidate-eval ratio. F1a moves the atlas tile assignment onto Metal and matches CPU per-tile tube-id sets exactly across the four seeds at tile_capacity 32. F1b renders through those Metal bins and matches dense/CPU tiled images to sub-micro max error across the same four seeds. F1c caches and sorts each pixel's candidate list once, keeps exact parity with F1b, and improves median render timing by 1.35x-2.17x on the same four seeds. F1d shows the cached path also beats dense direct per-frame world-tube render and PRT direct Metal on the same scene, while PRT tiled at the cached-compatible cap32 is invalid from overflow. F1e reruns PRT tiled in a separate process at a valid `4x4x4:128` capacity and cached atlas remains faster by 1.14x-1.93x. F1f rejects scaling the current cached atlas cap32 path to 256 tubes: all four seeds overflow atlas tiles, while valid PRT tiled at `4x4x4:256` passes. F1g raises the cached local candidate store to 256 and restores 256-tube parity at atlas cap64, but loses to valid PRT tiled by 12%-19%. F1h confirms cap64 cached still beats the scan renderer at 256 tubes by 1.07x-1.54x with exact cached-vs-scan parity, so the remaining speed gap is specifically against valid PRT tiled. F1i rejects the cached-select ordering variant: it is exact, but only 0.65x-0.69x the speed of insertion-cached on the same four seeds. F1j finds a support-1.25 speed-mode row that beats valid PRT tiled by 1.08x-1.23x at 83.0-85.8 dB direct-dense PSNR. F1k shows the same speed/fidelity split at 128px: support 1.25 beats valid PRT tiled by 1.04x-1.34x at 81.3-83.2 dB, while support 1.4 reaches 91.6-92.7 dB but loses or roughly ties speed. F1l confirms existing C5/C5c overfit artifacts are PRT screen-time training evidence, not atlas-support-policy evidence, because the atlas-residual renderer has no backward/training harness. F1m rejects scaling support/band retuning to 512 tubes under the fixed candidate-store budget: multi-band rows overflow, while the no-overflow 1-band/support1.25 row is fast but misses the 80 dB quality gate at 77.99 dB. F1n adds an explicit candidate512 atlas-cache budget and recovers a robust 512-tube speed-mode row: 4 bands, cap128, support1.25 passes all four seeds at 82.4-85.1 dB and beats valid PRT tiled by 1.05x-1.24x. F1o rejects promoting that row at 128px: support1.25 keeps atlas quality but loses speed, and support1.20 drops below the 80 dB quality gate while still only tying speed. F1p rejects temporal tile-depth shrink as the missing 128px speed strategy: the fast `tile_t=1/support1.25` row fails quality, while the quality-restored `support1.4` row is much slower. F1q records the candidate512 cost: 4096 bytes of local per-pixel candidate/depth arrays and 2.02-8.125 MiB atlas tile-bin estimates across F1n/F1o after including depth bands. Support 1.25 is still not exact dense coverage and should not replace the fidelity policy without actual atlas overfit/training-quality checks. The current implementation is still not promoted into training/backward or large-scene playback.
