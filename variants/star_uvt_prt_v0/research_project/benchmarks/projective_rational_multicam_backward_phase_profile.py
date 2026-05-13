@@ -65,6 +65,14 @@ def _summarize_ms(rows: list[dict[str, float]]) -> dict[str, Any]:
     return summary
 
 
+def _percentile(sorted_values: torch.Tensor, q: float) -> float:
+    if sorted_values.numel() == 0:
+        return 0.0
+    last_index = sorted_values.numel() - 1
+    index = min(last_index, max(0, int(round(q * float(last_index)))))
+    return float(sorted_values[index].item())
+
+
 def _make_grad_image(image: torch.Tensor, target: torch.Tensor, frame: int, loss_mode: str) -> torch.Tensor:
     if loss_mode == "sampled_frame":
         grad = torch.zeros_like(image)
@@ -117,6 +125,12 @@ def _profile_backward(
     tile_counts = last_result.tile_counts.detach().cpu()
     tile_overflow = last_result.tile_overflow.detach().cpu()
     tile_unstable = last_result.tile_unstable.detach().cpu()
+    clipped_counts = torch.clamp(tile_counts.to(torch.int64), max=config.tile_capacity)
+    active_counts = clipped_counts[clipped_counts > 0]
+    sorted_active_counts = torch.sort(active_counts).values
+    tile_pixel_count = int(config.tile_x * config.tile_y * config.tile_t)
+    total_tile_tube_pairs = int(clipped_counts.sum().item())
+    tile_pixel_tube_visits = int(total_tile_tube_pairs * tile_pixel_count)
     grad_tensors = (
         last_result.grad_h_coeff,
         last_result.grad_lambda_uv,
@@ -134,6 +148,18 @@ def _profile_backward(
         "timing_summary_ms": _summarize_ms(timing_rows),
         "max_tile_count": int(tile_counts.max().item()),
         "mean_tile_count": float(tile_counts.float().mean().item()),
+        "active_tile_count": int(active_counts.numel()),
+        "total_tile_count": int(tile_counts.numel()),
+        "mean_active_tile_count": 0.0 if active_counts.numel() == 0 else float(active_counts.to(torch.float32).mean().item()),
+        "tile_count_percentiles": {
+            "p50": _percentile(sorted_active_counts, 0.50),
+            "p90": _percentile(sorted_active_counts, 0.90),
+            "p95": _percentile(sorted_active_counts, 0.95),
+            "p99": _percentile(sorted_active_counts, 0.99),
+        },
+        "tile_pixel_count": tile_pixel_count,
+        "total_tile_tube_pairs": total_tile_tube_pairs,
+        "tile_pixel_tube_visits": tile_pixel_tube_visits,
         "overflow_tile_count": int((tile_overflow > 0).sum().item()),
         "unstable_tile_count": int((tile_unstable > 0).sum().item()),
         "grad_max_abs": grad_max_abs,

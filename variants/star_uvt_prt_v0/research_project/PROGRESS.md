@@ -59,6 +59,7 @@ Last updated: 2026-05-13
 - [x] Gate D2t: support-aware backward phase profile for the 1024 train-speed policy.
 - [x] Gate D2u: reject existing PRT `tile_pair_atomic` as the lower-contention shortcut.
 - [x] Gate D2v: profile PRT backward compute-only vs atomic writes.
+- [x] Gate D2w: selected 1024 PRT backward replay workload shape.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1445,6 +1446,42 @@ and local gradient arithmetic. The next kernel idea should focus on reusing
 per-pixel alpha/order state or reducing repeated `eval_prt_h` / `exp` work, not
 just changing the final accumulation destination.
 
+Gate D2w adds tile-occupancy workload counters to the backward phase profiler.
+This quantifies how much replay work the selected 1024 train-speed policy asks
+the backward kernel to do.
+
+Validation:
+
+```text
+python3 -m py_compile research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py
+python3 setup.py build_ext --inplace
+python3 research_project/benchmarks/projective_rational_multicam_backward_phase_profile.py --target-size 64 --max-frames 4 --steps 20 --prt-tubes 1024 --prt-tile-policy train_speed --profile-warmups 1 --profile-repeats 5 --out-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_64_4f_1024t_20step_train_speed_support32_workload.json
+```
+
+Result:
+
+```text
+pass true, policy train_speed_support32_1024, support 32/255, tile 4x4x1:512, max tile 458, overflow 0.
+active tiles: 1024 / 1024
+mean active tile count: 140.970
+tile-count percentiles: p50 111, p90 286, p95 335, p99 422
+tile pixel count: 16
+total tile-tube pairs: 144353
+tile-pixel-tube visits: 2309648
+median backward kernel: 18.213 ms
+median compute-only kernel: 17.719 ms
+visits per compute-only ms: 130348
+```
+
+Read: the selected 1024 backward row is broad replay work, not a tiny hotspot.
+Every tile is active, the p99 active tile holds 422 tubes, and even this
+64x64x4 profile replays about 2.31M tile-pixel-tube visits. This reinforces the
+D2v result: accumulation rewrites alone are unlikely to matter. The next speed
+attempt should reduce replay itself, either by caching per-pixel order/alpha
+state from forward for backward, fusing the training forward/backward pass, or
+making the support policy/density policy reduce visits without corrupting the
+render alpha semantics.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1467,6 +1504,6 @@ should be measured before splitting a camera window.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
-7. Design a PRT backward kernel that reduces per-pixel replay/local math; D2v shows atomic writes are only about 4% of selected-policy backward time.
+7. Design a PRT backward kernel that reduces per-pixel replay/local math; D2v shows atomic writes are only about 4% of selected-policy backward time, and D2w shows the row replays about 2.31M tile-pixel-tube visits.
 8. Test cached per-pixel alpha/order state or a fused forward/backward training-step path before spending more effort on accumulation-only rewrites.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
