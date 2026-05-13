@@ -2328,23 +2328,19 @@ kernel void projective_rational_tile_pixel_fused_mse_backward(
 
   float t = frame_time(f, mi);
   float2 pixel = float2(float(x) + 0.5f, float(y) + 0.5f);
-  uint sorted_ids[STAR_TILE_CAPACITY];
-  for (uint i = 0u; i < count; ++i) {
-    sorted_ids[i] = local_ids[i];
-  }
   uint ordered_ids[STAR_TILE_CAPACITY];
   float t_before[STAR_TILE_CAPACITY];
   float alpha_values[STAR_TILE_CAPACITY];
-  bool processed[STAR_TILE_CAPACITY];
   bool differentiable_alpha[STAR_TILE_CAPACITY];
 
   uint ordered_count = 0u;
   if (uint(STAR_TILE_T) == 1u) {
     ordered_count = count;
-    for (uint i = 0u; i < count; ++i) {
-      ordered_ids[i] = sorted_ids[i];
-    }
   } else {
+    uint sorted_ids[STAR_TILE_CAPACITY];
+    for (uint i = 0u; i < count; ++i) {
+      sorted_ids[i] = local_ids[i];
+    }
     float last_depth = -INFINITY;
     uint last_id = 0xFFFFFFFFu;
     for (uint rank = 0u; rank < count; ++rank) {
@@ -2368,17 +2364,14 @@ kernel void projective_rational_tile_pixel_fused_mse_backward(
     }
   }
 
-  for (uint i = 0u; i < ordered_count; ++i) {
-    t_before[i] = 0.0f;
-    alpha_values[i] = 0.0f;
-    processed[i] = false;
-    differentiable_alpha[i] = false;
-  }
-
   float3 accum = float3(0.0f);
   float T = 1.0f;
+  uint replay_count = 0u;
   for (uint i = 0u; i < ordered_count; ++i) {
-    uint tube_id = ordered_ids[i];
+    alpha_values[i] = 0.0f;
+    differentiable_alpha[i] = false;
+    replay_count = i + 1u;
+    uint tube_id = uint(STAR_TILE_T) == 1u ? local_ids[i] : ordered_ids[i];
     float tau = t - center_t[tube_id];
     float3 h = eval_prt_h(h_coeff, tube_id, h_terms, tau);
     float depth = max(h.z, mf.eps);
@@ -2396,7 +2389,6 @@ kernel void projective_rational_tile_pixel_fused_mse_backward(
     if (!(alpha >= mf.alpha_threshold)) continue;
     t_before[i] = T;
     alpha_values[i] = alpha;
-    processed[i] = true;
     differentiable_alpha[i] = alpha_raw < mf.max_alpha;
     accum += T * alpha * load3(color, tube_id);
     T *= (1.0f - alpha);
@@ -2412,11 +2404,11 @@ kernel void projective_rational_tile_pixel_fused_mse_backward(
   float3 grad_rgb = 2.0f * diff * inv_numel;
 
   float dT_next = dot(grad_rgb, float3(mf.bg_r, mf.bg_g, mf.bg_b));
-  for (int si = int(ordered_count) - 1; si >= 0; --si) {
+  for (int si = int(replay_count) - 1; si >= 0; --si) {
     uint i = uint(si);
-    if (!processed[i]) continue;
-    uint tube_id = ordered_ids[i];
     float alpha = alpha_values[i];
+    if (!(alpha > 0.0f)) continue;
+    uint tube_id = uint(STAR_TILE_T) == 1u ? local_ids[i] : ordered_ids[i];
     float t_i = t_before[i];
     float3 c = load3(color, tube_id);
     float d_alpha = dot(grad_rgb, t_i * c) - dT_next * t_i;

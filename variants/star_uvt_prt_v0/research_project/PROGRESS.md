@@ -76,6 +76,7 @@ Last updated: 2026-05-13
 - [x] Gate D3k: `tile_t=1` forward presorted-order shortcut with parity and selected timing rows.
 - [x] Gate D3l: 2048-tube 256px train-wall profile after the forward shortcut.
 - [x] Gate D3m: fused-MSE `tile_t=1` threadgroup presort train-kernel shortcut.
+- [x] Gate D3n: fused-MSE replay bookkeeping cleanup after threadgroup presort.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2088,6 +2089,48 @@ For comparison reporting, use the D3m bracket: 135 PRT steps is clearly under
 the splat wall and still wins PSNR/render speed; 170 PRT steps is slightly over
 the splat wall and widens the PSNR margin.
 
+Gate D3n cleans up fused-MSE replay bookkeeping after D3m. The `tile_t=1` fused
+kernel was already using a threadgroup-sorted tile list, but it still copied
+that sorted list into per-thread replay arrays and pre-cleared per-candidate
+bookkeeping arrays. D3n replays directly from the shared sorted IDs for
+`tile_t=1` and initializes only visited candidates.
+
+Validation:
+
+```text
+python3 setup.py build_ext --inplace
+python3 research_project/benchmarks/projective_rational_tile_pixel_fused_mse_backward_check.py --out-json research_project/benchmarks/results/projective_rational_tile_pixel_fused_mse_backward_check_replay_bookkeeping_cleanup.json
+python3 -m py_compile research_project/benchmarks/projective_rational_fused_mse_timing_probe.py research_project/benchmarks/projective_rational_multicam_train_breakdown.py research_project/benchmarks/projective_rational_multicam_splat_compare.py
+python3 research_project/benchmarks/projective_rational_fused_mse_timing_probe.py --tube-counts 2048 --frames 8 --width 256 --height 256 --tile-config 4x4x1:512 --support-alpha-threshold 0.25098039215686274 --warmups 1 --repeats 5 --out-json research_project/benchmarks/results/projective_rational_fused_mse_timing_probe_2048_256_8f_support64_tile4x4x1_replay_bookkeeping_cleanup.json
+python3 research_project/benchmarks/projective_rational_multicam_train_breakdown.py --target-size 256 --max-frames 8 --steps 20 --prt-tubes 2048 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 1 --out-json research_project/benchmarks/results/projective_rational_multicam_train_breakdown_256_8f_2048t_20step_support64_fused_mse_replay_bookkeeping_cleanup.json
+STAR_UVT_TILE_T=1 python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 200 --prt-steps 135 --splat-steps 200 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-eval-support-alpha-threshold 0.2196078431372549 --prt-extra-eval-support-alpha-thresholds 0.25098039215686274,0.18823529411764706 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_samewall_prt135_splat200_train64_eval56_extra64_48_replay_bookkeeping_cleanup_fused_mse.json
+```
+
+Result:
+
+```text
+Fused MSE parity: pass, loss abs error 2.98e-08, max grad abs error 1.86e-09, overflow 0.
+Projected fused MSE after D3m: 13.95 ms fused, 23.81 ms separate, 1.71x speedup over separate.
+Projected fused MSE after D3n: 12.21 ms fused, 24.77 ms separate, 2.03x speedup over separate.
+
+Real 20-step breakdown after D3m: median step 53.06 ms, fused MSE 44.98 ms, train loop 1.374 s.
+Real 20-step breakdown after D3n: median step 53.40 ms, fused MSE 41.08 ms, train loop 1.689 s.
+
+135-step under-wall row after D3n: PRT wall 5.670 s vs splat wall 7.350 s.
+135-step eval56 PRT: PSNR 16.0302 / heldout 13.2225 dB, render 8.57 / 9.42 ms, max tile 163, overflow 0.
+135-step splat:      PSNR 15.6136 / heldout 12.4152 dB, render 79.82 / 87.23 ms.
+135-step eval64 PRT: PSNR 17.4955 / heldout 12.8992 dB, render 7.35 / 8.65 ms, max tile 120, overflow 0.
+135-step eval48 PRT: PSNR 14.9446 / heldout 13.3054 dB, render 9.80 / 12.34 ms, max tile 218, overflow 0.
+```
+
+Read: D3n is worth keeping as a small fused-kernel cleanup. The projected fused
+kernel timing improved again, and the real fused-MSE segment improved, but total
+train-step wall is now dominated by noise and remaining non-fused overheads
+around the same 53 ms median. The under-wall same-wall comparison remains strong:
+PRT stays below splat training wall and still wins train PSNR, heldout PSNR, and
+render speed. The next train-speed work needs a larger structural change to
+gradient accumulation or support scheduling, not more replay bookkeeping cleanup.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -2112,6 +2155,6 @@ should be measured before splitting a camera window.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
 8. Treat split train/eval support as a diagnostic only; pursue support scheduling or residual-certified support inflation before making it a policy.
-9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m removes redundant fused-kernel sorting but the fused MSE kernel remains the 256px train-wall bottleneck.
+9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, but the fused MSE path remains the 256px train-wall bottleneck.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3l says train speed still needs fused-kernel work.
