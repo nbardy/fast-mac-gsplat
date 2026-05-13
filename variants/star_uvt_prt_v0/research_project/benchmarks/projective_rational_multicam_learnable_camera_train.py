@@ -73,6 +73,7 @@ def _init_wandb(args: argparse.Namespace, report_config: dict[str, Any]):
         "name": args.wandb_run_name,
         "tags": [tag for tag in args.wandb_tags.split(",") if tag],
         "config": serialize_config_value(report_config),
+        "settings": wandb.Settings(init_timeout=args.wandb_init_timeout),
     }
     if args.wandb_mode is not None:
         init_kwargs["mode"] = args.wandb_mode
@@ -358,11 +359,34 @@ def _write_media(out_dir: Path, media: dict[str, torch.Tensor], fps: float) -> d
 def _log_wandb(run, report: dict[str, Any], media: dict[str, torch.Tensor], fps: float) -> None:
     if run is None:
         return
+    history_by_step: dict[int, dict[str, Any]] = {}
+    for row in report["train"]["losses"]:
+        step = int(row["step"])
+        history_by_step.setdefault(step, {}).update(
+            {
+                "Train/Loss": float(row["loss"]),
+                "Train/View": int(row["view"]),
+                "Train/Frame": int(row["frame"]),
+            }
+        )
+    for row in report["train"]["logs"]:
+        step = int(row["step"])
+        camera = row["camera"]
+        history_by_step.setdefault(step, {}).update(
+            {
+                "Train/TotalLoss": float(row["loss"]),
+                "Train/ReconstructionLoss": float(row["recon_loss"]),
+                "Train/CameraRegularization": float(row["camera_regularization"]),
+                "Train/CameraTemporal": float(row["camera_temporal"]),
+                "Camera/RotationDegreesMax": float(camera["rotation_degrees_max"]),
+                "Camera/TranslationMax": float(camera["translation_max"]),
+            }
+        )
     payload = {
         "Train/PSNR": report["eval"]["metrics"].get("psnr"),
         "Train/MSE": report["eval"]["metrics"].get("mse"),
         "Train/L1": report["eval"]["metrics"].get("l1"),
-        "Train/FinalSampledLoss": report["train"]["final_loss"],
+        "Train/FinalLoss": report["train"]["final_loss"],
         "Camera/RawRotationGradMax": report["train"]["gradient_checks"]["raw_rotation_grad_norm_max"],
         "Camera/RawTranslationGradMax": report["train"]["gradient_checks"]["raw_translation_grad_norm_max"],
         "Tiles/MaxTileCount": report["eval"]["max_tile_count"],
@@ -379,7 +403,10 @@ def _log_wandb(run, report: dict[str, Any], media: dict[str, torch.Tensor], fps:
             continue
         payload[f"{prefix}/Render_Video"] = _make_wandb_video(_nhwc_to_nchw(render), fps)
         payload[f"{prefix}/GT_Render_Video"] = _make_wandb_video(_side_by_side_nchw(target, render), fps)
-    run.log(payload, step=int(report["train"]["steps"]))
+    final_step = int(report["train"]["steps"])
+    history_by_step.setdefault(final_step, {}).update(payload)
+    for step in sorted(history_by_step):
+        run.log(history_by_step[step], step=step)
     run.finish()
 
 
@@ -584,6 +611,7 @@ def main() -> None:
     parser.add_argument("--wandb-run-name", default="star-uvt-prt-real-clip-learnable-camera")
     parser.add_argument("--wandb-tags", default="star-uvt-prt,real-clip,learnable-camera")
     parser.add_argument("--wandb-mode")
+    parser.add_argument("--wandb-init-timeout", type=float, default=300.0)
     parser.add_argument("--out-json", type=Path)
     parser.add_argument("--out-dir", type=Path)
     args = parser.parse_args()
