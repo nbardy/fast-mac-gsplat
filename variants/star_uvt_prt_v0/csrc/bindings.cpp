@@ -80,6 +80,26 @@ profile_projective_rational_tiled_dispatch(
               h_coeff.device());
 }
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> bin_inverse_homography_atlas_residual_tiles_dispatch(
+    const torch::Tensor& atlas_ref_uv,
+    const torch::Tensor& atlas_residual_coeff,
+    const torch::Tensor& lambda_uv,
+    const torch::Tensor& lambda_t,
+    const torch::Tensor& center_t,
+    const torch::Tensor& opacity,
+    const torch::Tensor& band_ids,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32) {
+#if defined(__APPLE__)
+  if (atlas_ref_uv.device().is_mps()) {
+    return metal_bin_inverse_homography_atlas_residual_tiles(
+        atlas_ref_uv, atlas_residual_coeff, lambda_uv, lambda_t, center_t, opacity, band_ids, meta_i32, meta_f32);
+  }
+#endif
+  TORCH_CHECK(false, "star_uvt_prt_v0.bin_inverse_homography_atlas_residual_tiles: no backend available for device ",
+              atlas_ref_uv.device());
+}
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 projective_rational_direct_serial_backward_dispatch(
     const torch::Tensor& h_coeff,
@@ -635,6 +655,7 @@ TORCH_LIBRARY(star_uvt_prt_v0, m) {
   m.def("render_projective_rational_direct(Tensor h_coeff, Tensor lambda_uv, Tensor lambda_t, Tensor center_t, Tensor opacity, Tensor color, Tensor meta_i32, Tensor meta_f32) -> Tensor");
   m.def("render_projective_rational_tiled(Tensor h_coeff, Tensor lambda_uv, Tensor lambda_t, Tensor center_t, Tensor opacity, Tensor color, Tensor meta_i32, Tensor meta_f32) -> (Tensor, Tensor, Tensor, Tensor)");
   m.def("profile_projective_rational_tiled(Tensor h_coeff, Tensor lambda_uv, Tensor lambda_t, Tensor center_t, Tensor opacity, Tensor color, Tensor meta_i32, Tensor meta_f32) -> (Tensor, Tensor, Tensor, Tensor, Tensor)");
+  m.def("bin_inverse_homography_atlas_residual_tiles(Tensor atlas_ref_uv, Tensor atlas_residual_coeff, Tensor lambda_uv, Tensor lambda_t, Tensor center_t, Tensor opacity, Tensor band_ids, Tensor meta_i32, Tensor meta_f32) -> (Tensor, Tensor, Tensor)");
   m.def("projective_rational_direct_serial_backward(Tensor h_coeff, Tensor lambda_uv, Tensor lambda_t, Tensor center_t, Tensor opacity, Tensor color, Tensor grad_image, Tensor meta_i32, Tensor meta_f32) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)");
   m.def("projective_rational_tile_pair_atomic_backward(Tensor h_coeff, Tensor lambda_uv, Tensor lambda_t, Tensor center_t, Tensor opacity, Tensor color, Tensor grad_image, Tensor meta_i32, Tensor meta_f32) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)");
   m.def("projective_rational_tile_pixel_atomic_backward(Tensor h_coeff, Tensor lambda_uv, Tensor lambda_t, Tensor center_t, Tensor opacity, Tensor color, Tensor grad_image, Tensor meta_i32, Tensor meta_f32) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)");
@@ -671,6 +692,7 @@ TORCH_LIBRARY_IMPL(star_uvt_prt_v0, CompositeExplicitAutograd, m) {
   m.impl("render_projective_rational_direct", star_uvt::render_projective_rational_direct_dispatch);
   m.impl("render_projective_rational_tiled", star_uvt::render_projective_rational_tiled_dispatch);
   m.impl("profile_projective_rational_tiled", star_uvt::profile_projective_rational_tiled_dispatch);
+  m.impl("bin_inverse_homography_atlas_residual_tiles", star_uvt::bin_inverse_homography_atlas_residual_tiles_dispatch);
   m.impl("projective_rational_direct_serial_backward", star_uvt::projective_rational_direct_serial_backward_dispatch);
   m.impl("projective_rational_tile_pair_atomic_backward", star_uvt::projective_rational_tile_pair_atomic_backward_dispatch);
   m.impl("projective_rational_tile_pixel_atomic_backward", star_uvt::projective_rational_tile_pixel_atomic_backward_dispatch);

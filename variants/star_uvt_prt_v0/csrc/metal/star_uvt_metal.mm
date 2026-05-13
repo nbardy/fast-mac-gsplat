@@ -97,6 +97,7 @@ struct MetalKernels {
   std::shared_ptr<MetalKernelFunction> render_projective_rational_direct;
   std::shared_ptr<MetalKernelFunction> bin_projective_rational_tubes;
   std::shared_ptr<MetalKernelFunction> render_projective_rational_tiles;
+  std::shared_ptr<MetalKernelFunction> bin_inverse_homography_atlas_residual_tiles;
   std::shared_ptr<MetalKernelFunction> projective_rational_direct_serial_backward;
   std::shared_ptr<MetalKernelFunction> projective_rational_tile_pair_atomic_backward;
   std::shared_ptr<MetalKernelFunction> projective_rational_tile_pixel_atomic_backward;
@@ -144,6 +145,8 @@ MetalKernels& kernels() {
     out.render_projective_rational_direct = lib->getKernelFunction("render_projective_rational_direct");
     out.bin_projective_rational_tubes = lib->getKernelFunction("bin_projective_rational_tubes_to_uvt_tiles");
     out.render_projective_rational_tiles = lib->getKernelFunction("render_projective_rational_tiles");
+    out.bin_inverse_homography_atlas_residual_tiles =
+        lib->getKernelFunction("bin_inverse_homography_atlas_residual_tubes_to_atlas_tiles");
     out.projective_rational_direct_serial_backward =
         lib->getKernelFunction("projective_rational_direct_serial_backward");
     out.projective_rational_tile_pair_atomic_backward =
@@ -233,6 +236,27 @@ void check_meta(const ParsedMeta& meta, int64_t n, const ShaderConfig& sc) {
   TORCH_CHECK(meta.tiles_y == (meta.height + meta.tile_y - 1) / meta.tile_y, "tiles_y mismatch");
   TORCH_CHECK(meta.tiles_t == (meta.frames + meta.tile_t - 1) / meta.tile_t, "tiles_t mismatch");
   TORCH_CHECK(meta.tile_count == meta.tiles_x * meta.tiles_y * meta.tiles_t, "tile_count mismatch");
+}
+
+void check_inverse_homography_atlas_meta(
+    const ParsedMeta& meta,
+    int64_t n,
+    int64_t residual_terms,
+    const ShaderConfig& sc) {
+  TORCH_CHECK(meta.height > 0 && meta.width > 0 && meta.frames > 0, "height, width, and frames must be positive");
+  TORCH_CHECK(meta.tile_x == sc.tile_x && meta.tile_y == sc.tile_y && meta.tile_t == sc.tile_t,
+              "meta tile shape must match STAR_UVT_TILE_* shader constants");
+  TORCH_CHECK(meta.tile_capacity == sc.tile_capacity, "meta tile_capacity must match STAR_UVT_TILE_CAPACITY");
+  TORCH_CHECK(meta.tube_count == n, "meta tube_count mismatch");
+  TORCH_CHECK(meta.tiles_x == (meta.width + meta.tile_x - 1) / meta.tile_x, "tiles_x mismatch");
+  TORCH_CHECK(meta.tiles_y == (meta.height + meta.tile_y - 1) / meta.tile_y, "tiles_y mismatch");
+  TORCH_CHECK(meta.tiles_t == (meta.frames + meta.tile_t - 1) / meta.tile_t, "tiles_t mismatch");
+  TORCH_CHECK(meta.reserved0 == residual_terms, "meta reserved0 must equal atlas residual term count");
+  TORCH_CHECK(meta.reserved0 > 0, "atlas residual term count must be positive");
+  TORCH_CHECK(meta.reserved1 > 0, "meta reserved1 must equal a positive atlas depth-band count");
+  TORCH_CHECK(meta.tile_count == meta.tiles_x * meta.tiles_y * meta.tiles_t * meta.reserved1,
+              "atlas tile_count mismatch");
+  TORCH_CHECK(meta.support_alpha_threshold > 0.0f, "atlas support scale must be positive");
 }
 
 }  // namespace
@@ -439,6 +463,67 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_ren
   });
 
   return std::make_tuple(out, tile_counts, tile_overflow, tile_unstable);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> metal_bin_inverse_homography_atlas_residual_tiles(
+    const torch::Tensor& atlas_ref_uv,
+    const torch::Tensor& atlas_residual_coeff,
+    const torch::Tensor& lambda_uv,
+    const torch::Tensor& lambda_t,
+    const torch::Tensor& center_t,
+    const torch::Tensor& opacity,
+    const torch::Tensor& band_ids,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32) {
+  check_float_mps_2d(atlas_ref_uv, "atlas_ref_uv", 2);
+  check_float_mps_3d(atlas_residual_coeff, "atlas_residual_coeff", 2);
+  check_float_mps_2d(lambda_uv, "lambda_uv", 3);
+  check_float_mps_1d(lambda_t, "lambda_t");
+  check_float_mps_1d(center_t, "center_t");
+  check_float_mps_1d(opacity, "opacity");
+  check_int_mps_1d(band_ids, "band_ids");
+  TORCH_CHECK(atlas_ref_uv.size(0) == atlas_residual_coeff.size(0) &&
+                  atlas_ref_uv.size(0) == lambda_uv.size(0) && atlas_ref_uv.size(0) == lambda_t.size(0) &&
+                  atlas_ref_uv.size(0) == center_t.size(0) && atlas_ref_uv.size(0) == opacity.size(0) &&
+                  atlas_ref_uv.size(0) == band_ids.size(0),
+              "all inverse-homography atlas residual inputs must agree on N");
+
+  auto meta = parse_meta(meta_i32, meta_f32);
+  auto& sc = shader_config();
+  check_inverse_homography_atlas_meta(meta, atlas_ref_uv.size(0), atlas_residual_coeff.size(1), sc);
+  auto& k = kernels();
+
+  auto opts_i32 = atlas_ref_uv.options().dtype(torch::kInt32);
+  auto tile_counts = torch::empty({meta.tile_count}, opts_i32);
+  auto tile_overflow = torch::empty({meta.tile_count}, opts_i32);
+  auto tile_unstable_unused = torch::empty({meta.tile_count}, opts_i32);
+  auto tile_tube_ids = torch::empty({meta.tile_count * meta.tile_capacity}, opts_i32);
+
+  launch(k.clear_tiles, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, tile_counts);
+    fn.setArg(1, tile_overflow);
+    fn.setArg(2, tile_unstable_unused);
+    fn.setArg(3, meta_i32);
+    fn.dispatch((uint64_t)meta.tile_count, 256);
+  });
+
+  launch(k.bin_inverse_homography_atlas_residual_tiles, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, atlas_ref_uv);
+    fn.setArg(1, atlas_residual_coeff);
+    fn.setArg(2, lambda_uv);
+    fn.setArg(3, lambda_t);
+    fn.setArg(4, center_t);
+    fn.setArg(5, opacity);
+    fn.setArg(6, band_ids);
+    fn.setArg(7, meta_i32);
+    fn.setArg(8, meta_f32);
+    fn.setArg(9, tile_counts);
+    fn.setArg(10, tile_tube_ids);
+    fn.setArg(11, tile_overflow);
+    fn.dispatch((uint64_t)meta.tube_count, 256);
+  });
+
+  return std::make_tuple(tile_counts, tile_overflow, tile_tube_ids);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>

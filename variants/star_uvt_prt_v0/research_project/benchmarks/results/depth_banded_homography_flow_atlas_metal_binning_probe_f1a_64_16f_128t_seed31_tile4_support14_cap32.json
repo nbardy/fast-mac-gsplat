@@ -1,0 +1,49 @@
+{
+  "comparison": {
+    "active_tile_count_cpu": 1599,
+    "active_tile_count_metal": 1599,
+    "duplicate_metal_ids": 0,
+    "extra_pairs": 0,
+    "max_tile_count_cpu": 29,
+    "max_tile_count_metal": 29,
+    "missing_pairs": 0,
+    "out_of_range_metal_ids": 0,
+    "overflow_sum": 0,
+    "overflow_tile_count": 0,
+    "per_tile_count_mismatches": 0,
+    "per_tile_set_mismatches": 0,
+    "tile_count": 4096,
+    "tile_pairs_cpu": 9073,
+    "tile_pairs_metal": 9073
+  },
+  "config": {
+    "depth_bands": 4,
+    "dolly_z": 0.12,
+    "fallback_max_px": 1.0,
+    "frames": 16,
+    "pan_x": 0.09,
+    "residual_degree": 3,
+    "seed": 31,
+    "support_scale": 1.4,
+    "target_size": 64,
+    "tile_capacity": 32,
+    "tile_size": 4,
+    "tile_t": 4,
+    "tubes": 128,
+    "velocity_scale": 0.01,
+    "zoom": 0.025
+  },
+  "cpu_tile_stats": {
+    "bands": 4,
+    "max_pairs_per_tube_time_tile": 36,
+    "tile_pairs": 9073,
+    "tiles_t": 4,
+    "tiles_x": 16,
+    "tiles_y": 16
+  },
+  "fallback_tubes": 0,
+  "metal_checked": true,
+  "name": "depth_banded_homography_flow_atlas_metal_binning_probe",
+  "note": "F1a bin-only Metal parity check for inverse-homography atlas-residual tubes. The gate compares per-tile tube-id sets because atomic insertion order is not stable.",
+  "pass": true
+}

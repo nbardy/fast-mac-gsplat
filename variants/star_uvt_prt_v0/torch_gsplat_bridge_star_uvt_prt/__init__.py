@@ -10,12 +10,14 @@ from .tile_config import (
     select_projective_rational_tile_summary,
 )
 from .rasterize import (
+    AtlasTileAssignmentResult,
     Gate0Stats,
     ProjectiveRationalBackwardProfileResult,
     ProjectiveRationalFusedMSEResult,
     ProjectiveRationalProfileResult,
     UVTRenderConfig,
     UVTRenderResult,
+    bin_inverse_homography_atlas_residual_tiles,
     brute_force_render_projective_rational_tubes,
     brute_force_render_uvt_tubes,
     direct_atomic_backward,
@@ -57,6 +59,7 @@ from .rasterize import (
 
 __all__ = [
     "DEFAULT_PROJECTIVE_RATIONAL_TILE_CANDIDATES",
+    "AtlasTileAssignmentResult",
     "Gate0Stats",
     "PROJECTIVE_RATIONAL_1024_TRAIN_SPEED_SUPPORT_ALPHA_THRESHOLD",
     "ProjectiveRationalBackwardProfileResult",
@@ -67,6 +70,7 @@ __all__ = [
     "UVTRenderConfig",
     "UVTRenderResult",
     "apply_projective_rational_tile_env",
+    "bin_inverse_homography_atlas_residual_tiles",
     "brute_force_render_projective_rational_tubes",
     "brute_force_render_uvt_tubes",
     "direct_atomic_backward",

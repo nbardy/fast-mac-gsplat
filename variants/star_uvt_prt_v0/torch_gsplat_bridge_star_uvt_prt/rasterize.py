@@ -99,6 +99,13 @@ class ProjectiveRationalFusedMSEResult:
     loss_sum: Tensor
 
 
+@dataclass(frozen=True)
+class AtlasTileAssignmentResult:
+    tile_counts: Tensor
+    tile_overflow: Tensor
+    tile_tube_ids: Tensor
+
+
 _PRT_PROFILE_TIMING_KEYS = ("alloc_ms", "clear_tiles_ms", "bin_tubes_ms", "render_tiles_ms", "total_ms")
 _PRT_BACKWARD_PROFILE_TIMING_KEYS = (
     "alloc_tiles_ms",
@@ -221,6 +228,67 @@ def _check_prt_inputs(
         raise ValueError("Metal STAR-UVT PRT render requires MPS tensors")
 
 
+def _check_depth_banded_atlas_inputs(
+    atlas_ref_uv: Tensor,
+    atlas_residual_coeff: Tensor,
+    lambda_uv: Tensor,
+    lambda_t: Tensor,
+    center_t: Tensor,
+    opacity: Tensor,
+    assignments: Tensor,
+    *,
+    require_mps: bool,
+) -> None:
+    if atlas_ref_uv.ndim != 2 or atlas_ref_uv.shape[-1] != 2:
+        raise ValueError("atlas_ref_uv must have shape [N,2]")
+    if atlas_residual_coeff.ndim != 3 or atlas_residual_coeff.shape[-1] != 2:
+        raise ValueError("atlas_residual_coeff must have shape [N,R,2]")
+    if atlas_residual_coeff.shape[1] <= 0:
+        raise ValueError("atlas_residual_coeff must contain at least one polynomial term")
+    if atlas_ref_uv.shape[0] != atlas_residual_coeff.shape[0]:
+        raise ValueError("atlas_ref_uv and atlas_residual_coeff must agree on N")
+    tube_count = atlas_ref_uv.shape[0]
+    expected = {
+        "lambda_uv": (tube_count, 3),
+        "lambda_t": (tube_count,),
+        "center_t": (tube_count,),
+        "opacity": (tube_count,),
+        "assignments": (tube_count,),
+    }
+    tensors = {
+        "lambda_uv": lambda_uv,
+        "lambda_t": lambda_t,
+        "center_t": center_t,
+        "opacity": opacity,
+        "assignments": assignments,
+    }
+    for name, shape in expected.items():
+        if tensors[name].shape != shape:
+            raise ValueError(f"{name} must have shape {shape}, got {tuple(tensors[name].shape)}")
+    for name, tensor in {
+        "atlas_ref_uv": atlas_ref_uv,
+        "atlas_residual_coeff": atlas_residual_coeff,
+        "lambda_uv": lambda_uv,
+        "lambda_t": lambda_t,
+        "center_t": center_t,
+        "opacity": opacity,
+    }.items():
+        if tensor.dtype != torch.float32:
+            raise ValueError(f"{name} must be float32")
+        if tensor.device != atlas_ref_uv.device:
+            raise ValueError(f"{name} must be on the same device as atlas_ref_uv")
+        if not tensor.is_contiguous():
+            raise ValueError(f"{name} must be contiguous")
+    if assignments.dtype != torch.int32:
+        raise ValueError("assignments must be int32")
+    if assignments.device != atlas_ref_uv.device:
+        raise ValueError("assignments must be on the same device as atlas_ref_uv")
+    if not assignments.is_contiguous():
+        raise ValueError("assignments must be contiguous")
+    if require_mps and atlas_ref_uv.device.type != "mps":
+        raise ValueError("Metal depth-banded atlas binning requires MPS tensors")
+
+
 def _make_meta(
     config: UVTRenderConfig,
     device: torch.device,
@@ -265,6 +333,63 @@ def _make_meta(
             1.0e-8,
             float(config.max_alpha),
             float(support_alpha_threshold),
+        ],
+        device=device,
+        dtype=torch.float32,
+    )
+    return meta_i32, meta_f32
+
+
+def _make_depth_banded_atlas_meta(
+    config: UVTRenderConfig,
+    device: torch.device,
+    tube_count: int,
+    *,
+    atlas_terms: int,
+    depth_bands: int,
+    support_scale: float,
+) -> tuple[Tensor, Tensor]:
+    _runtime_validate(config)
+    if atlas_terms <= 0:
+        raise ValueError("atlas_terms must be positive")
+    if depth_bands <= 0:
+        raise ValueError("depth_bands must be positive")
+    if support_scale <= 0.0:
+        raise ValueError("support_scale must be positive")
+    tiles_x = (config.width + config.tile_x - 1) // config.tile_x
+    tiles_y = (config.height + config.tile_y - 1) // config.tile_y
+    tiles_t = (config.frames + config.tile_t - 1) // config.tile_t
+    tile_count = tiles_x * tiles_y * tiles_t * int(depth_bands)
+    meta_i32 = torch.tensor(
+        [
+            config.height,
+            config.width,
+            config.frames,
+            config.tile_x,
+            config.tile_y,
+            config.tile_t,
+            tiles_x,
+            tiles_y,
+            tiles_t,
+            tile_count,
+            tube_count,
+            config.tile_capacity,
+            int(atlas_terms),
+            int(depth_bands),
+        ],
+        device=device,
+        dtype=torch.int32,
+    )
+    meta_f32 = torch.tensor(
+        [
+            float(config.alpha_threshold),
+            float(config.transmittance_threshold),
+            float(config.background[0]),
+            float(config.background[1]),
+            float(config.background[2]),
+            1.0e-8,
+            float(config.max_alpha),
+            float(support_scale),
         ],
         device=device,
         dtype=torch.float32,
@@ -461,6 +586,74 @@ def render_projective_rational_tubes_tiled(
         tile_overflow=tile_overflow,
         tile_unstable=tile_unstable,
         stats=None,
+    )
+
+
+def bin_inverse_homography_atlas_residual_tiles(
+    atlas_ref_uv: Tensor,
+    atlas_residual_coeff: Tensor,
+    lambda_uv: Tensor,
+    lambda_t: Tensor,
+    center_t: Tensor,
+    opacity: Tensor,
+    band_ids: Tensor,
+    config: UVTRenderConfig,
+    *,
+    band_count: int,
+    support_scale: float = 1.4,
+) -> AtlasTileAssignmentResult:
+    _runtime_validate(config)
+    atlas_ref_uv = atlas_ref_uv.contiguous()
+    atlas_residual_coeff = atlas_residual_coeff.contiguous()
+    lambda_uv = lambda_uv.contiguous()
+    lambda_t = lambda_t.contiguous()
+    center_t = center_t.contiguous()
+    opacity = opacity.contiguous()
+    band_ids = band_ids.contiguous()
+    _check_depth_banded_atlas_inputs(
+        atlas_ref_uv,
+        atlas_residual_coeff,
+        lambda_uv,
+        lambda_t,
+        center_t,
+        opacity,
+        band_ids,
+        require_mps=True,
+    )
+    if band_count <= 0:
+        raise ValueError("band_count must be positive")
+    if support_scale <= 0.0:
+        raise ValueError("support_scale must be positive")
+    if band_ids.numel() > 0:
+        min_band = int(band_ids.min().detach().cpu().item())
+        max_band = int(band_ids.max().detach().cpu().item())
+        if min_band < 0 or max_band >= band_count:
+            raise ValueError("band_ids must be in [0, band_count)")
+    if not hasattr(torch.ops, "star_uvt_prt_v0"):
+        raise RuntimeError("star_uvt_prt_v0 custom ops not found. Build the extension first.")
+    meta_i32, meta_f32 = _make_depth_banded_atlas_meta(
+        config,
+        atlas_ref_uv.device,
+        atlas_ref_uv.shape[0],
+        atlas_terms=atlas_residual_coeff.shape[1],
+        depth_bands=band_count,
+        support_scale=support_scale,
+    )
+    tile_counts, tile_overflow, tile_tube_ids = torch.ops.star_uvt_prt_v0.bin_inverse_homography_atlas_residual_tiles(
+        atlas_ref_uv,
+        atlas_residual_coeff,
+        lambda_uv,
+        lambda_t,
+        center_t,
+        opacity,
+        band_ids,
+        meta_i32,
+        meta_f32,
+    )
+    return AtlasTileAssignmentResult(
+        tile_counts=tile_counts,
+        tile_overflow=tile_overflow,
+        tile_tube_ids=tile_tube_ids,
     )
 
 

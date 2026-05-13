@@ -309,6 +309,10 @@ inline uint encode_tile(uint tx, uint ty, uint tz, constant MetaI32& mi) {
   return (tz * uint(mi.tiles_y) + ty) * uint(mi.tiles_x) + tx;
 }
 
+inline uint encode_atlas_tile(uint band, uint tx, uint ty, uint tz, constant MetaI32& mi) {
+  return (((band * uint(mi.tiles_t) + tz) * uint(mi.tiles_y) + ty) * uint(mi.tiles_x)) + tx;
+}
+
 inline void decode_tile(uint tile_id, constant MetaI32& mi, thread uint& tx, thread uint& ty, thread uint& tz) {
   tx = tile_id % uint(mi.tiles_x);
   uint rem = tile_id / uint(mi.tiles_x);
@@ -340,6 +344,28 @@ inline float3 tile_half_extent(uint tx, uint ty, uint tz, constant MetaI32& mi) 
       max(0.5f, 0.5f * (float(x1) - float(x0) + 1.0f)),
       max(0.5f, 0.5f * (float(y1) - float(y0) + 1.0f)),
       max(0.0f, 0.5f * (frame_time(f1, mi) - frame_time(f0, mi))));
+}
+
+inline float lambda_uv_min_eigenvalue(const device float* lambda_uv, uint tube_id, float eps) {
+  uint b = tube_id * 3u;
+  float a = lambda_uv[b + 0u];
+  float c = lambda_uv[b + 1u];
+  float d = lambda_uv[b + 2u];
+  float disc = sqrt(max((a - d) * (a - d) + 4.0f * c * c, 0.0f));
+  return max(0.5f * (a + d - disc), eps);
+}
+
+inline float2 eval_atlas_residual(
+    const device float* atlas_residual_coeff,
+    uint tube_id,
+    uint residual_terms,
+    float t) {
+  float2 residual = float2(0.0f);
+  for (int p = int(residual_terms) - 1; p >= 0; --p) {
+    uint b = (tube_id * residual_terms + uint(p)) * 2u;
+    residual = residual * t + float2(atlas_residual_coeff[b + 0u], atlas_residual_coeff[b + 1u]);
+  }
+  return residual;
 }
 
 inline void sort_by_depth(threadgroup uint* ids, threadgroup float* depths, uint count, uint tid) {
@@ -1390,6 +1416,94 @@ kernel void bin_projective_rational_tubes_to_uvt_tiles(
           tile_tube_ids[idx] = tube_id;
           float t = tile_center(tx, ty, tz, mi).z;
           tile_depths[idx] = max(eval_prt_h(h_coeff, tube_id, h_terms, t - center_t[tube_id]).z, mf.eps);
+        } else {
+          atomic_store_explicit(tile_overflow + tile_id, 1u, memory_order_relaxed);
+        }
+      }
+    }
+  }
+}
+
+kernel void bin_inverse_homography_atlas_residual_tubes_to_atlas_tiles(
+    const device float* atlas_ref_uv [[buffer(0)]],
+    const device float* atlas_residual_coeff [[buffer(1)]],
+    const device float* lambda_uv [[buffer(2)]],
+    const device float* lambda_t [[buffer(3)]],
+    const device float* center_t [[buffer(4)]],
+    const device float* opacity [[buffer(5)]],
+    const device int* band_ids [[buffer(6)]],
+    constant MetaI32& mi [[buffer(7)]],
+    constant MetaF32& mf [[buffer(8)]],
+    device atomic_uint* tile_counts [[buffer(9)]],
+    device uint* tile_tube_ids [[buffer(10)]],
+    device atomic_uint* tile_overflow [[buffer(11)]],
+    uint tube_id [[thread_position_in_grid]]) {
+  if (tube_id >= uint(mi.tube_count)) return;
+  uint residual_terms = uint(mi.reserved0);
+  uint band_count = uint(mi.reserved1);
+  int raw_band = band_ids[tube_id];
+  if (raw_band < 0 || uint(raw_band) >= band_count) return;
+  uint band = uint(raw_band);
+
+  float op = opacity[tube_id];
+  if (!(op > mf.alpha_threshold)) return;
+  float ratio = max(op / max(mf.alpha_threshold, mf.eps), 1.0f + 1.0e-6f);
+  float support_tau = 2.0f * log(ratio);
+  if (!isfinite(support_tau) || support_tau <= 0.0f) return;
+
+  float time_precision = lambda_t[tube_id];
+  float half_t = time_precision > mf.eps ? sqrt(max(support_tau / time_precision, 0.0f)) : float(mi.frames);
+  float frame_center = 0.5f * float(mi.frames - 1);
+  int f0 = max(0, int(floor(center_t[tube_id] - half_t + frame_center)));
+  int f1 = min(mi.frames - 1, int(ceil(center_t[tube_id] + half_t + frame_center)));
+  if (f0 > f1) return;
+
+  float min_eig = lambda_uv_min_eigenvalue(lambda_uv, tube_id, mf.eps);
+  float support_scale = mf.support_alpha_threshold;
+  float2 ref = float2(atlas_ref_uv[tube_id * 2u + 0u], atlas_ref_uv[tube_id * 2u + 1u]);
+
+  uint tz0 = uint(f0 / mi.tile_t);
+  uint tz1 = uint(f1 / mi.tile_t);
+  for (uint tz = tz0; tz <= tz1; ++tz) {
+    uint tile_f0 = tz * uint(mi.tile_t);
+    uint tile_f1 = min(uint(mi.frames - 1), tile_f0 + uint(mi.tile_t - 1));
+    uint zf0 = max(uint(f0), tile_f0);
+    uint zf1 = min(uint(f1), tile_f1);
+    bool any = false;
+    float min_u = INFINITY;
+    float max_u = -INFINITY;
+    float min_v = INFINITY;
+    float max_v = -INFINITY;
+    for (uint f = zf0; f <= zf1; ++f) {
+      float t = frame_time(f, mi);
+      float dt = t - center_t[tube_id];
+      float budget = support_tau - time_precision * dt * dt;
+      if (!(budget > 0.0f)) continue;
+      float2 center = ref + eval_atlas_residual(atlas_residual_coeff, tube_id, residual_terms, t);
+      float radius = support_scale * sqrt(max(budget / min_eig, 0.0f));
+      min_u = min(min_u, center.x - radius);
+      max_u = max(max_u, center.x + radius);
+      min_v = min(min_v, center.y - radius);
+      max_v = max(max_v, center.y + radius);
+      any = true;
+    }
+    if (!any) continue;
+
+    int tx0i = clamp(int(floor(min_u / float(mi.tile_x))), 0, mi.tiles_x - 1);
+    int tx1i = clamp(int(floor(max_u / float(mi.tile_x))), 0, mi.tiles_x - 1);
+    int ty0i = clamp(int(floor(min_v / float(mi.tile_y))), 0, mi.tiles_y - 1);
+    int ty1i = clamp(int(floor(max_v / float(mi.tile_y))), 0, mi.tiles_y - 1);
+    uint tx0 = uint(tx0i);
+    uint tx1 = uint(tx1i);
+    uint ty0 = uint(ty0i);
+    uint ty1 = uint(ty1i);
+    for (uint ty = ty0; ty <= ty1; ++ty) {
+      for (uint tx = tx0; tx <= tx1; ++tx) {
+        uint tile_id = encode_atlas_tile(band, tx, ty, tz, mi);
+        uint slot = atomic_fetch_add_explicit(tile_counts + tile_id, 1u, memory_order_relaxed);
+        if (slot < STAR_TILE_CAPACITY) {
+          uint idx = tile_id * STAR_TILE_CAPACITY + slot;
+          tile_tube_ids[idx] = tube_id;
         } else {
           atomic_store_explicit(tile_overflow + tile_id, 1u, memory_order_relaxed);
         }
