@@ -95,6 +95,7 @@ Last updated: 2026-05-13
 - [x] Gate F0c: quantify PRT-fallback outliers for the hard-camera/object-motion residual row.
 - [x] Gate F0d: four-seed hybrid fallback robustness sweep.
 - [x] Gate F0e: tile-policy estimate sweep for the hybrid fallback row.
+- [x] Gate F0f: residual-coordinate culling control against ordinary image-space culling.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2705,6 +2706,36 @@ tile bookkeeping and dispatch costs. It does say the first implementation should
 make tile shape explicit and measure 4x4 against 8x8 in the actual renderer,
 rather than assuming the older 8x8 UVT tile shape is still best.
 
+Gate F0f checks whether F0e's tile-pair win comes from the residual-coordinate
+flow-sheared frame or from ordinary image-space center culling:
+
+```text
+python3 research_project/benchmarks/depth_banded_homography_flow_culling_control.py --out-json research_project/benchmarks/results/depth_banded_homography_flow_culling_control_f0f_hardcam_velocity001_4seeds_tiles4_8_16.json
+```
+
+Result:
+
+```text
+4x4 residual-coordinate hybrid ratio vs segmented_f4: min 0.810, median 0.815, max 0.824.
+4x4 image-space hybrid control ratio vs segmented_f4: min 0.998, median 0.999, max 1.001.
+4x4 residual-coordinate savings vs image-space control: min 9975, median 10631, max 10893 tile pairs.
+
+8x8 residual-coordinate hybrid ratio vs segmented_f4: min 0.830, median 0.847, max 0.848.
+8x8 image-space hybrid control ratio vs segmented_f4: min 0.998, median 0.999, max 1.002.
+8x8 residual-coordinate savings vs image-space control: min 2953, median 3047.5, max 3344 tile pairs.
+
+16x16 residual-coordinate hybrid ratio vs segmented_f4: min 0.880, median 0.895, max 0.908.
+16x16 image-space hybrid control ratio vs segmented_f4: min 0.999, median 1.000, max 1.002.
+16x16 residual-coordinate savings vs image-space control: min 764, median 872, max 986 tile pairs.
+```
+
+Read: the win is specifically the flow-sheared residual coordinate system, not
+generic screen-space culling. Ordinary image-space culling is approximately
+segmented_f4 cost on this stress, while residual-coordinate culling keeps the
+hybrid below segmented_f4 for every seed/tile row. This makes the next renderer
+target sharper: implement residual-coordinate tile assignment plus flow-sheared
+screen evaluation, with a PRT fallback list for high-residual tubes.
+
 The separate representation idea tested by F0 is
 depth-banded homography-flow gauge residual tubes. Compile a small bank of
 camera-induced depth-band flows from `K_seq,w2c_seq`, let each world tube store
@@ -2751,4 +2782,4 @@ should be measured before splitting a camera window.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, D3x rejects naive replay caching, and D3y shows write-set pruning can turn exact 200-vs-200 into a train-wall win.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, and D3z/D4a are boundary results showing that more steps must still fit the train-wall budget and improve quality before replacing D3y.
-12. Continue depth-banded homography-flow gauge residual tubes after F0-F0e: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion needs a small PRT fallback/window-split tail. Four hard-camera/object-motion seeds all pass the hybrid upper-bound. The tile-estimate sweep favors 4x4 over 8x8/16x16 on the synthetic stress, but the current implementation is still a dense upper-bound with exact direct depth, not a Metal flow-sheared renderer or training path.
+12. Continue depth-banded homography-flow gauge residual tubes after F0-F0f: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion needs a small PRT fallback/window-split tail. Four hard-camera/object-motion seeds all pass the hybrid upper-bound. The tile-estimate sweep favors 4x4 over 8x8/16x16 on the synthetic stress, and F0f shows the culling win comes from residual-coordinate flow shearing rather than ordinary screen-space culling. The current implementation is still a dense upper-bound with exact direct depth, not a Metal flow-sheared renderer or training path.

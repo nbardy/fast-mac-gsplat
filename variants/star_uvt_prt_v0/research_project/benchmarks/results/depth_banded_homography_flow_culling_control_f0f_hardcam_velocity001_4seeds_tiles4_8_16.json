@@ -1,0 +1,342 @@
+{
+  "config": {
+    "depth_bands": 4,
+    "dolly_z": 0.12,
+    "fallback_max_px": 1.0,
+    "frames": 32,
+    "pan_x": 0.09,
+    "residual_degree": 3,
+    "seeds": [
+      17,
+      23,
+      31,
+      47
+    ],
+    "target_size": 128,
+    "tile_sizes": [
+      4,
+      8,
+      16
+    ],
+    "tile_t": 4,
+    "tubes": 256,
+    "velocity_scale": 0.01,
+    "zoom": 0.025
+  },
+  "name": "depth_banded_homography_flow_culling_control",
+  "note": "Tile-pair control for F0e. It separates the residual-coordinate culling claim from ordinary image-space culling. This still estimates culling work only; it is not a flow-sheared Metal render-time measurement.",
+  "pass": true,
+  "rows": [
+    {
+      "direct_image_ratio_vs_segmented_f4": 0.9989441824452735,
+      "direct_image_tile_pairs": 56768,
+      "fallback_tubes": 6,
+      "flow_sheared_hybrid_tile_pairs": 46831,
+      "flow_sheared_ratio_vs_image_space": 0.8244023518642397,
+      "flow_sheared_ratio_vs_segmented_f4": 0.8240831984233125,
+      "flow_sheared_saves_vs_image_space_tile_pairs": 9975,
+      "hybrid_center_max_px": 0.9977508783340454,
+      "hybrid_center_p95_px": 0.16951286792755127,
+      "image_nonfallback_tile_pairs": 54603,
+      "image_space_hybrid_tile_pairs": 56806,
+      "image_space_ratio_vs_segmented_f4": 0.9996128668966002,
+      "pass": true,
+      "prt_fallback_tile_pairs": 2203,
+      "residual_nonfallback_tile_pairs": 44628,
+      "seed": 17,
+      "segmented_f4_tile_pairs": 56828,
+      "tile_size": 4
+    },
+    {
+      "direct_image_ratio_vs_segmented_f4": 0.9991702679343129,
+      "direct_image_tile_pairs": 57802,
+      "fallback_tubes": 0,
+      "flow_sheared_hybrid_tile_pairs": 47026,
+      "flow_sheared_ratio_vs_image_space": 0.8147827292258646,
+      "flow_sheared_ratio_vs_segmented_f4": 0.812895419187554,
+      "flow_sheared_saves_vs_image_space_tile_pairs": 10690,
+      "hybrid_center_max_px": 0.8084192276000977,
+      "hybrid_center_p95_px": 0.19211815297603607,
+      "image_nonfallback_tile_pairs": 57716,
+      "image_space_hybrid_tile_pairs": 57716,
+      "image_space_ratio_vs_segmented_f4": 0.9976836646499568,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "residual_nonfallback_tile_pairs": 47026,
+      "seed": 23,
+      "segmented_f4_tile_pairs": 57850,
+      "tile_size": 4
+    },
+    {
+      "direct_image_ratio_vs_segmented_f4": 0.999185343109216,
+      "direct_image_tile_pairs": 57646,
+      "fallback_tubes": 3,
+      "flow_sheared_hybrid_tile_pairs": 46741,
+      "flow_sheared_ratio_vs_image_space": 0.8109969809487455,
+      "flow_sheared_ratio_vs_segmented_f4": 0.8101676113219974,
+      "flow_sheared_saves_vs_image_space_tile_pairs": 10893,
+      "hybrid_center_max_px": 0.931444525718689,
+      "hybrid_center_p95_px": 0.20074263215065002,
+      "image_nonfallback_tile_pairs": 56612,
+      "image_space_hybrid_tile_pairs": 57634,
+      "image_space_ratio_vs_segmented_f4": 0.998977345605186,
+      "pass": true,
+      "prt_fallback_tile_pairs": 1022,
+      "residual_nonfallback_tile_pairs": 45719,
+      "seed": 31,
+      "segmented_f4_tile_pairs": 57693,
+      "tile_size": 4
+    },
+    {
+      "direct_image_ratio_vs_segmented_f4": 1.0005045847615401,
+      "direct_image_tile_pairs": 57502,
+      "fallback_tubes": 3,
+      "flow_sheared_hybrid_tile_pairs": 46972,
+      "flow_sheared_ratio_vs_image_space": 0.8162797163909357,
+      "flow_sheared_ratio_vs_segmented_f4": 0.8172881178988395,
+      "flow_sheared_saves_vs_image_space_tile_pairs": 10572,
+      "hybrid_center_max_px": 0.9775803089141846,
+      "hybrid_center_p95_px": 0.17315368354320526,
+      "image_nonfallback_tile_pairs": 56382,
+      "image_space_hybrid_tile_pairs": 57544,
+      "image_space_ratio_vs_segmented_f4": 1.0012353626920467,
+      "pass": true,
+      "prt_fallback_tile_pairs": 1162,
+      "residual_nonfallback_tile_pairs": 45810,
+      "seed": 47,
+      "segmented_f4_tile_pairs": 57473,
+      "tile_size": 4
+    },
+    {
+      "direct_image_ratio_vs_segmented_f4": 0.9979144412228496,
+      "direct_image_tile_pairs": 19618,
+      "fallback_tubes": 6,
+      "flow_sheared_hybrid_tile_pairs": 16668,
+      "flow_sheared_ratio_vs_image_space": 0.8494979868508231,
+      "flow_sheared_ratio_vs_segmented_f4": 0.8478559438425148,
+      "flow_sheared_saves_vs_image_space_tile_pairs": 2953,
+      "hybrid_center_max_px": 0.9977508783340454,
+      "hybrid_center_p95_px": 0.16951286792755127,
+      "image_nonfallback_tile_pairs": 18905,
+      "image_space_hybrid_tile_pairs": 19621,
+      "image_space_ratio_vs_segmented_f4": 0.9980670430845923,
+      "pass": true,
+      "prt_fallback_tile_pairs": 716,
+      "residual_nonfallback_tile_pairs": 15952,
+      "seed": 17,
+      "segmented_f4_tile_pairs": 19659,
+      "tile_size": 8
+    },
+    {
+      "direct_image_ratio_vs_segmented_f4": 0.9996486825595985,
+      "direct_image_tile_pairs": 19918,
+      "fallback_tubes": 0,
+      "flow_sheared_hybrid_tile_pairs": 16542,
+      "flow_sheared_ratio_vs_image_space": 0.8318414965302222,
+      "flow_sheared_ratio_vs_segmented_f4": 0.8302132998745295,
+      "flow_sheared_saves_vs_image_space_tile_pairs": 3344,
+      "hybrid_center_max_px": 0.8084192276000977,
+      "hybrid_center_p95_px": 0.19211815297603607,
+      "image_nonfallback_tile_pairs": 19886,
+      "image_space_hybrid_tile_pairs": 19886,
+      "image_space_ratio_vs_segmented_f4": 0.9980426599749059,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "residual_nonfallback_tile_pairs": 16542,
+      "seed": 23,
+      "segmented_f4_tile_pairs": 19925,
+      "tile_size": 8
+    },
+    {
+      "direct_image_ratio_vs_segmented_f4": 1.000455235204856,
+      "direct_image_tile_pairs": 19779,
+      "fallback_tubes": 3,
+      "flow_sheared_hybrid_tile_pairs": 16755,
+      "flow_sheared_ratio_vs_image_space": 0.8476248292608893,
+      "flow_sheared_ratio_vs_segmented_f4": 0.8474962063732928,
+      "flow_sheared_saves_vs_image_space_tile_pairs": 3012,
+      "hybrid_center_max_px": 0.931444525718689,
+      "hybrid_center_p95_px": 0.20074263215065002,
+      "image_nonfallback_tile_pairs": 19425,
+      "image_space_hybrid_tile_pairs": 19767,
+      "image_space_ratio_vs_segmented_f4": 0.9998482549317147,
+      "pass": true,
+      "prt_fallback_tile_pairs": 342,
+      "residual_nonfallback_tile_pairs": 16413,
+      "seed": 31,
+      "segmented_f4_tile_pairs": 19770,
+      "tile_size": 8
+    },
+    {
+      "direct_image_ratio_vs_segmented_f4": 1.0008088978766432,
+      "direct_image_tile_pairs": 19796,
+      "fallback_tubes": 3,
+      "flow_sheared_hybrid_tile_pairs": 16738,
+      "flow_sheared_ratio_vs_image_space": 0.8444578981887897,
+      "flow_sheared_ratio_vs_segmented_f4": 0.8462082912032356,
+      "flow_sheared_saves_vs_image_space_tile_pairs": 3083,
+      "hybrid_center_max_px": 0.9775803089141846,
+      "hybrid_center_p95_px": 0.17315368354320526,
+      "image_nonfallback_tile_pairs": 19451,
+      "image_space_hybrid_tile_pairs": 19821,
+      "image_space_ratio_vs_segmented_f4": 1.002072800808898,
+      "pass": true,
+      "prt_fallback_tile_pairs": 370,
+      "residual_nonfallback_tile_pairs": 16368,
+      "seed": 47,
+      "segmented_f4_tile_pairs": 19780,
+      "tile_size": 8
+    },
+    {
+      "direct_image_ratio_vs_segmented_f4": 0.9989093553078041,
+      "direct_image_tile_pairs": 8243,
+      "fallback_tubes": 6,
+      "flow_sheared_hybrid_tile_pairs": 7489,
+      "flow_sheared_ratio_vs_image_space": 0.9074276020840907,
+      "flow_sheared_ratio_vs_segmented_f4": 0.907537566650509,
+      "flow_sheared_saves_vs_image_space_tile_pairs": 764,
+      "hybrid_center_max_px": 0.9977508783340454,
+      "hybrid_center_p95_px": 0.16951286792755127,
+      "image_nonfallback_tile_pairs": 7980,
+      "image_space_hybrid_tile_pairs": 8253,
+      "image_space_ratio_vs_segmented_f4": 1.0001211827435774,
+      "pass": true,
+      "prt_fallback_tile_pairs": 273,
+      "residual_nonfallback_tile_pairs": 7216,
+      "seed": 17,
+      "segmented_f4_tile_pairs": 8252,
+      "tile_size": 16
+    },
+    {
+      "direct_image_ratio_vs_segmented_f4": 1.0,
+      "direct_image_tile_pairs": 8294,
+      "fallback_tubes": 0,
+      "flow_sheared_hybrid_tile_pairs": 7297,
+      "flow_sheared_ratio_vs_image_space": 0.8809610044669806,
+      "flow_sheared_ratio_vs_segmented_f4": 0.8797926211719315,
+      "flow_sheared_saves_vs_image_space_tile_pairs": 986,
+      "hybrid_center_max_px": 0.8084192276000977,
+      "hybrid_center_p95_px": 0.19211815297603607,
+      "image_nonfallback_tile_pairs": 8283,
+      "image_space_hybrid_tile_pairs": 8283,
+      "image_space_ratio_vs_segmented_f4": 0.9986737400530504,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "residual_nonfallback_tile_pairs": 7297,
+      "seed": 23,
+      "segmented_f4_tile_pairs": 8294,
+      "tile_size": 16
+    },
+    {
+      "direct_image_ratio_vs_segmented_f4": 1.000361663652803,
+      "direct_image_tile_pairs": 8298,
+      "fallback_tubes": 3,
+      "flow_sheared_hybrid_tile_pairs": 7363,
+      "flow_sheared_ratio_vs_image_space": 0.8877501808536291,
+      "flow_sheared_ratio_vs_segmented_f4": 0.8876431585292345,
+      "flow_sheared_saves_vs_image_space_tile_pairs": 931,
+      "hybrid_center_max_px": 0.931444525718689,
+      "hybrid_center_p95_px": 0.20074263215065002,
+      "image_nonfallback_tile_pairs": 8166,
+      "image_space_hybrid_tile_pairs": 8294,
+      "image_space_ratio_vs_segmented_f4": 0.9998794454490657,
+      "pass": true,
+      "prt_fallback_tile_pairs": 128,
+      "residual_nonfallback_tile_pairs": 7235,
+      "seed": 31,
+      "segmented_f4_tile_pairs": 8295,
+      "tile_size": 16
+    },
+    {
+      "direct_image_ratio_vs_segmented_f4": 1.000364874726344,
+      "direct_image_tile_pairs": 8225,
+      "fallback_tubes": 3,
+      "flow_sheared_hybrid_tile_pairs": 7422,
+      "flow_sheared_ratio_vs_image_space": 0.9012750455373406,
+      "flow_sheared_ratio_vs_segmented_f4": 0.9027000729749453,
+      "flow_sheared_saves_vs_image_space_tile_pairs": 813,
+      "hybrid_center_max_px": 0.9775803089141846,
+      "hybrid_center_p95_px": 0.17315368354320526,
+      "image_nonfallback_tile_pairs": 8105,
+      "image_space_hybrid_tile_pairs": 8235,
+      "image_space_ratio_vs_segmented_f4": 1.0015811238141572,
+      "pass": true,
+      "prt_fallback_tile_pairs": 130,
+      "residual_nonfallback_tile_pairs": 7292,
+      "seed": 47,
+      "segmented_f4_tile_pairs": 8222,
+      "tile_size": 16
+    }
+  ],
+  "summary_by_tile_size": {
+    "16": {
+      "flow_sheared_ratio_vs_image_space": {
+        "max": 0.9074276020840907,
+        "median": 0.8945126131954848,
+        "min": 0.8809610044669806
+      },
+      "flow_sheared_ratio_vs_segmented_f4": {
+        "max": 0.907537566650509,
+        "median": 0.8951716157520899,
+        "min": 0.8797926211719315
+      },
+      "flow_sheared_saves_vs_image_space_tile_pairs": {
+        "max": 986.0,
+        "median": 872.0,
+        "min": 764.0
+      },
+      "image_space_ratio_vs_segmented_f4": {
+        "max": 1.0015811238141572,
+        "median": 1.0000003140963216,
+        "min": 0.9986737400530504
+      },
+      "pass_count": 4
+    },
+    "4": {
+      "flow_sheared_ratio_vs_image_space": {
+        "max": 0.8244023518642397,
+        "median": 0.8155312228084002,
+        "min": 0.8109969809487455
+      },
+      "flow_sheared_ratio_vs_segmented_f4": {
+        "max": 0.8240831984233125,
+        "median": 0.8150917685431968,
+        "min": 0.8101676113219974
+      },
+      "flow_sheared_saves_vs_image_space_tile_pairs": {
+        "max": 10893.0,
+        "median": 10631.0,
+        "min": 9975.0
+      },
+      "image_space_ratio_vs_segmented_f4": {
+        "max": 1.0012353626920467,
+        "median": 0.9992951062508931,
+        "min": 0.9976836646499568
+      },
+      "pass_count": 4
+    },
+    "8": {
+      "flow_sheared_ratio_vs_image_space": {
+        "max": 0.8494979868508231,
+        "median": 0.8460413637248395,
+        "min": 0.8318414965302222
+      },
+      "flow_sheared_ratio_vs_segmented_f4": {
+        "max": 0.8478559438425148,
+        "median": 0.8468522487882642,
+        "min": 0.8302132998745295
+      },
+      "flow_sheared_saves_vs_image_space_tile_pairs": {
+        "max": 3344.0,
+        "median": 3047.5,
+        "min": 2953.0
+      },
+      "image_space_ratio_vs_segmented_f4": {
+        "max": 1.002072800808898,
+        "median": 0.9989576490081535,
+        "min": 0.9980426599749059
+      },
+      "pass_count": 4
+    }
+  }
+}
