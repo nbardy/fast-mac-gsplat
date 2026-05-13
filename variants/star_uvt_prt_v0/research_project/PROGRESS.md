@@ -97,6 +97,7 @@ Last updated: 2026-05-13
 - [x] Gate F0e: tile-policy estimate sweep for the hybrid fallback row.
 - [x] Gate F0f: residual-coordinate culling control against ordinary image-space culling.
 - [x] Gate F0g: stricter reference-atlas-plus-residual culling control.
+- [x] Gate F0h: inverse-homography atlas-residual representation probe.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2769,6 +2770,45 @@ wrong implementation target: do not build a raw residual-only rasterizer. Build
 a reference-atlas-plus-residual tile path, then evaluate the depth-band
 homography warp into screen space.
 
+Gate F0h fixes the remaining representation mismatch. Earlier F0 rows fit the
+residual as a screen-space delta. A renderer-facing atlas path should instead
+invert each depth-band homography, fit the residual in reference-atlas
+coordinates, then warp `reference_uv + residual_atlas(t)` forward.
+
+Command:
+
+```text
+python3 research_project/benchmarks/depth_banded_homography_flow_atlas_residual_probe.py --out-json research_project/benchmarks/results/depth_banded_homography_flow_atlas_residual_probe_f0h_hardcam_velocity001_4seeds_tiles4_8_16.json
+```
+
+Result:
+
+```text
+All 12 seed/tile rows pass with zero fallback tubes.
+Atlas-residual hybrid center max: min 0.3049 px, median 0.4606 px, max 0.5828 px.
+Atlas-residual hybrid PSNR: min 73.98 dB, median 74.98 dB, max 77.15 dB.
+
+4x4 atlas ratio vs segmented_f4: min 0.817, median 0.819, max 0.828.
+4x4 image-space control ratio vs segmented_f4: min 0.999, median 0.999, max 1.001.
+4x4 atlas savings vs image-space control: min 9926, median 10304.5, max 10550 tile pairs.
+
+8x8 atlas ratio vs segmented_f4: min 0.850, median 0.854, max 0.855.
+8x8 image-space control ratio vs segmented_f4: min 0.998, median 1.000, max 1.001.
+8x8 atlas savings vs image-space control: min 2811, median 2910.5, max 2981 tile pairs.
+
+16x16 atlas ratio vs segmented_f4: min 0.886, median 0.894, max 0.903.
+16x16 image-space control ratio vs segmented_f4: min 0.999, median 1.000, max 1.001.
+16x16 atlas savings vs image-space control: min 802, median 879.5, max 934 tile pairs.
+```
+
+Read: F0h is the current best representation target for the flow-sheared path.
+Fitting residuals in atlas coordinates is cleaner than adding screen-space
+residuals after the homography: the hard-camera/object-motion row no longer
+needs any PRT fallback under these four seeds, while preserving the 4x4 culling
+advantage. The fallback route still matters for tougher rows and as a safety
+valve, but the first Metal renderer should implement inverse-homography
+atlas-residual tubes rather than the earlier screen-additive residual variant.
+
 The separate representation idea tested by F0 is
 depth-banded homography-flow gauge residual tubes. Compile a small bank of
 camera-induced depth-band flows from `K_seq,w2c_seq`, let each world tube store
@@ -2815,4 +2855,4 @@ should be measured before splitting a camera window.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, D3x rejects naive replay caching, and D3y shows write-set pruning can turn exact 200-vs-200 into a train-wall win.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, and D3z/D4a are boundary results showing that more steps must still fit the train-wall budget and improve quality before replacing D3y.
-12. Continue depth-banded homography-flow gauge residual tubes after F0-F0g: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion needs a small PRT fallback/window-split tail. Four hard-camera/object-motion seeds all pass the hybrid upper-bound. The tile-estimate sweep favors 4x4 over 8x8/16x16 on the synthetic stress, F0f shows the culling win comes from flow-sheared coordinates rather than ordinary screen-space culling, and F0g preserves the win under the stricter reference-atlas-plus-residual coordinate. The current implementation is still a dense upper-bound with exact direct depth, not a Metal flow-sheared renderer or training path.
+12. Continue depth-banded homography-flow gauge residual tubes after F0-F0h: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion originally needed a small PRT fallback/window-split tail under screen-additive residuals. F0h is now the better renderer target: inverse-homography atlas residuals pass all four hard-camera/object-motion seeds with no fallback tubes, high PSNR, and the same 4x4 culling advantage. The current implementation is still a dense upper-bound with exact direct depth, not a Metal flow-sheared renderer or training path.

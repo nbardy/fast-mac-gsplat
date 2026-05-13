@@ -1,0 +1,424 @@
+{
+  "config": {
+    "depth_bands": 4,
+    "dolly_z": 0.12,
+    "fallback_max_px": 1.0,
+    "frames": 32,
+    "pan_x": 0.09,
+    "psnr_gate": 50.0,
+    "residual_degree": 3,
+    "seeds": [
+      17,
+      23,
+      31,
+      47
+    ],
+    "target_size": 128,
+    "tile_sizes": [
+      4,
+      8,
+      16
+    ],
+    "tile_t": 4,
+    "tubes": 256,
+    "velocity_scale": 0.01,
+    "zoom": 0.025
+  },
+  "name": "depth_banded_homography_flow_atlas_residual_probe",
+  "note": "Tests the renderer-facing representation: invert each depth-band homography to fit a residual in reference-atlas coordinates, then warp reference-atlas-plus-residual centers forward. This is still dense rendering plus tile-pair estimates, not Metal time.",
+  "pass": true,
+  "rows": [
+    {
+      "atlas_hybrid_tile_pairs": 46681,
+      "atlas_nonfallback_tile_pairs": 46681,
+      "atlas_ratio_vs_image_space": 0.8222539279926725,
+      "atlas_ratio_vs_segmented_f4": 0.8214436545364961,
+      "atlas_saves_vs_image_space_tile_pairs": 10091,
+      "fallback_tubes": 0,
+      "hybrid_center_max_px": 0.4702293276786804,
+      "hybrid_center_p95_px": 0.031251370906829834,
+      "hybrid_image_psnr": 74.51581096073463,
+      "image_nonfallback_tile_pairs": 56772,
+      "image_space_hybrid_tile_pairs": 56772,
+      "image_space_ratio_vs_segmented_f4": 0.9990145702822553,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "pure_center_max_px": 0.4702293276786804,
+      "pure_center_p95_px": 0.031251370906829834,
+      "seed": 17,
+      "segmented_f4_tile_pairs": 56828,
+      "segmented_image_psnr": 51.45021045809537,
+      "tile_size": 4,
+      "warped_image_psnr": 74.51581096073463
+    },
+    {
+      "atlas_hybrid_tile_pairs": 47257,
+      "atlas_nonfallback_tile_pairs": 47257,
+      "atlas_ratio_vs_image_space": 0.8179489398528775,
+      "atlas_ratio_vs_segmented_f4": 0.8168885047536733,
+      "atlas_saves_vs_image_space_tile_pairs": 10518,
+      "fallback_tubes": 0,
+      "hybrid_center_max_px": 0.30485305190086365,
+      "hybrid_center_p95_px": 0.02885119989514351,
+      "hybrid_image_psnr": 77.1453791906717,
+      "image_nonfallback_tile_pairs": 57775,
+      "image_space_hybrid_tile_pairs": 57775,
+      "image_space_ratio_vs_segmented_f4": 0.9987035436473639,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "pure_center_max_px": 0.30485305190086365,
+      "pure_center_p95_px": 0.02885119989514351,
+      "seed": 23,
+      "segmented_f4_tile_pairs": 57850,
+      "segmented_image_psnr": 52.18647723384755,
+      "tile_size": 4,
+      "warped_image_psnr": 77.1453791906717
+    },
+    {
+      "atlas_hybrid_tile_pairs": 47111,
+      "atlas_nonfallback_tile_pairs": 47111,
+      "atlas_ratio_vs_image_space": 0.817034043807773,
+      "atlas_ratio_vs_segmented_f4": 0.8165808676962543,
+      "atlas_saves_vs_image_space_tile_pairs": 10550,
+      "fallback_tubes": 0,
+      "hybrid_center_max_px": 0.58281409740448,
+      "hybrid_center_p95_px": 0.0337318480014801,
+      "hybrid_image_psnr": 73.98255306526069,
+      "image_nonfallback_tile_pairs": 57661,
+      "image_space_hybrid_tile_pairs": 57661,
+      "image_space_ratio_vs_segmented_f4": 0.9994453399892534,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "pure_center_max_px": 0.58281409740448,
+      "pure_center_p95_px": 0.0337318480014801,
+      "seed": 31,
+      "segmented_f4_tile_pairs": 57693,
+      "segmented_image_psnr": 51.35254828056165,
+      "tile_size": 4,
+      "warped_image_psnr": 73.98255306526069
+    },
+    {
+      "atlas_hybrid_tile_pairs": 47596,
+      "atlas_nonfallback_tile_pairs": 47596,
+      "atlas_ratio_vs_image_space": 0.8274399360244776,
+      "atlas_ratio_vs_segmented_f4": 0.8281453900092217,
+      "atlas_saves_vs_image_space_tile_pairs": 9926,
+      "fallback_tubes": 0,
+      "hybrid_center_max_px": 0.45087143778800964,
+      "hybrid_center_p95_px": 0.030326299369335175,
+      "hybrid_image_psnr": 75.43491692340591,
+      "image_nonfallback_tile_pairs": 57522,
+      "image_space_hybrid_tile_pairs": 57522,
+      "image_space_ratio_vs_segmented_f4": 1.0008525742522576,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "pure_center_max_px": 0.45087143778800964,
+      "pure_center_p95_px": 0.030326299369335175,
+      "seed": 47,
+      "segmented_f4_tile_pairs": 57473,
+      "segmented_image_psnr": 51.232409601755926,
+      "tile_size": 4,
+      "warped_image_psnr": 75.43491692340591
+    },
+    {
+      "atlas_hybrid_tile_pairs": 16803,
+      "atlas_nonfallback_tile_pairs": 16803,
+      "atlas_ratio_vs_image_space": 0.8566840012236158,
+      "atlas_ratio_vs_segmented_f4": 0.854723027620937,
+      "atlas_saves_vs_image_space_tile_pairs": 2811,
+      "fallback_tubes": 0,
+      "hybrid_center_max_px": 0.4702293276786804,
+      "hybrid_center_p95_px": 0.031251370906829834,
+      "hybrid_image_psnr": 74.51581096073463,
+      "image_nonfallback_tile_pairs": 19614,
+      "image_space_hybrid_tile_pairs": 19614,
+      "image_space_ratio_vs_segmented_f4": 0.9977109720738593,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "pure_center_max_px": 0.4702293276786804,
+      "pure_center_p95_px": 0.031251370906829834,
+      "seed": 17,
+      "segmented_f4_tile_pairs": 19659,
+      "segmented_image_psnr": 51.45021045809537,
+      "tile_size": 8,
+      "warped_image_psnr": 74.51581096073463
+    },
+    {
+      "atlas_hybrid_tile_pairs": 16929,
+      "atlas_nonfallback_tile_pairs": 16929,
+      "atlas_ratio_vs_image_space": 0.8502762430939227,
+      "atlas_ratio_vs_segmented_f4": 0.8496361355081555,
+      "atlas_saves_vs_image_space_tile_pairs": 2981,
+      "fallback_tubes": 0,
+      "hybrid_center_max_px": 0.30485305190086365,
+      "hybrid_center_p95_px": 0.02885119989514351,
+      "hybrid_image_psnr": 77.1453791906717,
+      "image_nonfallback_tile_pairs": 19910,
+      "image_space_hybrid_tile_pairs": 19910,
+      "image_space_ratio_vs_segmented_f4": 0.9992471769134254,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "pure_center_max_px": 0.30485305190086365,
+      "pure_center_p95_px": 0.02885119989514351,
+      "seed": 23,
+      "segmented_f4_tile_pairs": 19925,
+      "segmented_image_psnr": 52.18647723384755,
+      "tile_size": 8,
+      "warped_image_psnr": 77.1453791906717
+    },
+    {
+      "atlas_hybrid_tile_pairs": 16858,
+      "atlas_nonfallback_tile_pairs": 16858,
+      "atlas_ratio_vs_image_space": 0.8523181151726579,
+      "atlas_ratio_vs_segmented_f4": 0.8527061203844208,
+      "atlas_saves_vs_image_space_tile_pairs": 2921,
+      "fallback_tubes": 0,
+      "hybrid_center_max_px": 0.58281409740448,
+      "hybrid_center_p95_px": 0.0337318480014801,
+      "hybrid_image_psnr": 73.98255306526069,
+      "image_nonfallback_tile_pairs": 19779,
+      "image_space_hybrid_tile_pairs": 19779,
+      "image_space_ratio_vs_segmented_f4": 1.000455235204856,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "pure_center_max_px": 0.58281409740448,
+      "pure_center_p95_px": 0.0337318480014801,
+      "seed": 31,
+      "segmented_f4_tile_pairs": 19770,
+      "segmented_image_psnr": 51.35254828056165,
+      "tile_size": 8,
+      "warped_image_psnr": 73.98255306526069
+    },
+    {
+      "atlas_hybrid_tile_pairs": 16906,
+      "atlas_nonfallback_tile_pairs": 16906,
+      "atlas_ratio_vs_image_space": 0.8535797233161668,
+      "atlas_ratio_vs_segmented_f4": 0.8547017189079879,
+      "atlas_saves_vs_image_space_tile_pairs": 2900,
+      "fallback_tubes": 0,
+      "hybrid_center_max_px": 0.45087143778800964,
+      "hybrid_center_p95_px": 0.030326299369335175,
+      "hybrid_image_psnr": 75.43491692340591,
+      "image_nonfallback_tile_pairs": 19806,
+      "image_space_hybrid_tile_pairs": 19806,
+      "image_space_ratio_vs_segmented_f4": 1.001314459049545,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "pure_center_max_px": 0.45087143778800964,
+      "pure_center_p95_px": 0.030326299369335175,
+      "seed": 47,
+      "segmented_f4_tile_pairs": 19780,
+      "segmented_image_psnr": 51.232409601755926,
+      "tile_size": 8,
+      "warped_image_psnr": 75.43491692340591
+    },
+    {
+      "atlas_hybrid_tile_pairs": 7309,
+      "atlas_nonfallback_tile_pairs": 7309,
+      "atlas_ratio_vs_image_space": 0.886691738444741,
+      "atlas_ratio_vs_segmented_f4": 0.8857246728065924,
+      "atlas_saves_vs_image_space_tile_pairs": 934,
+      "fallback_tubes": 0,
+      "hybrid_center_max_px": 0.4702293276786804,
+      "hybrid_center_p95_px": 0.031251370906829834,
+      "hybrid_image_psnr": 74.51581096073463,
+      "image_nonfallback_tile_pairs": 8243,
+      "image_space_hybrid_tile_pairs": 8243,
+      "image_space_ratio_vs_segmented_f4": 0.9989093553078041,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "pure_center_max_px": 0.4702293276786804,
+      "pure_center_p95_px": 0.031251370906829834,
+      "seed": 17,
+      "segmented_f4_tile_pairs": 8252,
+      "segmented_image_psnr": 51.45021045809537,
+      "tile_size": 16,
+      "warped_image_psnr": 74.51581096073463
+    },
+    {
+      "atlas_hybrid_tile_pairs": 7412,
+      "atlas_nonfallback_tile_pairs": 7412,
+      "atlas_ratio_vs_image_space": 0.8936580660718592,
+      "atlas_ratio_vs_segmented_f4": 0.8936580660718592,
+      "atlas_saves_vs_image_space_tile_pairs": 882,
+      "fallback_tubes": 0,
+      "hybrid_center_max_px": 0.30485305190086365,
+      "hybrid_center_p95_px": 0.02885119989514351,
+      "hybrid_image_psnr": 77.1453791906717,
+      "image_nonfallback_tile_pairs": 8294,
+      "image_space_hybrid_tile_pairs": 8294,
+      "image_space_ratio_vs_segmented_f4": 1.0,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "pure_center_max_px": 0.30485305190086365,
+      "pure_center_p95_px": 0.02885119989514351,
+      "seed": 23,
+      "segmented_f4_tile_pairs": 8294,
+      "segmented_image_psnr": 52.18647723384755,
+      "tile_size": 16,
+      "warped_image_psnr": 77.1453791906717
+    },
+    {
+      "atlas_hybrid_tile_pairs": 7421,
+      "atlas_nonfallback_tile_pairs": 7421,
+      "atlas_ratio_vs_image_space": 0.8943118823812967,
+      "atlas_ratio_vs_segmented_f4": 0.8946353224834237,
+      "atlas_saves_vs_image_space_tile_pairs": 877,
+      "fallback_tubes": 0,
+      "hybrid_center_max_px": 0.58281409740448,
+      "hybrid_center_p95_px": 0.0337318480014801,
+      "hybrid_image_psnr": 73.98255306526069,
+      "image_nonfallback_tile_pairs": 8298,
+      "image_space_hybrid_tile_pairs": 8298,
+      "image_space_ratio_vs_segmented_f4": 1.000361663652803,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "pure_center_max_px": 0.58281409740448,
+      "pure_center_p95_px": 0.0337318480014801,
+      "seed": 31,
+      "segmented_f4_tile_pairs": 8295,
+      "segmented_image_psnr": 51.35254828056165,
+      "tile_size": 16,
+      "warped_image_psnr": 73.98255306526069
+    },
+    {
+      "atlas_hybrid_tile_pairs": 7425,
+      "atlas_nonfallback_tile_pairs": 7425,
+      "atlas_ratio_vs_image_space": 0.9025161055062598,
+      "atlas_ratio_vs_segmented_f4": 0.9030649477012892,
+      "atlas_saves_vs_image_space_tile_pairs": 802,
+      "fallback_tubes": 0,
+      "hybrid_center_max_px": 0.45087143778800964,
+      "hybrid_center_p95_px": 0.030326299369335175,
+      "hybrid_image_psnr": 75.43491692340591,
+      "image_nonfallback_tile_pairs": 8227,
+      "image_space_hybrid_tile_pairs": 8227,
+      "image_space_ratio_vs_segmented_f4": 1.0006081245439067,
+      "pass": true,
+      "prt_fallback_tile_pairs": 0,
+      "pure_center_max_px": 0.45087143778800964,
+      "pure_center_p95_px": 0.030326299369335175,
+      "seed": 47,
+      "segmented_f4_tile_pairs": 8222,
+      "segmented_image_psnr": 51.232409601755926,
+      "tile_size": 16,
+      "warped_image_psnr": 75.43491692340591
+    }
+  ],
+  "summary_by_tile_size": {
+    "16": {
+      "atlas_ratio_vs_image_space": {
+        "max": 0.9025161055062598,
+        "median": 0.893984974226578,
+        "min": 0.886691738444741
+      },
+      "atlas_ratio_vs_segmented_f4": {
+        "max": 0.9030649477012892,
+        "median": 0.8941466942776415,
+        "min": 0.8857246728065924
+      },
+      "atlas_saves_vs_image_space_tile_pairs": {
+        "max": 934.0,
+        "median": 879.5,
+        "min": 802.0
+      },
+      "fallback_tubes": {
+        "max": 0.0,
+        "median": 0.0,
+        "min": 0.0
+      },
+      "hybrid_center_max_px": {
+        "max": 0.58281409740448,
+        "median": 0.46055038273334503,
+        "min": 0.30485305190086365
+      },
+      "hybrid_image_psnr": {
+        "max": 77.1453791906717,
+        "median": 74.97536394207026,
+        "min": 73.98255306526069
+      },
+      "image_space_ratio_vs_segmented_f4": {
+        "max": 1.0006081245439067,
+        "median": 1.0001808318264014,
+        "min": 0.9989093553078041
+      },
+      "pass_count": 4
+    },
+    "4": {
+      "atlas_ratio_vs_image_space": {
+        "max": 0.8274399360244776,
+        "median": 0.820101433922775,
+        "min": 0.817034043807773
+      },
+      "atlas_ratio_vs_segmented_f4": {
+        "max": 0.8281453900092217,
+        "median": 0.8191660796450847,
+        "min": 0.8165808676962543
+      },
+      "atlas_saves_vs_image_space_tile_pairs": {
+        "max": 10550.0,
+        "median": 10304.5,
+        "min": 9926.0
+      },
+      "fallback_tubes": {
+        "max": 0.0,
+        "median": 0.0,
+        "min": 0.0
+      },
+      "hybrid_center_max_px": {
+        "max": 0.58281409740448,
+        "median": 0.46055038273334503,
+        "min": 0.30485305190086365
+      },
+      "hybrid_image_psnr": {
+        "max": 77.1453791906717,
+        "median": 74.97536394207026,
+        "min": 73.98255306526069
+      },
+      "image_space_ratio_vs_segmented_f4": {
+        "max": 1.0008525742522576,
+        "median": 0.9992299551357544,
+        "min": 0.9987035436473639
+      },
+      "pass_count": 4
+    },
+    "8": {
+      "atlas_ratio_vs_image_space": {
+        "max": 0.8566840012236158,
+        "median": 0.8529489192444124,
+        "min": 0.8502762430939227
+      },
+      "atlas_ratio_vs_segmented_f4": {
+        "max": 0.854723027620937,
+        "median": 0.8537039196462044,
+        "min": 0.8496361355081555
+      },
+      "atlas_saves_vs_image_space_tile_pairs": {
+        "max": 2981.0,
+        "median": 2910.5,
+        "min": 2811.0
+      },
+      "fallback_tubes": {
+        "max": 0.0,
+        "median": 0.0,
+        "min": 0.0
+      },
+      "hybrid_center_max_px": {
+        "max": 0.58281409740448,
+        "median": 0.46055038273334503,
+        "min": 0.30485305190086365
+      },
+      "hybrid_image_psnr": {
+        "max": 77.1453791906717,
+        "median": 74.97536394207026,
+        "min": 73.98255306526069
+      },
+      "image_space_ratio_vs_segmented_f4": {
+        "max": 1.001314459049545,
+        "median": 0.9998512060591407,
+        "min": 0.9977109720738593
+      },
+      "pass_count": 4
+    }
+  }
+}
