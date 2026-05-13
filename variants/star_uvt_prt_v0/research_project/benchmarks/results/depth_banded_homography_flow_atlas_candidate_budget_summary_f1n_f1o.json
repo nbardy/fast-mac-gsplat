@@ -1,0 +1,1375 @@
+{
+  "name": "depth_banded_homography_flow_atlas_candidate_budget_summary",
+  "note": "Read-only accounting summary for F1n/F1o cached atlas result JSONs. Memory rows are estimates from recorded tile configs and candidate budgets; no renderer is run.",
+  "pass": true,
+  "rows": [
+    {
+      "candidate_budget": {
+        "fits": true,
+        "headroom_candidates": 0,
+        "max_pixel_candidates": 512,
+        "required_pixel_candidates": 512,
+        "usage_fraction": 1.0
+      },
+      "config": {
+        "atlas_tile_config": {
+          "tile_capacity": 256,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "depth_bands": 2,
+        "frames": 16,
+        "prt_tile_config": {
+          "tile_capacity": 512,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "seed": 17,
+        "support_scale": 1.25,
+        "target_size": 64,
+        "tubes": 512
+      },
+      "label": "depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed17_support1.25_16f_512t_2band_atlas4x4x4cap256_candidate512_prt4x4x4cap512",
+      "memory_estimate": {
+        "atlas_tile_bin_bytes": 2113536,
+        "atlas_tile_bin_mib": 2.015625,
+        "notes": {
+          "per_pixel_local_array": "candidate id uint32 plus depth float32 arrays sized by STAR_ATLAS_MAX_PIXEL_CANDIDATES; count register not included unless using *_with_count.",
+          "tile_bin": "tile counts plus overflow arrays plus one uint32 id slot per tile-capacity entry; atlas tile count includes the depth-band dimension."
+        },
+        "per_pixel_local_array_bytes": 4096,
+        "per_pixel_local_array_with_count_bytes": 4100,
+        "valid_prt_tile_bin_bytes": 2109440,
+        "valid_prt_tile_bin_mib": 2.01171875
+      },
+      "pass": true,
+      "psnr_rows": {
+        "cached_atlas_vs_direct_dense_reference": {
+          "l1": 9.99563326331554e-06,
+          "max_abs": 0.007509899791330099,
+          "mse": 7.394984624653489e-09,
+          "psnr": 81.31062724633294
+        },
+        "cached_atlas_vs_scan_atlas": {
+          "l1": 0.0,
+          "max_abs": 0.0,
+          "mse": 0.0,
+          "psnr": 120.0
+        },
+        "prt_tiled_vs_direct_dense_reference": {
+          "l1": 8.987917254899003e-08,
+          "max_abs": 6.511807441711426e-05,
+          "mse": 1.4900132993753146e-12,
+          "psnr": 118.26809855198776
+        },
+        "prt_tiled_vs_prt_direct": {
+          "l1": 2.2043174396912946e-08,
+          "max_abs": 7.003545761108398e-07,
+          "mse": 3.142580961014679e-15,
+          "psnr": 120.0
+        }
+      },
+      "source": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed17_support1.25_16f_512t_2band_atlas4x4x4cap256_candidate512_prt4x4x4cap512.json",
+      "speedups": {
+        "cached_vs_direct_dense_reference": 25.29015769034957,
+        "cached_vs_scan": 1.2016485985434182,
+        "cached_vs_valid_prt_direct": 1.9942907449719736,
+        "cached_vs_valid_prt_tiled": 1.2513346660755746,
+        "valid_prt_tiled_vs_valid_prt_direct": 1.5937309171066536
+      },
+      "tile_pairs": {
+        "atlas_active_tile_count": 1073,
+        "atlas_cached": 30842,
+        "atlas_max_tile_count": 154,
+        "atlas_overflow_tile_count": 0,
+        "valid_prt_active_tile_count": 619,
+        "valid_prt_max_tile_count": 285,
+        "valid_prt_overflow_tile_count": 0,
+        "valid_prt_tiled": 28921
+      },
+      "timing_ms": {
+        "atlas_cached": {
+          "max_ms": 25.393707997864112,
+          "median_ms": 23.843041999498382,
+          "min_ms": 23.417374992277473,
+          "sample_count": 3
+        },
+        "atlas_scan": {
+          "max_ms": 30.57020899723284,
+          "median_ms": 28.650958003709093,
+          "min_ms": 23.29695801017806,
+          "sample_count": 3
+        },
+        "direct_dense_reference": {
+          "max_ms": 607.830583001487,
+          "median_ms": 602.9942919849418,
+          "min_ms": 600.3272089874372,
+          "sample_count": 3
+        },
+        "valid_prt_direct": {
+          "max_ms": 49.884040985489264,
+          "median_ms": 47.549957991577685,
+          "min_ms": 44.97479199199006,
+          "sample_count": 3
+        },
+        "valid_prt_tiled": {
+          "max_ms": 30.34829199896194,
+          "median_ms": 29.83562499866821,
+          "min_ms": 29.724624997470528,
+          "sample_count": 3
+        }
+      }
+    },
+    {
+      "candidate_budget": {
+        "fits": true,
+        "headroom_candidates": 0,
+        "max_pixel_candidates": 512,
+        "required_pixel_candidates": 512,
+        "usage_fraction": 1.0
+      },
+      "config": {
+        "atlas_tile_config": {
+          "tile_capacity": 128,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "depth_bands": 4,
+        "frames": 16,
+        "prt_tile_config": {
+          "tile_capacity": 512,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "seed": 17,
+        "support_scale": 1.25,
+        "target_size": 64,
+        "tubes": 512
+      },
+      "label": "depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed17_support1.25_16f_512t_4band_atlas4x4x4cap128_candidate512_prt4x4x4cap512",
+      "memory_estimate": {
+        "atlas_tile_bin_bytes": 2129920,
+        "atlas_tile_bin_mib": 2.03125,
+        "notes": {
+          "per_pixel_local_array": "candidate id uint32 plus depth float32 arrays sized by STAR_ATLAS_MAX_PIXEL_CANDIDATES; count register not included unless using *_with_count.",
+          "tile_bin": "tile counts plus overflow arrays plus one uint32 id slot per tile-capacity entry; atlas tile count includes the depth-band dimension."
+        },
+        "per_pixel_local_array_bytes": 4096,
+        "per_pixel_local_array_with_count_bytes": 4100,
+        "valid_prt_tile_bin_bytes": 2109440,
+        "valid_prt_tile_bin_mib": 2.01171875
+      },
+      "pass": true,
+      "psnr_rows": {
+        "cached_atlas_vs_direct_dense_reference": {
+          "l1": 5.576208877755562e-06,
+          "max_abs": 0.005655720829963684,
+          "mse": 3.782362867355005e-09,
+          "psnr": 84.22236808719349
+        },
+        "cached_atlas_vs_scan_atlas": {
+          "l1": 0.0,
+          "max_abs": 0.0,
+          "mse": 0.0,
+          "psnr": 120.0
+        },
+        "prt_tiled_vs_direct_dense_reference": {
+          "l1": 8.987917254899003e-08,
+          "max_abs": 6.511807441711426e-05,
+          "mse": 1.4900132993753146e-12,
+          "psnr": 118.26809855198776
+        },
+        "prt_tiled_vs_prt_direct": {
+          "l1": 2.2043174396912946e-08,
+          "max_abs": 7.003545761108398e-07,
+          "mse": 3.142580961014679e-15,
+          "psnr": 120.0
+        }
+      },
+      "source": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed17_support1.25_16f_512t_4band_atlas4x4x4cap128_candidate512_prt4x4x4cap512.json",
+      "speedups": {
+        "cached_vs_direct_dense_reference": 20.932485796554115,
+        "cached_vs_scan": 1.0525296506359434,
+        "cached_vs_valid_prt_direct": 1.6927478834872371,
+        "cached_vs_valid_prt_tiled": 1.046979134489389,
+        "valid_prt_tiled_vs_valid_prt_direct": 1.6167923769682278
+      },
+      "tile_pairs": {
+        "atlas_active_tile_count": 1778,
+        "atlas_cached": 30571,
+        "atlas_max_tile_count": 83,
+        "atlas_overflow_tile_count": 0,
+        "valid_prt_active_tile_count": 619,
+        "valid_prt_max_tile_count": 285,
+        "valid_prt_overflow_tile_count": 0,
+        "valid_prt_tiled": 28921
+      },
+      "timing_ms": {
+        "atlas_cached": {
+          "max_ms": 29.52187499613501,
+          "median_ms": 28.593374998308718,
+          "min_ms": 27.01979098492302,
+          "sample_count": 3
+        },
+        "atlas_scan": {
+          "max_ms": 30.386458995053545,
+          "median_ms": 30.09537499747239,
+          "min_ms": 25.348084018332884,
+          "sample_count": 3
+        },
+        "direct_dense_reference": {
+          "max_ms": 601.5656669915188,
+          "median_ms": 598.5304160276428,
+          "min_ms": 595.3111669805367,
+          "sample_count": 3
+        },
+        "valid_prt_direct": {
+          "max_ms": 51.05595799977891,
+          "median_ms": 48.401375010143965,
+          "min_ms": 46.06724999030121,
+          "sample_count": 3
+        },
+        "valid_prt_tiled": {
+          "max_ms": 30.15795798273757,
+          "median_ms": 29.936667007859796,
+          "min_ms": 29.87204198143445,
+          "sample_count": 3
+        }
+      }
+    },
+    {
+      "candidate_budget": {
+        "fits": true,
+        "headroom_candidates": 0,
+        "max_pixel_candidates": 512,
+        "required_pixel_candidates": 512,
+        "usage_fraction": 1.0
+      },
+      "config": {
+        "atlas_tile_config": {
+          "tile_capacity": 128,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "depth_bands": 4,
+        "frames": 16,
+        "prt_tile_config": {
+          "tile_capacity": 512,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "seed": 17,
+        "support_scale": 1.4,
+        "target_size": 64,
+        "tubes": 512
+      },
+      "label": "depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed17_support1.4_16f_512t_atlas4x4x4cap128_candidate512_prt4x4x4cap512",
+      "memory_estimate": {
+        "atlas_tile_bin_bytes": 2129920,
+        "atlas_tile_bin_mib": 2.03125,
+        "notes": {
+          "per_pixel_local_array": "candidate id uint32 plus depth float32 arrays sized by STAR_ATLAS_MAX_PIXEL_CANDIDATES; count register not included unless using *_with_count.",
+          "tile_bin": "tile counts plus overflow arrays plus one uint32 id slot per tile-capacity entry; atlas tile count includes the depth-band dimension."
+        },
+        "per_pixel_local_array_bytes": 4096,
+        "per_pixel_local_array_with_count_bytes": 4100,
+        "valid_prt_tile_bin_bytes": 2109440,
+        "valid_prt_tile_bin_mib": 2.01171875
+      },
+      "pass": true,
+      "psnr_rows": {
+        "cached_atlas_vs_direct_dense_reference": {
+          "l1": 3.98951897295774e-06,
+          "max_abs": 0.003126092255115509,
+          "mse": 4.029872824329317e-10,
+          "psnr": 93.94708659209638
+        },
+        "cached_atlas_vs_scan_atlas": {
+          "l1": 0.0,
+          "max_abs": 0.0,
+          "mse": 0.0,
+          "psnr": 120.0
+        },
+        "prt_tiled_vs_direct_dense_reference": {
+          "l1": 8.987917254899003e-08,
+          "max_abs": 6.511807441711426e-05,
+          "mse": 1.4900132993753146e-12,
+          "psnr": 118.26809855198776
+        },
+        "prt_tiled_vs_prt_direct": {
+          "l1": 2.2043174396912946e-08,
+          "max_abs": 7.003545761108398e-07,
+          "mse": 3.142580961014679e-15,
+          "psnr": 120.0
+        }
+      },
+      "source": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed17_support1.4_16f_512t_atlas4x4x4cap128_candidate512_prt4x4x4cap512.json",
+      "speedups": {
+        "cached_vs_direct_dense_reference": 14.25656216962084,
+        "cached_vs_scan": 0.7520347557135624,
+        "cached_vs_valid_prt_direct": 1.1839825626834581,
+        "cached_vs_valid_prt_tiled": 0.7133241517061979,
+        "valid_prt_tiled_vs_valid_prt_direct": 1.659810003420596
+      },
+      "tile_pairs": {
+        "atlas_active_tile_count": 1908,
+        "atlas_cached": 35899,
+        "atlas_max_tile_count": 91,
+        "atlas_overflow_tile_count": 0,
+        "valid_prt_active_tile_count": 619,
+        "valid_prt_max_tile_count": 285,
+        "valid_prt_overflow_tile_count": 0,
+        "valid_prt_tiled": 28921
+      },
+      "timing_ms": {
+        "atlas_cached": {
+          "max_ms": 43.083125026896596,
+          "median_ms": 42.495875008171424,
+          "min_ms": 42.39591700024903,
+          "sample_count": 3
+        },
+        "atlas_scan": {
+          "max_ms": 39.604582998435944,
+          "median_ms": 31.958374980604276,
+          "min_ms": 28.678458009380847,
+          "sample_count": 3
+        },
+        "direct_dense_reference": {
+          "max_ms": 616.547207988333,
+          "median_ms": 605.8450840064324,
+          "min_ms": 604.9297910067253,
+          "sample_count": 3
+        },
+        "valid_prt_direct": {
+          "max_ms": 55.377834010869265,
+          "median_ms": 50.314374995650724,
+          "min_ms": 46.04979100986384,
+          "sample_count": 3
+        },
+        "valid_prt_tiled": {
+          "max_ms": 30.751915997825563,
+          "median_ms": 30.313333991216496,
+          "min_ms": 30.027540982700884,
+          "sample_count": 3
+        }
+      }
+    },
+    {
+      "candidate_budget": {
+        "fits": true,
+        "headroom_candidates": 0,
+        "max_pixel_candidates": 512,
+        "required_pixel_candidates": 512,
+        "usage_fraction": 1.0
+      },
+      "config": {
+        "atlas_tile_config": {
+          "tile_capacity": 256,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "depth_bands": 2,
+        "frames": 16,
+        "prt_tile_config": {
+          "tile_capacity": 512,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "seed": 23,
+        "support_scale": 1.25,
+        "target_size": 64,
+        "tubes": 512
+      },
+      "label": "depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed23_support1.25_16f_512t_2band_atlas4x4x4cap256_candidate512_prt4x4x4cap512",
+      "memory_estimate": {
+        "atlas_tile_bin_bytes": 2113536,
+        "atlas_tile_bin_mib": 2.015625,
+        "notes": {
+          "per_pixel_local_array": "candidate id uint32 plus depth float32 arrays sized by STAR_ATLAS_MAX_PIXEL_CANDIDATES; count register not included unless using *_with_count.",
+          "tile_bin": "tile counts plus overflow arrays plus one uint32 id slot per tile-capacity entry; atlas tile count includes the depth-band dimension."
+        },
+        "per_pixel_local_array_bytes": 4096,
+        "per_pixel_local_array_with_count_bytes": 4100,
+        "valid_prt_tile_bin_bytes": 2109440,
+        "valid_prt_tile_bin_mib": 2.01171875
+      },
+      "pass": true,
+      "psnr_rows": {
+        "cached_atlas_vs_direct_dense_reference": {
+          "l1": 9.820962986850645e-06,
+          "max_abs": 0.008218174800276756,
+          "mse": 5.357285726148575e-09,
+          "psnr": 82.7105519029309
+        },
+        "cached_atlas_vs_scan_atlas": {
+          "l1": 0.0,
+          "max_abs": 0.0,
+          "mse": 0.0,
+          "psnr": 120.0
+        },
+        "prt_tiled_vs_direct_dense_reference": {
+          "l1": 9.774370823834033e-08,
+          "max_abs": 7.18533992767334e-05,
+          "mse": 1.7944413316373087e-12,
+          "psnr": 117.46070736139708
+        },
+        "prt_tiled_vs_prt_direct": {
+          "l1": 2.033519130861805e-08,
+          "max_abs": 6.556510925292969e-07,
+          "mse": 2.7682118800860652e-15,
+          "psnr": 120.0
+        }
+      },
+      "source": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed23_support1.25_16f_512t_2band_atlas4x4x4cap256_candidate512_prt4x4x4cap512.json",
+      "speedups": {
+        "cached_vs_direct_dense_reference": 23.769737677360933,
+        "cached_vs_scan": 1.21755125593683,
+        "cached_vs_valid_prt_direct": 2.058528244752836,
+        "cached_vs_valid_prt_tiled": 1.3174655126940864,
+        "valid_prt_tiled_vs_valid_prt_direct": 1.5624911809215785
+      },
+      "tile_pairs": {
+        "atlas_active_tile_count": 1012,
+        "atlas_cached": 31282,
+        "atlas_max_tile_count": 161,
+        "atlas_overflow_tile_count": 0,
+        "valid_prt_active_tile_count": 577,
+        "valid_prt_max_tile_count": 302,
+        "valid_prt_overflow_tile_count": 0,
+        "valid_prt_tiled": 29011
+      },
+      "timing_ms": {
+        "atlas_cached": {
+          "max_ms": 25.83812500233762,
+          "median_ms": 25.412209011847153,
+          "min_ms": 25.22908299579285,
+          "sample_count": 3
+        },
+        "atlas_scan": {
+          "max_ms": 30.970083986176178,
+          "median_ms": 30.94066699850373,
+          "min_ms": 29.374875011853874,
+          "sample_count": 3
+        },
+        "direct_dense_reference": {
+          "max_ms": 610.7907920086291,
+          "median_ms": 604.0415420138743,
+          "min_ms": 603.8209999969695,
+          "sample_count": 3
+        },
+        "valid_prt_direct": {
+          "max_ms": 55.60433302889578,
+          "median_ms": 52.31175001244992,
+          "min_ms": 51.18695899727754,
+          "sample_count": 3
+        },
+        "valid_prt_tiled": {
+          "max_ms": 34.632875001989305,
+          "median_ms": 33.47970897448249,
+          "min_ms": 33.20258401799947,
+          "sample_count": 3
+        }
+      }
+    },
+    {
+      "candidate_budget": {
+        "fits": true,
+        "headroom_candidates": 0,
+        "max_pixel_candidates": 512,
+        "required_pixel_candidates": 512,
+        "usage_fraction": 1.0
+      },
+      "config": {
+        "atlas_tile_config": {
+          "tile_capacity": 128,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "depth_bands": 4,
+        "frames": 16,
+        "prt_tile_config": {
+          "tile_capacity": 512,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "seed": 23,
+        "support_scale": 1.25,
+        "target_size": 64,
+        "tubes": 512
+      },
+      "label": "depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed23_support1.25_16f_512t_4band_atlas4x4x4cap128_candidate512_prt4x4x4cap512",
+      "memory_estimate": {
+        "atlas_tile_bin_bytes": 2129920,
+        "atlas_tile_bin_mib": 2.03125,
+        "notes": {
+          "per_pixel_local_array": "candidate id uint32 plus depth float32 arrays sized by STAR_ATLAS_MAX_PIXEL_CANDIDATES; count register not included unless using *_with_count.",
+          "tile_bin": "tile counts plus overflow arrays plus one uint32 id slot per tile-capacity entry; atlas tile count includes the depth-band dimension."
+        },
+        "per_pixel_local_array_bytes": 4096,
+        "per_pixel_local_array_with_count_bytes": 4100,
+        "valid_prt_tile_bin_bytes": 2109440,
+        "valid_prt_tile_bin_mib": 2.01171875
+      },
+      "pass": true,
+      "psnr_rows": {
+        "cached_atlas_vs_direct_dense_reference": {
+          "l1": 5.594337835646002e-06,
+          "max_abs": 0.005188183858990669,
+          "mse": 3.073959531363357e-09,
+          "psnr": 85.12301854279758
+        },
+        "cached_atlas_vs_scan_atlas": {
+          "l1": 0.0,
+          "max_abs": 0.0,
+          "mse": 0.0,
+          "psnr": 120.0
+        },
+        "prt_tiled_vs_direct_dense_reference": {
+          "l1": 9.774370823834033e-08,
+          "max_abs": 7.18533992767334e-05,
+          "mse": 1.7944413316373087e-12,
+          "psnr": 117.46070736139708
+        },
+        "prt_tiled_vs_prt_direct": {
+          "l1": 2.033519130861805e-08,
+          "max_abs": 6.556510925292969e-07,
+          "mse": 2.7682118800860652e-15,
+          "psnr": 120.0
+        }
+      },
+      "source": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed23_support1.25_16f_512t_4band_atlas4x4x4cap128_candidate512_prt4x4x4cap512.json",
+      "speedups": {
+        "cached_vs_direct_dense_reference": 21.71668649682294,
+        "cached_vs_scan": 1.0827025878781291,
+        "cached_vs_valid_prt_direct": 1.789586217085975,
+        "cached_vs_valid_prt_tiled": 1.204122849260965,
+        "valid_prt_tiled_vs_valid_prt_direct": 1.4862156450102582
+      },
+      "tile_pairs": {
+        "atlas_active_tile_count": 1725,
+        "atlas_cached": 30980,
+        "atlas_max_tile_count": 89,
+        "atlas_overflow_tile_count": 0,
+        "valid_prt_active_tile_count": 577,
+        "valid_prt_max_tile_count": 302,
+        "valid_prt_overflow_tile_count": 0,
+        "valid_prt_tiled": 29011
+      },
+      "timing_ms": {
+        "atlas_cached": {
+          "max_ms": 28.523167013190687,
+          "median_ms": 27.513250010088086,
+          "min_ms": 26.844084000913426,
+          "sample_count": 3
+        },
+        "atlas_scan": {
+          "max_ms": 34.83312498428859,
+          "median_ms": 29.788666986860335,
+          "min_ms": 26.79816700401716,
+          "sample_count": 3
+        },
+        "direct_dense_reference": {
+          "max_ms": 607.3744999885093,
+          "median_ms": 597.4966249777935,
+          "min_ms": 597.485999984201,
+          "sample_count": 3
+        },
+        "valid_prt_direct": {
+          "max_ms": 51.411166990874335,
+          "median_ms": 49.237333005294204,
+          "min_ms": 47.805832989979535,
+          "sample_count": 3
+        },
+        "valid_prt_tiled": {
+          "max_ms": 33.616250002523884,
+          "median_ms": 33.129332994576544,
+          "min_ms": 33.05516700493172,
+          "sample_count": 3
+        }
+      }
+    },
+    {
+      "candidate_budget": {
+        "fits": true,
+        "headroom_candidates": 0,
+        "max_pixel_candidates": 512,
+        "required_pixel_candidates": 512,
+        "usage_fraction": 1.0
+      },
+      "config": {
+        "atlas_tile_config": {
+          "tile_capacity": 256,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "depth_bands": 2,
+        "frames": 16,
+        "prt_tile_config": {
+          "tile_capacity": 512,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "seed": 31,
+        "support_scale": 1.25,
+        "target_size": 64,
+        "tubes": 512
+      },
+      "label": "depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed31_support1.25_16f_512t_2band_atlas4x4x4cap256_candidate512_prt4x4x4cap512",
+      "memory_estimate": {
+        "atlas_tile_bin_bytes": 2113536,
+        "atlas_tile_bin_mib": 2.015625,
+        "notes": {
+          "per_pixel_local_array": "candidate id uint32 plus depth float32 arrays sized by STAR_ATLAS_MAX_PIXEL_CANDIDATES; count register not included unless using *_with_count.",
+          "tile_bin": "tile counts plus overflow arrays plus one uint32 id slot per tile-capacity entry; atlas tile count includes the depth-band dimension."
+        },
+        "per_pixel_local_array_bytes": 4096,
+        "per_pixel_local_array_with_count_bytes": 4100,
+        "valid_prt_tile_bin_bytes": 2109440,
+        "valid_prt_tile_bin_mib": 2.01171875
+      },
+      "pass": false,
+      "psnr_rows": {
+        "cached_atlas_vs_direct_dense_reference": {
+          "l1": 1.008102026389679e-05,
+          "max_abs": 0.012446164153516293,
+          "mse": 1.274787120308929e-08,
+          "psnr": 78.94562333029351
+        },
+        "cached_atlas_vs_scan_atlas": {
+          "l1": 0.0,
+          "max_abs": 0.0,
+          "mse": 0.0,
+          "psnr": 120.0
+        },
+        "prt_tiled_vs_direct_dense_reference": {
+          "l1": 7.043282579388688e-08,
+          "max_abs": 5.1587820053100586e-05,
+          "mse": 8.628330797240402e-13,
+          "psnr": 120.0
+        },
+        "prt_tiled_vs_prt_direct": {
+          "l1": 2.0579170367795996e-08,
+          "max_abs": 7.450580596923828e-07,
+          "mse": 2.8183469132011e-15,
+          "psnr": 120.0
+        }
+      },
+      "source": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed31_support1.25_16f_512t_2band_atlas4x4x4cap256_candidate512_prt4x4x4cap512.json",
+      "speedups": {
+        "cached_vs_direct_dense_reference": 27.355340147680373,
+        "cached_vs_scan": 1.1920081403267462,
+        "cached_vs_valid_prt_direct": 2.2842517633269517,
+        "cached_vs_valid_prt_tiled": 1.3908701973661008,
+        "valid_prt_tiled_vs_valid_prt_direct": 1.6423184332029352
+      },
+      "tile_pairs": {
+        "atlas_active_tile_count": 1011,
+        "atlas_cached": 31715,
+        "atlas_max_tile_count": 152,
+        "atlas_overflow_tile_count": 0,
+        "valid_prt_active_tile_count": 586,
+        "valid_prt_max_tile_count": 287,
+        "valid_prt_overflow_tile_count": 0,
+        "valid_prt_tiled": 29387
+      },
+      "timing_ms": {
+        "atlas_cached": {
+          "max_ms": 22.98700000392273,
+          "median_ms": 22.116249980172142,
+          "min_ms": 21.532333019422367,
+          "sample_count": 3
+        },
+        "atlas_scan": {
+          "max_ms": 29.118999984348193,
+          "median_ms": 26.36275000986643,
+          "min_ms": 26.304958009859547,
+          "sample_count": 3
+        },
+        "direct_dense_reference": {
+          "max_ms": 608.5638749937061,
+          "median_ms": 604.9975409987383,
+          "min_ms": 604.123334022006,
+          "sample_count": 3
+        },
+        "valid_prt_direct": {
+          "max_ms": 51.14358398714103,
+          "median_ms": 50.51908301538788,
+          "min_ms": 50.156416022218764,
+          "sample_count": 3
+        },
+        "valid_prt_tiled": {
+          "max_ms": 31.274500011932105,
+          "median_ms": 30.76083297492005,
+          "min_ms": 30.653084017103538,
+          "sample_count": 3
+        }
+      }
+    },
+    {
+      "candidate_budget": {
+        "fits": true,
+        "headroom_candidates": 0,
+        "max_pixel_candidates": 512,
+        "required_pixel_candidates": 512,
+        "usage_fraction": 1.0
+      },
+      "config": {
+        "atlas_tile_config": {
+          "tile_capacity": 128,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "depth_bands": 4,
+        "frames": 16,
+        "prt_tile_config": {
+          "tile_capacity": 512,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "seed": 31,
+        "support_scale": 1.25,
+        "target_size": 64,
+        "tubes": 512
+      },
+      "label": "depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed31_support1.25_16f_512t_4band_atlas4x4x4cap128_candidate512_prt4x4x4cap512",
+      "memory_estimate": {
+        "atlas_tile_bin_bytes": 2129920,
+        "atlas_tile_bin_mib": 2.03125,
+        "notes": {
+          "per_pixel_local_array": "candidate id uint32 plus depth float32 arrays sized by STAR_ATLAS_MAX_PIXEL_CANDIDATES; count register not included unless using *_with_count.",
+          "tile_bin": "tile counts plus overflow arrays plus one uint32 id slot per tile-capacity entry; atlas tile count includes the depth-band dimension."
+        },
+        "per_pixel_local_array_bytes": 4096,
+        "per_pixel_local_array_with_count_bytes": 4100,
+        "valid_prt_tile_bin_bytes": 2109440,
+        "valid_prt_tile_bin_mib": 2.01171875
+      },
+      "pass": true,
+      "psnr_rows": {
+        "cached_atlas_vs_direct_dense_reference": {
+          "l1": 5.642064479616238e-06,
+          "max_abs": 0.004909172188490629,
+          "mse": 3.979946594512285e-09,
+          "psnr": 84.0012275553039
+        },
+        "cached_atlas_vs_scan_atlas": {
+          "l1": 0.0,
+          "max_abs": 0.0,
+          "mse": 0.0,
+          "psnr": 120.0
+        },
+        "prt_tiled_vs_direct_dense_reference": {
+          "l1": 7.043282579388688e-08,
+          "max_abs": 5.1587820053100586e-05,
+          "mse": 8.628330797240402e-13,
+          "psnr": 120.0
+        },
+        "prt_tiled_vs_prt_direct": {
+          "l1": 2.0579170367795996e-08,
+          "max_abs": 7.450580596923828e-07,
+          "mse": 2.8183469132011e-15,
+          "psnr": 120.0
+        }
+      },
+      "source": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed31_support1.25_16f_512t_4band_atlas4x4x4cap128_candidate512_prt4x4x4cap512.json",
+      "speedups": {
+        "cached_vs_direct_dense_reference": 24.252115180592266,
+        "cached_vs_scan": 1.095438224614221,
+        "cached_vs_valid_prt_direct": 2.019581861496614,
+        "cached_vs_valid_prt_tiled": 1.2427623423887972,
+        "valid_prt_tiled_vs_valid_prt_direct": 1.6250748776428483
+      },
+      "tile_pairs": {
+        "atlas_active_tile_count": 1733,
+        "atlas_cached": 31448,
+        "atlas_max_tile_count": 81,
+        "atlas_overflow_tile_count": 0,
+        "valid_prt_active_tile_count": 586,
+        "valid_prt_max_tile_count": 287,
+        "valid_prt_overflow_tile_count": 0,
+        "valid_prt_tiled": 29387
+      },
+      "timing_ms": {
+        "atlas_cached": {
+          "max_ms": 25.550833001034334,
+          "median_ms": 24.789165996480733,
+          "min_ms": 24.144499999238178,
+          "sample_count": 3
+        },
+        "atlas_scan": {
+          "max_ms": 30.7382500031963,
+          "median_ms": 27.15499998885207,
+          "min_ms": 22.941082977922633,
+          "sample_count": 3
+        },
+        "direct_dense_reference": {
+          "max_ms": 603.1611670041457,
+          "median_ms": 601.189708977472,
+          "min_ms": 600.6337080034427,
+          "sample_count": 3
+        },
+        "valid_prt_direct": {
+          "max_ms": 51.46524999872781,
+          "median_ms": 50.06375000812113,
+          "min_ms": 47.69229199155234,
+          "sample_count": 3
+        },
+        "valid_prt_tiled": {
+          "max_ms": 34.42566600278951,
+          "median_ms": 30.80704199965112,
+          "min_ms": 30.129833990940824,
+          "sample_count": 3
+        }
+      }
+    },
+    {
+      "candidate_budget": {
+        "fits": true,
+        "headroom_candidates": 0,
+        "max_pixel_candidates": 512,
+        "required_pixel_candidates": 512,
+        "usage_fraction": 1.0
+      },
+      "config": {
+        "atlas_tile_config": {
+          "tile_capacity": 256,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "depth_bands": 2,
+        "frames": 16,
+        "prt_tile_config": {
+          "tile_capacity": 512,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "seed": 47,
+        "support_scale": 1.25,
+        "target_size": 64,
+        "tubes": 512
+      },
+      "label": "depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed47_support1.25_16f_512t_2band_atlas4x4x4cap256_candidate512_prt4x4x4cap512",
+      "memory_estimate": {
+        "atlas_tile_bin_bytes": 2113536,
+        "atlas_tile_bin_mib": 2.015625,
+        "notes": {
+          "per_pixel_local_array": "candidate id uint32 plus depth float32 arrays sized by STAR_ATLAS_MAX_PIXEL_CANDIDATES; count register not included unless using *_with_count.",
+          "tile_bin": "tile counts plus overflow arrays plus one uint32 id slot per tile-capacity entry; atlas tile count includes the depth-band dimension."
+        },
+        "per_pixel_local_array_bytes": 4096,
+        "per_pixel_local_array_with_count_bytes": 4100,
+        "valid_prt_tile_bin_bytes": 2109440,
+        "valid_prt_tile_bin_mib": 2.01171875
+      },
+      "pass": true,
+      "psnr_rows": {
+        "cached_atlas_vs_direct_dense_reference": {
+          "l1": 1.0034401384473313e-05,
+          "max_abs": 0.007702067494392395,
+          "mse": 7.448127448128616e-09,
+          "psnr": 81.27952900562505
+        },
+        "cached_atlas_vs_scan_atlas": {
+          "l1": 0.0,
+          "max_abs": 0.0,
+          "mse": 0.0,
+          "psnr": 120.0
+        },
+        "prt_tiled_vs_direct_dense_reference": {
+          "l1": 1.1275861311332847e-07,
+          "max_abs": 6.22868537902832e-05,
+          "mse": 2.424595463637602e-12,
+          "psnr": 116.15360711727945
+        },
+        "prt_tiled_vs_prt_direct": {
+          "l1": 2.0481678575379192e-08,
+          "max_abs": 7.152557373046875e-07,
+          "mse": 2.7070732537114867e-15,
+          "psnr": 120.0
+        }
+      },
+      "source": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed47_support1.25_16f_512t_2band_atlas4x4x4cap256_candidate512_prt4x4x4cap512.json",
+      "speedups": {
+        "cached_vs_direct_dense_reference": 22.509352226819356,
+        "cached_vs_scan": 1.0414292792235817,
+        "cached_vs_valid_prt_direct": 1.827986103766357,
+        "cached_vs_valid_prt_tiled": 1.2340075371723556,
+        "valid_prt_tiled_vs_valid_prt_direct": 1.4813411172147803
+      },
+      "tile_pairs": {
+        "atlas_active_tile_count": 1030,
+        "atlas_cached": 32032,
+        "atlas_max_tile_count": 157,
+        "atlas_overflow_tile_count": 0,
+        "valid_prt_active_tile_count": 599,
+        "valid_prt_max_tile_count": 297,
+        "valid_prt_overflow_tile_count": 0,
+        "valid_prt_tiled": 29703
+      },
+      "timing_ms": {
+        "atlas_cached": {
+          "max_ms": 28.144750016508624,
+          "median_ms": 26.607583014992997,
+          "min_ms": 23.59445800539106,
+          "sample_count": 3
+        },
+        "atlas_scan": {
+          "max_ms": 29.131458984920755,
+          "median_ms": 27.709916001185775,
+          "min_ms": 27.19370898557827,
+          "sample_count": 3
+        },
+        "direct_dense_reference": {
+          "max_ms": 607.8442919824738,
+          "median_ms": 598.9194579888135,
+          "min_ms": 596.4667909720447,
+          "sample_count": 3
+        },
+        "valid_prt_direct": {
+          "max_ms": 52.09533398738131,
+          "median_ms": 48.63829200621694,
+          "min_ms": 47.944124991772696,
+          "sample_count": 3
+        },
+        "valid_prt_tiled": {
+          "max_ms": 33.20133298984729,
+          "median_ms": 32.83395798644051,
+          "min_ms": 32.32562498305924,
+          "sample_count": 3
+        }
+      }
+    },
+    {
+      "candidate_budget": {
+        "fits": true,
+        "headroom_candidates": 0,
+        "max_pixel_candidates": 512,
+        "required_pixel_candidates": 512,
+        "usage_fraction": 1.0
+      },
+      "config": {
+        "atlas_tile_config": {
+          "tile_capacity": 128,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "depth_bands": 4,
+        "frames": 16,
+        "prt_tile_config": {
+          "tile_capacity": 512,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "seed": 47,
+        "support_scale": 1.25,
+        "target_size": 64,
+        "tubes": 512
+      },
+      "label": "depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed47_support1.25_16f_512t_4band_atlas4x4x4cap128_candidate512_prt4x4x4cap512",
+      "memory_estimate": {
+        "atlas_tile_bin_bytes": 2129920,
+        "atlas_tile_bin_mib": 2.03125,
+        "notes": {
+          "per_pixel_local_array": "candidate id uint32 plus depth float32 arrays sized by STAR_ATLAS_MAX_PIXEL_CANDIDATES; count register not included unless using *_with_count.",
+          "tile_bin": "tile counts plus overflow arrays plus one uint32 id slot per tile-capacity entry; atlas tile count includes the depth-band dimension."
+        },
+        "per_pixel_local_array_bytes": 4096,
+        "per_pixel_local_array_with_count_bytes": 4100,
+        "valid_prt_tile_bin_bytes": 2109440,
+        "valid_prt_tile_bin_mib": 2.01171875
+      },
+      "pass": true,
+      "psnr_rows": {
+        "cached_atlas_vs_direct_dense_reference": {
+          "l1": 5.980566129437648e-06,
+          "max_abs": 0.007702067494392395,
+          "mse": 5.805651071000284e-09,
+          "psnr": 82.36149069519313
+        },
+        "cached_atlas_vs_scan_atlas": {
+          "l1": 0.0,
+          "max_abs": 0.0,
+          "mse": 0.0,
+          "psnr": 120.0
+        },
+        "prt_tiled_vs_direct_dense_reference": {
+          "l1": 1.1275861311332847e-07,
+          "max_abs": 6.22868537902832e-05,
+          "mse": 2.424595463637602e-12,
+          "psnr": 116.15360711727945
+        },
+        "prt_tiled_vs_prt_direct": {
+          "l1": 2.0481678575379192e-08,
+          "max_abs": 7.152557373046875e-07,
+          "mse": 2.7070732537114867e-15,
+          "psnr": 120.0
+        }
+      },
+      "source": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed47_support1.25_16f_512t_4band_atlas4x4x4cap128_candidate512_prt4x4x4cap512.json",
+      "speedups": {
+        "cached_vs_direct_dense_reference": 19.48125477180635,
+        "cached_vs_scan": 0.8643028876716982,
+        "cached_vs_valid_prt_direct": 1.561224575858719,
+        "cached_vs_valid_prt_tiled": 1.0481618528939312,
+        "valid_prt_tiled_vs_valid_prt_direct": 1.4894880705191123
+      },
+      "tile_pairs": {
+        "atlas_active_tile_count": 1779,
+        "atlas_cached": 31550,
+        "atlas_max_tile_count": 79,
+        "atlas_overflow_tile_count": 0,
+        "valid_prt_active_tile_count": 599,
+        "valid_prt_max_tile_count": 297,
+        "valid_prt_overflow_tile_count": 0,
+        "valid_prt_tiled": 29703
+      },
+      "timing_ms": {
+        "atlas_cached": {
+          "max_ms": 38.45866600750014,
+          "median_ms": 30.935624992707744,
+          "min_ms": 27.843667019624263,
+          "sample_count": 3
+        },
+        "atlas_scan": {
+          "max_ms": 28.988415986532345,
+          "median_ms": 26.73775001312606,
+          "min_ms": 26.149999990593642,
+          "sample_count": 3
+        },
+        "direct_dense_reference": {
+          "max_ms": 604.1786249843426,
+          "median_ms": 602.6647920079995,
+          "min_ms": 601.4441669976804,
+          "sample_count": 3
+        },
+        "valid_prt_direct": {
+          "max_ms": 53.54420799994841,
+          "median_ms": 48.29745800816454,
+          "min_ms": 48.115790996234864,
+          "sample_count": 3
+        },
+        "valid_prt_tiled": {
+          "max_ms": 32.92462497483939,
+          "median_ms": 32.425542012788355,
+          "min_ms": 32.07491699140519,
+          "sample_count": 3
+        }
+      }
+    },
+    {
+      "candidate_budget": {
+        "fits": true,
+        "headroom_candidates": 0,
+        "max_pixel_candidates": 512,
+        "required_pixel_candidates": 512,
+        "usage_fraction": 1.0
+      },
+      "config": {
+        "atlas_tile_config": {
+          "tile_capacity": 128,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "depth_bands": 4,
+        "frames": 16,
+        "prt_tile_config": {
+          "tile_capacity": 512,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "seed": 17,
+        "support_scale": 1.2,
+        "target_size": 128,
+        "tubes": 512
+      },
+      "label": "depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1o_128_seed17_support1.20_16f_512t_4band_atlas4x4x4cap128_candidate512_prt4x4x4cap512",
+      "memory_estimate": {
+        "atlas_tile_bin_bytes": 8519680,
+        "atlas_tile_bin_mib": 8.125,
+        "notes": {
+          "per_pixel_local_array": "candidate id uint32 plus depth float32 arrays sized by STAR_ATLAS_MAX_PIXEL_CANDIDATES; count register not included unless using *_with_count.",
+          "tile_bin": "tile counts plus overflow arrays plus one uint32 id slot per tile-capacity entry; atlas tile count includes the depth-band dimension."
+        },
+        "per_pixel_local_array_bytes": 4096,
+        "per_pixel_local_array_with_count_bytes": 4100,
+        "valid_prt_tile_bin_bytes": 8437760,
+        "valid_prt_tile_bin_mib": 8.046875
+      },
+      "pass": false,
+      "psnr_rows": {
+        "cached_atlas_vs_direct_dense_reference": {
+          "l1": 1.272190365853021e-05,
+          "max_abs": 0.009064650163054466,
+          "mse": 2.1422073004373487e-08,
+          "psnr": 76.69138504988831
+        },
+        "cached_atlas_vs_scan_atlas": {
+          "l1": 0.0,
+          "max_abs": 0.0,
+          "mse": 0.0,
+          "psnr": 120.0
+        },
+        "prt_tiled_vs_direct_dense_reference": {
+          "l1": 8.876605761543033e-08,
+          "max_abs": 6.398558616638184e-05,
+          "mse": 1.4624294613838074e-12,
+          "psnr": 118.34925072439336
+        },
+        "prt_tiled_vs_prt_direct": {
+          "l1": 2.2952315603674833e-08,
+          "max_abs": 0.00045627355575561523,
+          "mse": 3.3681347641478787e-13,
+          "psnr": 120.0
+        }
+      },
+      "source": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1o_128_seed17_support1.20_16f_512t_4band_atlas4x4x4cap128_candidate512_prt4x4x4cap512.json",
+      "speedups": {
+        "cached_vs_direct_dense_reference": 44.6745774745916,
+        "cached_vs_scan": 1.2942429752559759,
+        "cached_vs_valid_prt_direct": 4.813726342612436,
+        "cached_vs_valid_prt_tiled": 0.9916239530966844,
+        "valid_prt_tiled_vs_valid_prt_direct": 4.854386915100157
+      },
+      "tile_pairs": {
+        "atlas_active_tile_count": 6141,
+        "atlas_cached": 86533,
+        "atlas_max_tile_count": 64,
+        "atlas_overflow_tile_count": 0,
+        "valid_prt_active_tile_count": 2259,
+        "valid_prt_max_tile_count": 220,
+        "valid_prt_overflow_tile_count": 0,
+        "valid_prt_tiled": 80670
+      },
+      "timing_ms": {
+        "atlas_cached": {
+          "max_ms": 26.50970799732022,
+          "median_ms": 25.613749981857836,
+          "min_ms": 24.00141698308289,
+          "sample_count": 3
+        },
+        "atlas_scan": {
+          "max_ms": 39.233332994626835,
+          "median_ms": 33.150415983982384,
+          "min_ms": 28.076208982383832,
+          "sample_count": 3
+        },
+        "direct_dense_reference": {
+          "max_ms": 1785.9860000025947,
+          "median_ms": 1144.283457979327,
+          "min_ms": 1053.6221250076778,
+          "sample_count": 3
+        },
+        "valid_prt_direct": {
+          "max_ms": 125.82804099656641,
+          "median_ms": 123.29758302075788,
+          "min_ms": 120.39312499109656,
+          "sample_count": 3
+        },
+        "valid_prt_tiled": {
+          "max_ms": 27.760124998167157,
+          "median_ms": 25.399208010639995,
+          "min_ms": 24.957749992609024,
+          "sample_count": 3
+        }
+      }
+    },
+    {
+      "candidate_budget": {
+        "fits": true,
+        "headroom_candidates": 0,
+        "max_pixel_candidates": 512,
+        "required_pixel_candidates": 512,
+        "usage_fraction": 1.0
+      },
+      "config": {
+        "atlas_tile_config": {
+          "tile_capacity": 128,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "depth_bands": 4,
+        "frames": 16,
+        "prt_tile_config": {
+          "tile_capacity": 512,
+          "tile_t": 4,
+          "tile_x": 4,
+          "tile_y": 4
+        },
+        "seed": 17,
+        "support_scale": 1.25,
+        "target_size": 128,
+        "tubes": 512
+      },
+      "label": "depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1o_128_seed17_support1.25_16f_512t_4band_atlas4x4x4cap128_candidate512_prt4x4x4cap512",
+      "memory_estimate": {
+        "atlas_tile_bin_bytes": 8519680,
+        "atlas_tile_bin_mib": 8.125,
+        "notes": {
+          "per_pixel_local_array": "candidate id uint32 plus depth float32 arrays sized by STAR_ATLAS_MAX_PIXEL_CANDIDATES; count register not included unless using *_with_count.",
+          "tile_bin": "tile counts plus overflow arrays plus one uint32 id slot per tile-capacity entry; atlas tile count includes the depth-band dimension."
+        },
+        "per_pixel_local_array_bytes": 4096,
+        "per_pixel_local_array_with_count_bytes": 4100,
+        "valid_prt_tile_bin_bytes": 8437760,
+        "valid_prt_tile_bin_mib": 8.046875
+      },
+      "pass": false,
+      "psnr_rows": {
+        "cached_atlas_vs_direct_dense_reference": {
+          "l1": 6.825875516369706e-06,
+          "max_abs": 0.006372139789164066,
+          "mse": 5.642847966669251e-09,
+          "psnr": 82.48501650620634
+        },
+        "cached_atlas_vs_scan_atlas": {
+          "l1": 0.0,
+          "max_abs": 0.0,
+          "mse": 0.0,
+          "psnr": 120.0
+        },
+        "prt_tiled_vs_direct_dense_reference": {
+          "l1": 8.876605761543033e-08,
+          "max_abs": 6.398558616638184e-05,
+          "mse": 1.4624294613838074e-12,
+          "psnr": 118.34925072439336
+        },
+        "prt_tiled_vs_prt_direct": {
+          "l1": 2.2952315603674833e-08,
+          "max_abs": 0.00045627355575561523,
+          "mse": 3.3681347641478787e-13,
+          "psnr": 120.0
+        }
+      },
+      "source": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1o_128_seed17_support1.25_16f_512t_4band_atlas4x4x4cap128_candidate512_prt4x4x4cap512.json",
+      "speedups": {
+        "cached_vs_direct_dense_reference": 39.350437306858474,
+        "cached_vs_scan": 1.2084799758712474,
+        "cached_vs_valid_prt_direct": 4.189053977212741,
+        "cached_vs_valid_prt_tiled": 0.8715260420327772,
+        "valid_prt_tiled_vs_valid_prt_direct": 4.806573498873365
+      },
+      "tile_pairs": {
+        "atlas_active_tile_count": 6449,
+        "atlas_cached": 92500,
+        "atlas_max_tile_count": 67,
+        "atlas_overflow_tile_count": 0,
+        "valid_prt_active_tile_count": 2259,
+        "valid_prt_max_tile_count": 220,
+        "valid_prt_overflow_tile_count": 0,
+        "valid_prt_tiled": 80670
+      },
+      "timing_ms": {
+        "atlas_cached": {
+          "max_ms": 28.646749997278675,
+          "median_ms": 28.52491699741222,
+          "min_ms": 26.343709003413096,
+          "sample_count": 3
+        },
+        "atlas_scan": {
+          "max_ms": 42.95958299189806,
+          "median_ms": 34.47179100476205,
+          "min_ms": 32.99124998738989,
+          "sample_count": 3
+        },
+        "direct_dense_reference": {
+          "max_ms": 1205.9763340221252,
+          "median_ms": 1122.4679579900112,
+          "min_ms": 1065.9564579837024,
+          "sample_count": 3
+        },
+        "valid_prt_direct": {
+          "max_ms": 122.5402920099441,
+          "median_ms": 119.49241699767299,
+          "min_ms": 117.24737501936033,
+          "sample_count": 3
+        },
+        "valid_prt_tiled": {
+          "max_ms": 25.87495799525641,
+          "median_ms": 24.860208010068163,
+          "min_ms": 22.898374998476356,
+          "sample_count": 3
+        }
+      }
+    }
+  ],
+  "summary": {
+    "candidate_budget": {
+      "all_fit": true,
+      "max_pixel_candidates": [
+        512
+      ],
+      "required_pixel_candidates": [
+        512
+      ]
+    },
+    "memory_estimate": {
+      "atlas_tile_bin_mib": {
+        "max": 8.125,
+        "median": 2.03125,
+        "min": 2.015625
+      },
+      "per_pixel_local_array_bytes": [
+        4096
+      ]
+    },
+    "passing_count": 8,
+    "psnr": {
+      "cached_vs_direct_dense": {
+        "max": 93.94708659209638,
+        "median": 82.48501650620634,
+        "min": 76.69138504988831
+      },
+      "prt_tiled_vs_direct_dense": {
+        "max": 120.0,
+        "median": 118.26809855198776,
+        "min": 116.15360711727945
+      }
+    },
+    "source_count": 11,
+    "tile_pairs": {
+      "atlas_cached": {
+        "max": 92500.0,
+        "median": 31550.0,
+        "min": 30571.0
+      },
+      "valid_prt_tiled": {
+        "max": 80670.0,
+        "median": 29387.0,
+        "min": 28921.0
+      }
+    },
+    "timing_ms": {
+      "atlas_cached_median": {
+        "max": 42.495875008171424,
+        "median": 26.607583014992997,
+        "min": 22.116249980172142
+      },
+      "valid_prt_tiled_median": {
+        "max": 33.47970897448249,
+        "median": 30.76083297492005,
+        "min": 24.860208010068163
+      }
+    }
+  }
+}
