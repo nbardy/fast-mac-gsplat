@@ -1,0 +1,98 @@
+{
+  "config": {
+    "color_noise": 0.85,
+    "depth_bands": 4,
+    "frames": 4,
+    "geometry_noise_px": 0.35,
+    "lr": 0.05,
+    "residual_degree": 3,
+    "seed": 17,
+    "steps": 200,
+    "support_scale": 1.4,
+    "target_size": 32,
+    "tile_capacity": 64,
+    "tile_size": 4,
+    "tile_t": 4,
+    "tubes": 64
+  },
+  "contact_sheet": "variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_cpu_overfit_gate_f1r_seed17_32_4f_64t_200step.png",
+  "losses": [
+    {
+      "loss": 0.0032126319129019976,
+      "step": 0
+    },
+    {
+      "loss": 0.0005994916427880526,
+      "step": 20
+    },
+    {
+      "loss": 0.00021442632714752108,
+      "step": 40
+    },
+    {
+      "loss": 0.00010637709783622995,
+      "step": 60
+    },
+    {
+      "loss": 6.903001485625282e-05,
+      "step": 80
+    },
+    {
+      "loss": 5.3735944675281644e-05,
+      "step": 100
+    },
+    {
+      "loss": 4.6451536036329344e-05,
+      "step": 120
+    },
+    {
+      "loss": 4.1744995542103425e-05,
+      "step": 140
+    },
+    {
+      "loss": 3.78800141334068e-05,
+      "step": 160
+    },
+    {
+      "loss": 3.4600863727973774e-05,
+      "step": 180
+    },
+    {
+      "loss": 3.168100738548674e-05,
+      "step": 200
+    }
+  ],
+  "metrics": {
+    "final_image_metrics": {
+      "l1": 0.0017054298659786582,
+      "max_abs": 0.10031624883413315,
+      "mse": 3.152643330395222e-05,
+      "psnr": 45.01325159731974
+    },
+    "final_loss": 3.152643330395222e-05,
+    "final_psnr": 45.01325159731974,
+    "initial_image_metrics": {
+      "l1": 0.019561180844902992,
+      "max_abs": 0.4785067141056061,
+      "mse": 0.0032126319129019976,
+      "psnr": 24.93139030860883
+    },
+    "initial_loss": 0.0032126319129019976,
+    "initial_psnr": 24.93139030860883,
+    "loss_drop_fraction": 0.9901867272197162
+  },
+  "name": "depth_banded_homography_flow_atlas_cpu_overfit_gate",
+  "note": "CPU/direct differentiable atlas-residual overfit gate; not a Metal backward or real heldout proof.",
+  "pass": true,
+  "tile_summary": {
+    "bands": 4,
+    "max_pairs_per_tube_time_tile": 20,
+    "max_tile_count": 17,
+    "overflow_tile_count": 0,
+    "tile_capacity": 64,
+    "tile_pairs": 620,
+    "tiles_t": 1,
+    "tiles_x": 8,
+    "tiles_y": 8
+  }
+}
