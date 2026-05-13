@@ -1,0 +1,175 @@
+{
+  "eval": {
+    "heldout_render_seconds": {
+      "max_s": 0.00572891702177003,
+      "median_s": 0.00572891702177003,
+      "min_s": 0.00572891702177003,
+      "samples_s": [
+        0.00572891702177003
+      ]
+    },
+    "max_tile_count": 32,
+    "metrics": {
+      "heldout_l1": 0.2091710865497589,
+      "heldout_mse": 0.059218280017375946,
+      "heldout_psnr": 12.275442107564194,
+      "l1": 0.21657942235469818,
+      "mse": 0.06437575817108154,
+      "psnr": 11.914374304905358
+    },
+    "overflow_tile_count": 0,
+    "train_render_seconds": {
+      "max_s": 0.031265708996215835,
+      "median_s": 0.02102837550046388,
+      "min_s": 0.010791042004711926,
+      "samples_s": [
+        0.031265708996215835,
+        0.010791042004711926
+      ]
+    }
+  },
+  "media_paths": {
+    "heldout_gt_render": "dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/projective_rational_multicam_learnable_camera_train_f1t_smoke_32_2f_32t_2step_media/heldout_gt_render.mp4",
+    "heldout_render": "dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/projective_rational_multicam_learnable_camera_train_f1t_smoke_32_2f_32t_2step_media/heldout_render.mp4",
+    "train_gt_render": "dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/projective_rational_multicam_learnable_camera_train_f1t_smoke_32_2f_32t_2step_media/train_gt_render.mp4",
+    "train_render": "dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/projective_rational_multicam_learnable_camera_train_f1t_smoke_32_2f_32t_2step_media/train_render.mp4"
+  },
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "camera_lr": 0.03,
+    "camera_poly_degree": 1,
+    "camera_regularization_weight": 0.001,
+    "camera_temporal_weight": 0.001,
+    "device": "mps",
+    "frames": 2,
+    "height": 32,
+    "heldout_camera_fit_errors": [
+      0.0
+    ],
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "max_frames": 2,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "prt_alpha_threshold": 0.00392156862745098,
+    "prt_support_alpha_threshold": null,
+    "prt_tubes": 32,
+    "sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+    "seed": 17,
+    "steps": 2,
+    "target_size": 32,
+    "tile_config": {
+      "tile_capacity": 128,
+      "tile_t": 1,
+      "tile_x": 8,
+      "tile_y": 8
+    },
+    "tile_policy": "generic_auto",
+    "train_camera_base_offsets": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "train_camera_fit_errors": [
+      0.0,
+      0.0
+    ],
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "width": 32,
+    "world_lr": 0.02
+  },
+  "model": {
+    "camera_parameter_count": 24,
+    "parameter_count": 376,
+    "tile_config": {
+      "tile_capacity": 128,
+      "tile_t": 1,
+      "tile_x": 8,
+      "tile_y": 8
+    },
+    "tile_config_key": "8x8x1:128",
+    "world_tube_parameter_count": 352
+  },
+  "name": "projective_rational_multicam_learnable_camera_train",
+  "note": "Real multicam clip PRT trainer. This forks the real-clip PRT-vs-splat harness and trains world tubes plus bounded train-camera SE3 residuals; heldout cameras stay fixed for evaluation.",
+  "pass": true,
+  "train": {
+    "camera_metrics": {
+      "raw_rotation_grad_norm": 0.0,
+      "raw_translation_grad_norm": 0.0,
+      "rotation_degrees_max": 0.15583530813455582,
+      "rotation_degrees_mean": 0.07873960584402084,
+      "translation_max": 0.004155635135248303,
+      "translation_mean": 0.0021264594979584217
+    },
+    "final_loss": 0.06585608422756195,
+    "gradient_checks": {
+      "raw_rotation_grad_norm_max": 0.002494583372026682,
+      "raw_translation_grad_norm_max": 0.01105789840221405
+    },
+    "initial_loss": 0.0746152400970459,
+    "logs": [
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.002494583372026682,
+          "raw_translation_grad_norm": 0.003104976611211896,
+          "rotation_degrees_max": 0.0,
+          "rotation_degrees_mean": 0.0,
+          "translation_max": 0.0,
+          "translation_mean": 0.0
+        },
+        "camera_regularization": 0.0,
+        "camera_temporal": 0.0,
+        "frame": 1,
+        "loss": 0.0746152400970459,
+        "recon_loss": 0.0746152400970459,
+        "step": 0,
+        "view": 0
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0023759352043271065,
+          "raw_translation_grad_norm": 0.01105789840221405,
+          "rotation_degrees_max": 0.0,
+          "rotation_degrees_mean": 0.0,
+          "translation_max": 0.0,
+          "translation_mean": 0.0
+        },
+        "camera_regularization": 0.0,
+        "camera_temporal": 0.0,
+        "frame": 0,
+        "loss": 0.07914935052394867,
+        "recon_loss": 0.07914935052394867,
+        "step": 1,
+        "view": 1
+      }
+    ],
+    "loss_mode": "sampled_frame",
+    "losses": [
+      {
+        "frame": 1,
+        "loss": 0.0746152400970459,
+        "step": 0,
+        "view": 0
+      },
+      {
+        "frame": 0,
+        "loss": 0.07914935052394867,
+        "step": 1,
+        "view": 1
+      },
+      {
+        "frame": 0,
+        "loss": 0.06585608422756195,
+        "step": 2,
+        "view": 1
+      }
+    ],
+    "sampled_loss_decreased": true,
+    "steps": 2,
+    "train_loop_elapsed_s": 3.439859583013458
+  }
+}

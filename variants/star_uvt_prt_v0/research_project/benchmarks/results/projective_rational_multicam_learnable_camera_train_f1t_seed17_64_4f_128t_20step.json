@@ -1,0 +1,595 @@
+{
+  "eval": {
+    "heldout_render_seconds": {
+      "max_s": 0.06749241598299704,
+      "median_s": 0.03289179201237857,
+      "min_s": 0.032325000007404014,
+      "samples_s": [
+        0.06749241598299704,
+        0.032325000007404014,
+        0.03289179201237857
+      ]
+    },
+    "max_tile_count": 87,
+    "metrics": {
+      "heldout_l1": 0.1544911116361618,
+      "heldout_mse": 0.03823256120085716,
+      "heldout_psnr": 14.175666076011275,
+      "l1": 0.15471626818180084,
+      "mse": 0.03786272741854191,
+      "psnr": 14.23344225261844
+    },
+    "overflow_tile_count": 0,
+    "train_render_seconds": {
+      "max_s": 0.0541123750153929,
+      "median_s": 0.035716333499294706,
+      "min_s": 0.015499875007662922,
+      "samples_s": [
+        0.0244503750000149,
+        0.04698229199857451,
+        0.02281033300096169,
+        0.051674207992618904,
+        0.015499875007662922,
+        0.0541123750153929
+      ]
+    }
+  },
+  "media_paths": {
+    "heldout_gt_render": "dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/projective_rational_multicam_learnable_camera_train_f1t_seed17_64_4f_128t_20step_media/heldout_gt_render.mp4",
+    "heldout_render": "dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/projective_rational_multicam_learnable_camera_train_f1t_seed17_64_4f_128t_20step_media/heldout_render.mp4",
+    "train_gt_render": "dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/projective_rational_multicam_learnable_camera_train_f1t_seed17_64_4f_128t_20step_media/train_gt_render.mp4",
+    "train_render": "dynaworld/third_party/fast-mac-gsplat/variants/star_uvt_prt_v0/research_project/benchmarks/results/projective_rational_multicam_learnable_camera_train_f1t_seed17_64_4f_128t_20step_media/train_render.mp4"
+  },
+  "meta": {
+    "baseline_config": "/Users/nicholasbardy/git/gsplats_browser/dynaworld/src/train_configs/local_mac_multicam_deepview_3cam_train2_test1_vjepa_full_relpose_features_F32_256_16f_8192splats_goodset_train0006_0014_holdout0005_alphaab_alpha1_128.jsonc",
+    "camera_lr": 0.03,
+    "camera_poly_degree": 1,
+    "camera_regularization_weight": 0.001,
+    "camera_temporal_weight": 0.001,
+    "device": "mps",
+    "frames": 4,
+    "height": 64,
+    "heldout_camera_fit_errors": [
+      0.0
+    ],
+    "heldout_cameras": [
+      "camera_0005"
+    ],
+    "max_frames": 4,
+    "pose_source": "deepview_models_relative_opencv_fisheye",
+    "prt_alpha_threshold": 0.00392156862745098,
+    "prt_support_alpha_threshold": null,
+    "prt_tubes": 128,
+    "sample_id": "deepview_03_Dog_camera_0001_to_camera_0040",
+    "seed": 17,
+    "steps": 20,
+    "target_size": 64,
+    "tile_config": {
+      "tile_capacity": 128,
+      "tile_t": 1,
+      "tile_x": 8,
+      "tile_y": 8
+    },
+    "tile_policy": "generic_auto",
+    "train_camera_base_offsets": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "train_camera_fit_errors": [
+      0.0,
+      0.0
+    ],
+    "train_cameras": [
+      "camera_0006",
+      "camera_0014"
+    ],
+    "width": 64,
+    "world_lr": 0.02
+  },
+  "model": {
+    "camera_parameter_count": 48,
+    "parameter_count": 1456,
+    "tile_config": {
+      "tile_capacity": 128,
+      "tile_t": 1,
+      "tile_x": 8,
+      "tile_y": 8
+    },
+    "tile_config_key": "8x8x1:128",
+    "world_tube_parameter_count": 1408
+  },
+  "name": "projective_rational_multicam_learnable_camera_train",
+  "note": "Real multicam clip PRT trainer. This forks the real-clip PRT-vs-splat harness and trains world tubes plus bounded train-camera SE3 residuals; heldout cameras stay fixed for evaluation.",
+  "pass": true,
+  "train": {
+    "camera_metrics": {
+      "raw_rotation_grad_norm": 0.0,
+      "raw_translation_grad_norm": 0.0,
+      "rotation_degrees_max": 1.1655316352844238,
+      "rotation_degrees_mean": 1.0096536576747894,
+      "translation_max": 0.029114103876054287,
+      "translation_mean": 0.022888888604938984
+    },
+    "final_loss": 0.04525500163435936,
+    "gradient_checks": {
+      "raw_rotation_grad_norm_max": 0.0031717312522232533,
+      "raw_translation_grad_norm_max": 0.01033356599509716
+    },
+    "initial_loss": 0.0502442792057991,
+    "logs": [
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0014570800121873617,
+          "raw_translation_grad_norm": 0.00436079315841198,
+          "rotation_degrees_max": 0.0,
+          "rotation_degrees_mean": 0.0,
+          "translation_max": 0.0,
+          "translation_mean": 0.0
+        },
+        "camera_regularization": 0.0,
+        "camera_temporal": 0.0,
+        "frame": 1,
+        "loss": 0.0502442792057991,
+        "recon_loss": 0.0502442792057991,
+        "step": 0,
+        "view": 0
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0012417365796864033,
+          "raw_translation_grad_norm": 0.0020885164849460125,
+          "rotation_degrees_max": 0.0,
+          "rotation_degrees_mean": 0.0,
+          "translation_max": 0.0,
+          "translation_mean": 0.0
+        },
+        "camera_regularization": 0.0,
+        "camera_temporal": 0.0,
+        "frame": 0,
+        "loss": 0.04243309423327446,
+        "recon_loss": 0.04243309423327446,
+        "step": 1,
+        "view": 1
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0011942250421270728,
+          "raw_translation_grad_norm": 0.0036388132721185684,
+          "rotation_degrees_max": 0.15583427250385284,
+          "rotation_degrees_mean": 0.15582609176635742,
+          "translation_max": 0.004155605565756559,
+          "translation_mean": 0.004155443981289864
+        },
+        "camera_regularization": 8.221456482715439e-06,
+        "camera_temporal": 1.0961153748212382e-05,
+        "frame": 0,
+        "loss": 0.03773100674152374,
+        "recon_loss": 0.03773098811507225,
+        "step": 2,
+        "view": 1
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0007622401462867856,
+          "raw_translation_grad_norm": 0.003226840402930975,
+          "rotation_degrees_max": 0.15583425760269165,
+          "rotation_degrees_mean": 0.15583044290542603,
+          "translation_max": 0.0041556162759661674,
+          "translation_mean": 0.004155552014708519
+        },
+        "camera_regularization": 8.22189304017229e-06,
+        "camera_temporal": 5.416747745603991e-15,
+        "frame": 3,
+        "loss": 0.035753168165683746,
+        "recon_loss": 0.03575316071510315,
+        "step": 3,
+        "view": 0
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.001179551356472075,
+          "raw_translation_grad_norm": 0.003002940444275737,
+          "rotation_degrees_max": 0.30934539437294006,
+          "rotation_degrees_mean": 0.30932754278182983,
+          "translation_max": 0.008245057426393032,
+          "translation_mean": 0.008244821801781654
+        },
+        "camera_regularization": 3.2374646252719685e-05,
+        "camera_temporal": 4.316350896260701e-05,
+        "frame": 1,
+        "loss": 0.03644416853785515,
+        "recon_loss": 0.03644409030675888,
+        "step": 4,
+        "view": 1
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0011373496381565928,
+          "raw_translation_grad_norm": 0.002562988782301545,
+          "rotation_degrees_max": 0.4582010507583618,
+          "rotation_degrees_mean": 0.4346412420272827,
+          "translation_max": 0.012294754385948181,
+          "translation_mean": 0.011593777686357498
+        },
+        "camera_regularization": 6.447431951528415e-05,
+        "camera_temporal": 7.589184679090977e-05,
+        "frame": 2,
+        "loss": 0.04255130514502525,
+        "recon_loss": 0.04255116730928421,
+        "step": 5,
+        "view": 1
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0006907979259267449,
+          "raw_translation_grad_norm": 0.0013424099888652563,
+          "rotation_degrees_max": 0.3043680191040039,
+          "rotation_degrees_mean": 0.2796686887741089,
+          "translation_max": 0.007124342489987612,
+          "translation_mean": 0.006820139940828085
+        },
+        "camera_regularization": 2.3542632334283553e-05,
+        "camera_temporal": 7.671806088183075e-07,
+        "frame": 3,
+        "loss": 0.03212113678455353,
+        "recon_loss": 0.03212111443281174,
+        "step": 6,
+        "view": 0
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.000989213353022933,
+          "raw_translation_grad_norm": 0.0028812375385314226,
+          "rotation_degrees_max": 0.5908300280570984,
+          "rotation_degrees_mean": 0.5301623344421387,
+          "translation_max": 0.01623247191309929,
+          "translation_mean": 0.014049476943910122
+        },
+        "camera_regularization": 9.855055395746604e-05,
+        "camera_temporal": 9.447290358366445e-05,
+        "frame": 2,
+        "loss": 0.037781499326229095,
+        "recon_loss": 0.037781309336423874,
+        "step": 7,
+        "view": 1
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0009808233007788658,
+          "raw_translation_grad_norm": 0.0028892860282212496,
+          "rotation_degrees_max": 0.7148764133453369,
+          "rotation_degrees_mean": 0.6199675798416138,
+          "translation_max": 0.02013615146279335,
+          "translation_mean": 0.016191069036722183
+        },
+        "camera_regularization": 0.00013954330643173307,
+        "camera_temporal": 0.0001079263020073995,
+        "frame": 1,
+        "loss": 0.033589038997888565,
+        "recon_loss": 0.03358879312872887,
+        "step": 8,
+        "view": 1
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0013138853246346116,
+          "raw_translation_grad_norm": 0.002704322338104248,
+          "rotation_degrees_max": 0.4423367977142334,
+          "rotation_degrees_mean": 0.3853453993797302,
+          "translation_max": 0.00913198757916689,
+          "translation_mean": 0.008967002853751183
+        },
+        "camera_regularization": 4.231453931424767e-05,
+        "camera_temporal": 3.2543671295570675e-06,
+        "frame": 2,
+        "loss": 0.038680337369441986,
+        "recon_loss": 0.038680292665958405,
+        "step": 9,
+        "view": 0
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.000947211345192045,
+          "raw_translation_grad_norm": 0.00230290531180799,
+          "rotation_degrees_max": 0.5806347727775574,
+          "rotation_degrees_mean": 0.4991764426231384,
+          "translation_max": 0.011288854293525219,
+          "translation_mean": 0.010720484890043736
+        },
+        "camera_regularization": 6.465916521847248e-05,
+        "camera_temporal": 6.2479339248966426e-06,
+        "frame": 3,
+        "loss": 0.029165569692850113,
+        "recon_loss": 0.029165498912334442,
+        "step": 10,
+        "view": 0
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0005764940287917852,
+          "raw_translation_grad_norm": 0.001163905719295144,
+          "rotation_degrees_max": 0.8081811666488647,
+          "rotation_degrees_mean": 0.696262538433075,
+          "translation_max": 0.02326982282102108,
+          "translation_mean": 0.01791670173406601
+        },
+        "camera_regularization": 0.00018015626119449735,
+        "camera_temporal": 0.00011810909199994057,
+        "frame": 1,
+        "loss": 0.032261405140161514,
+        "recon_loss": 0.03226110711693764,
+        "step": 11,
+        "view": 1
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0012622803915292025,
+          "raw_translation_grad_norm": 0.0036555116530507803,
+          "rotation_degrees_max": 0.8748014569282532,
+          "rotation_degrees_mean": 0.7590186595916748,
+          "translation_max": 0.02525991015136242,
+          "translation_mean": 0.019044164568185806
+        },
+        "camera_regularization": 0.00021151575492694974,
+        "camera_temporal": 0.00012428851914592087,
+        "frame": 2,
+        "loss": 0.034023456275463104,
+        "recon_loss": 0.03402312099933624,
+        "step": 12,
+        "view": 1
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0011795249301940203,
+          "raw_translation_grad_norm": 0.004655011929571629,
+          "rotation_degrees_max": 0.9508091807365417,
+          "rotation_degrees_mean": 0.8263335227966309,
+          "translation_max": 0.0276805330067873,
+          "translation_mean": 0.020537354052066803
+        },
+        "camera_regularization": 0.00025212630862370133,
+        "camera_temporal": 0.00012845528544858098,
+        "frame": 0,
+        "loss": 0.03451579809188843,
+        "recon_loss": 0.034515418112277985,
+        "step": 13,
+        "view": 1
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.001041049137711525,
+          "raw_translation_grad_norm": 0.0027435929514467716,
+          "rotation_degrees_max": 1.0319691896438599,
+          "rotation_degrees_mean": 0.8987801671028137,
+          "translation_max": 0.03045419417321682,
+          "translation_mean": 0.02273535542190075
+        },
+        "camera_regularization": 0.00030230064294300973,
+        "camera_temporal": 0.0001385296054650098,
+        "frame": 3,
+        "loss": 0.043592844158411026,
+        "recon_loss": 0.04359240457415581,
+        "step": 14,
+        "view": 1
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0010203804122284055,
+          "raw_translation_grad_norm": 0.0033143057953566313,
+          "rotation_degrees_max": 1.10621178150177,
+          "rotation_degrees_mean": 0.9701323509216309,
+          "translation_max": 0.0330018475651741,
+          "translation_mean": 0.024988539516925812
+        },
+        "camera_regularization": 0.0003540389006957412,
+        "camera_temporal": 0.00014582902076654136,
+        "frame": 3,
+        "loss": 0.04311325028538704,
+        "recon_loss": 0.043112751096487045,
+        "step": 15,
+        "view": 1
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0014047955628484488,
+          "raw_translation_grad_norm": 0.004119791090488434,
+          "rotation_degrees_max": 1.174291729927063,
+          "rotation_degrees_mean": 1.0427019596099854,
+          "translation_max": 0.03557246923446655,
+          "translation_mean": 0.027198676019906998
+        },
+        "camera_regularization": 0.00040755770169198513,
+        "camera_temporal": 0.00015169470862019807,
+        "frame": 2,
+        "loss": 0.03140636533498764,
+        "recon_loss": 0.03140580654144287,
+        "step": 16,
+        "view": 1
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0016612112522125244,
+          "raw_translation_grad_norm": 0.0032516419887542725,
+          "rotation_degrees_max": 0.7149183750152588,
+          "rotation_degrees_mean": 0.6018437147140503,
+          "translation_max": 0.013824554160237312,
+          "translation_mean": 0.012441221624612808
+        },
+        "camera_regularization": 9.087863872991875e-05,
+        "camera_temporal": 9.376251909998246e-06,
+        "frame": 2,
+        "loss": 0.03478182107210159,
+        "recon_loss": 0.034781720489263535,
+        "step": 17,
+        "view": 0
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.0031717312522232533,
+          "raw_translation_grad_norm": 0.01033356599509716,
+          "rotation_degrees_max": 0.8382910490036011,
+          "rotation_degrees_mean": 0.7005782127380371,
+          "translation_max": 0.01609787903726101,
+          "translation_mean": 0.014062229543924332
+        },
+        "camera_regularization": 0.00011998522677458823,
+        "camera_temporal": 1.250321656698361e-05,
+        "frame": 0,
+        "loss": 0.06277187913656235,
+        "recon_loss": 0.0627717450261116,
+        "step": 18,
+        "view": 0
+      },
+      {
+        "camera": {
+          "raw_rotation_grad_norm": 0.003097417065873742,
+          "raw_translation_grad_norm": 0.009239236824214458,
+          "rotation_degrees_max": 0.9597553610801697,
+          "rotation_degrees_mean": 0.8005800247192383,
+          "translation_max": 0.017726678401231766,
+          "translation_mean": 0.01507380697876215
+        },
+        "camera_regularization": 0.00014650754746980965,
+        "camera_temporal": 1.3390717867878266e-05,
+        "frame": 0,
+        "loss": 0.05877712741494179,
+        "recon_loss": 0.058776967227458954,
+        "step": 19,
+        "view": 0
+      }
+    ],
+    "loss_mode": "sampled_frame",
+    "losses": [
+      {
+        "frame": 1,
+        "loss": 0.0502442792057991,
+        "step": 0,
+        "view": 0
+      },
+      {
+        "frame": 0,
+        "loss": 0.04243309423327446,
+        "step": 1,
+        "view": 1
+      },
+      {
+        "frame": 0,
+        "loss": 0.03773098811507225,
+        "step": 2,
+        "view": 1
+      },
+      {
+        "frame": 3,
+        "loss": 0.03575316071510315,
+        "step": 3,
+        "view": 0
+      },
+      {
+        "frame": 1,
+        "loss": 0.03644409030675888,
+        "step": 4,
+        "view": 1
+      },
+      {
+        "frame": 2,
+        "loss": 0.04255116730928421,
+        "step": 5,
+        "view": 1
+      },
+      {
+        "frame": 3,
+        "loss": 0.03212111443281174,
+        "step": 6,
+        "view": 0
+      },
+      {
+        "frame": 2,
+        "loss": 0.037781309336423874,
+        "step": 7,
+        "view": 1
+      },
+      {
+        "frame": 1,
+        "loss": 0.03358879312872887,
+        "step": 8,
+        "view": 1
+      },
+      {
+        "frame": 2,
+        "loss": 0.038680292665958405,
+        "step": 9,
+        "view": 0
+      },
+      {
+        "frame": 3,
+        "loss": 0.029165498912334442,
+        "step": 10,
+        "view": 0
+      },
+      {
+        "frame": 1,
+        "loss": 0.03226110711693764,
+        "step": 11,
+        "view": 1
+      },
+      {
+        "frame": 2,
+        "loss": 0.03402312099933624,
+        "step": 12,
+        "view": 1
+      },
+      {
+        "frame": 0,
+        "loss": 0.034515418112277985,
+        "step": 13,
+        "view": 1
+      },
+      {
+        "frame": 3,
+        "loss": 0.04359240457415581,
+        "step": 14,
+        "view": 1
+      },
+      {
+        "frame": 3,
+        "loss": 0.043112751096487045,
+        "step": 15,
+        "view": 1
+      },
+      {
+        "frame": 2,
+        "loss": 0.03140580654144287,
+        "step": 16,
+        "view": 1
+      },
+      {
+        "frame": 2,
+        "loss": 0.034781720489263535,
+        "step": 17,
+        "view": 0
+      },
+      {
+        "frame": 0,
+        "loss": 0.0627717450261116,
+        "step": 18,
+        "view": 0
+      },
+      {
+        "frame": 0,
+        "loss": 0.058776967227458954,
+        "step": 19,
+        "view": 0
+      },
+      {
+        "frame": 1,
+        "loss": 0.04525500163435936,
+        "step": 20,
+        "view": 0
+      }
+    ],
+    "sampled_loss_decreased": true,
+    "steps": 20,
+    "train_loop_elapsed_s": 3.5918273339921143
+  }
+}
