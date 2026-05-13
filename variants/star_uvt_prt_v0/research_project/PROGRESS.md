@@ -57,6 +57,7 @@ Last updated: 2026-05-13
 - [x] Gate D2r: lower 1024-tube `tile_t=1` support-pruning cutoff.
 - [x] Gate D2s: explicit 1024 train-speed tile policy API.
 - [x] Gate D2t: support-aware backward phase profile for the 1024 train-speed policy.
+- [x] Gate D2u: reject existing PRT `tile_pair_atomic` as the lower-contention shortcut.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1379,6 +1380,33 @@ The backward kernel is about 95% of the profiled total, while binning is about
 2.7%. The next speed work should target lower-atomic/two-pass accumulation
 inside the backward kernel; reducing tile setup will not move this row much.
 
+Gate D2u tests whether the existing PRT `tile_pair_atomic` backward is already
+the lower-contention alternative. The train-step timing and breakdown probes now
+accept `--support-alpha-threshold` so the synthetic case can match the selected
+1024 support-pruned policy surface.
+
+Validation:
+
+```text
+python3 -m py_compile research_project/benchmarks/projective_rational_train_step_timing_probe.py research_project/benchmarks/projective_rational_train_step_breakdown_probe.py
+python3 setup.py build_ext --inplace
+python3 research_project/benchmarks/projective_rational_train_step_breakdown_probe.py --tube-counts 1024 --frames 4 --width 64 --height 64 --tile-config 4x4x1:512 --support-alpha-threshold 0.12549019607843137 --warmups 1 --repeats 5 --forward-mode tiled --backward-mode tile_pixel_atomic --out-json research_project/benchmarks/results/projective_rational_train_step_breakdown_probe_1024_support32_tile_pixel_atomic.json
+python3 research_project/benchmarks/projective_rational_train_step_breakdown_probe.py --tube-counts 1024 --frames 4 --width 64 --height 64 --tile-config 4x4x1:512 --support-alpha-threshold 0.12549019607843137 --warmups 1 --repeats 5 --forward-mode tiled --backward-mode tile_pair_atomic --out-json research_project/benchmarks/results/projective_rational_train_step_breakdown_probe_1024_support32_tile_pair_atomic.json
+```
+
+Result:
+
+```text
+tile_pixel_atomic: pass true, max tile 266, overflow 0, loss 0.00509760 -> 0.00509594, median forward 17.464 ms, backward 5.906 ms, wall 24.161 ms.
+tile_pair_atomic:  pass true, max tile 266, overflow 0, loss 0.00509760 -> 0.00509594, median forward 17.524 ms, backward 2066.803 ms, wall 2086.299 ms.
+```
+
+Read: the existing `tile_pair_atomic` PRT backward is numerically viable on this
+case but unusably slow. It is roughly 350x slower in the measured backward
+segment, so the next lower-contention attempt should not be a direct switch to
+`tile_pair_atomic`. It needs a new PRT-specific two-pass/reduction design that
+avoids both pixel-level atomic contention and per-tube serial replay.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1401,6 +1429,6 @@ should be measured before splitting a camera window.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
-7. Test a lower-atomic or two-pass accumulation structure inside `projective_rational_tile_pixel_atomic_backward`; D2t shows this kernel is the selected 1024 policy bottleneck.
+7. Design a new lower-atomic or two-pass accumulation structure inside `projective_rational_tile_pixel_atomic_backward`; D2u rejects the existing `tile_pair_atomic` shortcut as far too slow.
 8. Profile alpha replay vs atomic accumulation inside `projective_rational_tile_pixel_atomic_backward` if the next kernel split is ambiguous.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.

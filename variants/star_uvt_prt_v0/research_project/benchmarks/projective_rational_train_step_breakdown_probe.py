@@ -122,6 +122,7 @@ def _run_case(
     forward_mode: str,
     backward_mode: str,
     lr: float,
+    support_alpha_threshold: float | None,
 ) -> dict[str, Any]:
     params, target, config, tile_stats = _make_case(
         tube_count=tube_count,
@@ -131,6 +132,7 @@ def _run_case(
         seed=seed,
         camera_motion_scale=camera_motion_scale,
         tile_config=tile_config,
+        support_alpha_threshold=support_alpha_threshold,
     )
 
     losses: list[float] = []
@@ -175,6 +177,7 @@ def _run_case(
         "forward_mode": forward_mode,
         "backward_mode": backward_mode,
         "lr": lr,
+        "support_alpha_threshold": support_alpha_threshold,
         "warmups": warmups,
         "repeats": repeats,
         "initial_loss": losses[0],
@@ -201,6 +204,7 @@ def run_probe(
     forward_mode: str,
     backward_mode: str,
     lr: float,
+    support_alpha_threshold: float | None,
 ) -> dict[str, Any]:
     if not torch.backends.mps.is_available():
         raise RuntimeError("MPS is required for the PRT train-step breakdown probe")
@@ -218,6 +222,7 @@ def run_probe(
             forward_mode=forward_mode,
             backward_mode=backward_mode,
             lr=lr,
+            support_alpha_threshold=support_alpha_threshold,
         )
         for index, tube_count in enumerate(tube_counts)
     ]
@@ -225,6 +230,7 @@ def run_probe(
         "name": "projective_rational_train_step_breakdown_probe",
         "note": "Diagnostic PRT train-step timing split into forward, loss, backward, and SGD segments.",
         "camera_motion_scale": camera_motion_scale,
+        "support_alpha_threshold": support_alpha_threshold,
         "tile_config_key": tile_config.key,
         "tile_config": tile_config.as_dict(),
         "pass": all(bool(row["pass"]) for row in rows),
@@ -243,6 +249,7 @@ def main() -> None:
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--seed", type=int, default=31)
     parser.add_argument("--camera-motion-scale", type=float, default=1.0)
+    parser.add_argument("--support-alpha-threshold", type=float)
     parser.add_argument("--forward-mode", choices=("direct", "tiled"), default="tiled")
     parser.add_argument(
         "--backward-mode",
@@ -272,6 +279,7 @@ def main() -> None:
         forward_mode=args.forward_mode,
         backward_mode=args.backward_mode,
         lr=args.lr,
+        support_alpha_threshold=args.support_alpha_threshold,
     )
     if args.out_json is not None:
         args.out_json.parent.mkdir(parents=True, exist_ok=True)

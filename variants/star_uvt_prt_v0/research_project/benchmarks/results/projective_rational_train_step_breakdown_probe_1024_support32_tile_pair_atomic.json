@@ -1,0 +1,90 @@
+{
+  "camera_motion_scale": 1.0,
+  "name": "projective_rational_train_step_breakdown_probe",
+  "note": "Diagnostic PRT train-step timing split into forward, loss, backward, and SGD segments.",
+  "pass": true,
+  "rows": [
+    {
+      "active_tile_count": 314,
+      "backward_mode": "tile_pair_atomic",
+      "camera_fit_error": 5.801895852641792e-08,
+      "final_loss": 0.005095941945910454,
+      "forward_mode": "tiled",
+      "frames": 4,
+      "height": 64,
+      "initial_loss": 0.005097602494060993,
+      "loss_decreased": true,
+      "lr": 0.02,
+      "max_tile_count": 266,
+      "median_backward_ms": 2066.8032910034526,
+      "median_component_sum_ms": 2086.2761239986867,
+      "median_forward_ms": 17.524249997222796,
+      "median_loss_ms": 0.9326660074293613,
+      "median_optimizer_ms": 1.4608750061597675,
+      "median_wall_ms": 2086.2987500004238,
+      "overflow_tile_count": 0,
+      "pass": true,
+      "records": [
+        {
+          "backward_ms": 1990.1650420069927,
+          "component_sum_ms": 2010.8933330047876,
+          "forward_ms": 17.736750000040047,
+          "loss": 0.005097236018627882,
+          "loss_ms": 0.9326660074293613,
+          "optimizer_ms": 2.058874990325421,
+          "wall_ms": 2010.9176669939188
+        },
+        {
+          "backward_ms": 2004.0579170017736,
+          "component_sum_ms": 2024.56862499821,
+          "forward_ms": 17.524249997222796,
+          "loss": 0.005096870474517345,
+          "loss_ms": 0.8457910007564351,
+          "optimizer_ms": 2.1406669984571636,
+          "wall_ms": 2024.5922500034794
+        },
+        {
+          "backward_ms": 2639.1724169952795,
+          "component_sum_ms": 2658.8078340137145,
+          "forward_ms": 17.51883400720544,
+          "loss": 0.005096673499792814,
+          "loss_ms": 0.655708005069755,
+          "optimizer_ms": 1.4608750061597675,
+          "wall_ms": 2658.8271249929676
+        },
+        {
+          "backward_ms": 2066.8032910034526,
+          "component_sum_ms": 2086.2761239986867,
+          "forward_ms": 17.18675000302028,
+          "loss": 0.005096307024359703,
+          "loss_ms": 1.044457996613346,
+          "optimizer_ms": 1.2416249956004322,
+          "wall_ms": 2086.2987500004238
+        },
+        {
+          "backward_ms": 2574.6134169894503,
+          "component_sum_ms": 2594.5707089995267,
+          "forward_ms": 17.569750008988194,
+          "loss": 0.005095941945910454,
+          "loss_ms": 1.08712499786634,
+          "optimizer_ms": 1.3004170032218099,
+          "wall_ms": 2594.5968750020256
+        }
+      ],
+      "repeats": 5,
+      "support_alpha_threshold": 0.12549019607843137,
+      "total_tile_pairs": 26939,
+      "tube_count": 1024,
+      "warmups": 1,
+      "width": 64
+    }
+  ],
+  "support_alpha_threshold": 0.12549019607843137,
+  "tile_config": {
+    "tile_capacity": 512,
+    "tile_t": 1,
+    "tile_x": 4,
+    "tile_y": 4
+  },
+  "tile_config_key": "4x4x1:512"
+}
