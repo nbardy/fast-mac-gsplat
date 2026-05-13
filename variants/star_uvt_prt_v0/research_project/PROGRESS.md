@@ -70,6 +70,7 @@ Last updated: 2026-05-13
 - [x] Gate D3e: fused sequence 128px 8-frame 1024 multicam scaling rows.
 - [x] Gate D3f: explicit 2048-tube/2048-splat 128px 8-frame capacity rows.
 - [x] Gate D3g: 2048-tube support-threshold dial and rejected global policy promotion.
+- [x] Gate D3h: 256px x 8-frame 2048-tube scaling rows.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1842,6 +1843,41 @@ So the 2048 rows stay explicit for now. A real selector needs a density-aware
 signature, or the harness must keep requiring explicit tile config plus support
 threshold for 2048+ tube experiments.
 
+Gate D3h scales the 2048 PRT rows to 256px while keeping the same 8-frame
+multicam sample and 2048 direct-splat baseline. It tests whether the support
+threshold dial still gives a useful speed/quality row at a fuller local
+resolution.
+
+Validation:
+
+```text
+python3 setup.py build_ext --inplace
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 72 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.18823529411764706 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_72step_sequence_tile4x4x1cap512_support48_fused_mse.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 72 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_72step_sequence_tile4x4x1cap512_support64_fused_mse.json
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 200 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_200step_sequence_tile4x4x1cap512_support64_fused_mse.json
+```
+
+Result:
+
+```text
+72-step support48 PRT:  train wall 7.413 s, PSNR 15.6489 / heldout 13.6551 dB, render 89.59 / 98.29 ms, max tile 257, overflow 0.
+72-step support48 splat: train wall 2.174 s, PSNR 13.9928 / heldout 12.2259 dB, render 59.17 / 63.08 ms.
+
+72-step support64 PRT:  train wall 3.740 s, PSNR 16.5587 / heldout 13.1365 dB, render 28.69 / 32.45 ms, max tile 130, overflow 0.
+72-step support64 splat: train wall 1.944 s, PSNR 13.9928 / heldout 12.2259 dB, render 70.97 / 64.96 ms.
+
+200-step support64 PRT:  train wall 8.106 s, PSNR 18.0244 / heldout 12.7822 dB, render 17.65 / 23.51 ms, max tile 115, overflow 0.
+200-step support64 splat: train wall 6.434 s, PSNR 15.6135 / heldout 12.4150 dB, render 66.20 / 79.22 ms.
+```
+
+Read: the 256px row keeps the overfit and render-speed story but exposes the
+training-speed gap. Support `64/255` is the useful 256px setting: it beats direct
+splats on train and heldout PSNR and renders 2-4x faster, but the fused PRT train
+loop is still slower than direct splats at 72/200 steps. Support `48/255` is too
+dense at 256px for speed despite the stronger heldout PSNR. This points the next
+engineering target back at train-step cost and support scheduling, not basic
+render correctness.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1864,6 +1900,6 @@ should be measured before splitting a camera window.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
-7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row and `64/255` is the overfit-speed row, but the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
+7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
 8. Keep accumulation-only and derivative-math rewrites behind fused-train-step work unless a new profile changes the cost split.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
