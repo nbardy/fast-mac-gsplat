@@ -1,0 +1,82 @@
+{
+  "cached_render": {
+    "max_ms": 15.822499990463257,
+    "median_ms": 14.72458298667334,
+    "min_ms": 12.52008302253671,
+    "samples_ms": [
+      13.222499983385205,
+      15.822499990463257,
+      12.52008302253671,
+      15.000000013969839,
+      14.72458298667334
+    ]
+  },
+  "cached_vs_scan": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "config": {
+    "depth_bands": 4,
+    "frames": 16,
+    "iters": 5,
+    "seed": 31,
+    "support_scale": 1.4,
+    "target_size": 64,
+    "tile_capacity": 64,
+    "tile_size": 4,
+    "tile_t": 4,
+    "tubes": 256,
+    "warmup": 2
+  },
+  "fallback_tubes": 0,
+  "name": "depth_banded_homography_flow_atlas_cached_select_timing_probe",
+  "note": "F1i timing probe for cached atlas candidate ordering. The select variant caches candidate ids/depths unsorted and repeatedly selects the next depth during compositing, avoiding insertion-sort writes while preserving exact depth order.",
+  "pass": false,
+  "scan_render": {
+    "max_ms": 17.60829202248715,
+    "median_ms": 14.76854202337563,
+    "min_ms": 13.329624984180555,
+    "samples_ms": [
+      13.329624984180555,
+      14.76854202337563,
+      13.565417000791058,
+      16.59420898067765,
+      17.60829202248715
+    ]
+  },
+  "select_render": {
+    "max_ms": 22.765083995182067,
+    "median_ms": 21.77729198592715,
+    "min_ms": 20.542375015793368,
+    "samples_ms": [
+      22.765083995182067,
+      20.542375015793368,
+      21.77729198592715,
+      21.913542004767805,
+      21.632541000144556
+    ]
+  },
+  "select_vs_cached": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "select_vs_scan": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "speed_read": {
+    "select_beats_cached": false,
+    "select_beats_scan": false
+  },
+  "speedups": {
+    "cached_vs_scan": 1.0029854181094349,
+    "select_vs_cached": 0.6761438931979519,
+    "select_vs_scan": 0.6781624654212888
+  }
+}

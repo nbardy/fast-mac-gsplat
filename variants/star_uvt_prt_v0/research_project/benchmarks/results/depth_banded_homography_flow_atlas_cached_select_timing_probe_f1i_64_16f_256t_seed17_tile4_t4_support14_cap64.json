@@ -1,0 +1,82 @@
+{
+  "cached_render": {
+    "max_ms": 21.218457986833528,
+    "median_ms": 14.558166993083432,
+    "min_ms": 13.310500013176352,
+    "samples_ms": [
+      13.310500013176352,
+      14.558166993083432,
+      14.4492500112392,
+      21.218457986833528,
+      19.66529100900516
+    ]
+  },
+  "cached_vs_scan": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "config": {
+    "depth_bands": 4,
+    "frames": 16,
+    "iters": 5,
+    "seed": 17,
+    "support_scale": 1.4,
+    "target_size": 64,
+    "tile_capacity": 64,
+    "tile_size": 4,
+    "tile_t": 4,
+    "tubes": 256,
+    "warmup": 2
+  },
+  "fallback_tubes": 0,
+  "name": "depth_banded_homography_flow_atlas_cached_select_timing_probe",
+  "note": "F1i timing probe for cached atlas candidate ordering. The select variant caches candidate ids/depths unsorted and repeatedly selects the next depth during compositing, avoiding insertion-sort writes while preserving exact depth order.",
+  "pass": false,
+  "scan_render": {
+    "max_ms": 28.135875007137656,
+    "median_ms": 21.54241598327644,
+    "min_ms": 18.000458017922938,
+    "samples_ms": [
+      18.000458017922938,
+      23.741958022583276,
+      28.135875007137656,
+      21.54241598327644,
+      19.663916988065466
+    ]
+  },
+  "select_render": {
+    "max_ms": 34.836458013160154,
+    "median_ms": 22.546166990650818,
+    "min_ms": 19.453917018836364,
+    "samples_ms": [
+      34.836458013160154,
+      28.28054199926555,
+      22.546166990650818,
+      19.453917018836364,
+      21.062665997305885
+    ]
+  },
+  "select_vs_cached": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "select_vs_scan": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "speed_read": {
+    "select_beats_cached": false,
+    "select_beats_scan": false
+  },
+  "speedups": {
+    "cached_vs_scan": 1.4797478276977603,
+    "select_vs_cached": 0.6457047443638754,
+    "select_vs_scan": 0.9554801928065821
+  }
+}

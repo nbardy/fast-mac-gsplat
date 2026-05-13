@@ -1,0 +1,82 @@
+{
+  "cached_render": {
+    "max_ms": 14.730833005160093,
+    "median_ms": 14.503209007671103,
+    "min_ms": 12.968209019163623,
+    "samples_ms": [
+      14.299166010459885,
+      14.715124998474494,
+      12.968209019163623,
+      14.730833005160093,
+      14.503209007671103
+    ]
+  },
+  "cached_vs_scan": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "config": {
+    "depth_bands": 4,
+    "frames": 16,
+    "iters": 5,
+    "seed": 47,
+    "support_scale": 1.4,
+    "target_size": 64,
+    "tile_capacity": 64,
+    "tile_size": 4,
+    "tile_t": 4,
+    "tubes": 256,
+    "warmup": 2
+  },
+  "fallback_tubes": 0,
+  "name": "depth_banded_homography_flow_atlas_cached_select_timing_probe",
+  "note": "F1i timing probe for cached atlas candidate ordering. The select variant caches candidate ids/depths unsorted and repeatedly selects the next depth during compositing, avoiding insertion-sort writes while preserving exact depth order.",
+  "pass": false,
+  "scan_render": {
+    "max_ms": 25.15495801344514,
+    "median_ms": 20.290582993766293,
+    "min_ms": 15.986125014023855,
+    "samples_ms": [
+      20.290582993766293,
+      21.702791011193767,
+      25.15495801344514,
+      17.675417009741068,
+      15.986125014023855
+    ]
+  },
+  "select_render": {
+    "max_ms": 23.889874981250614,
+    "median_ms": 20.929999998770654,
+    "min_ms": 19.61437499267049,
+    "samples_ms": [
+      23.889874981250614,
+      21.399624994955957,
+      20.929999998770654,
+      19.773917010752484,
+      19.61437499267049
+    ]
+  },
+  "select_vs_cached": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "select_vs_scan": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "speed_read": {
+    "select_beats_cached": false,
+    "select_beats_scan": false
+  },
+  "speedups": {
+    "cached_vs_scan": 1.399040928323801,
+    "select_vs_cached": 0.6929387963938349,
+    "select_vs_scan": 0.9694497369784081
+  }
+}

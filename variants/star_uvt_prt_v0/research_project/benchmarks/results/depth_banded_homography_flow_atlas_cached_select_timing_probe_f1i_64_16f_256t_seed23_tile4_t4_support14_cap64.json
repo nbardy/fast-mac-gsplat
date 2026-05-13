@@ -1,0 +1,82 @@
+{
+  "cached_render": {
+    "max_ms": 14.733957999851555,
+    "median_ms": 13.337833021068946,
+    "min_ms": 12.340166984358802,
+    "samples_ms": [
+      14.733957999851555,
+      13.337833021068946,
+      12.438250007107854,
+      12.340166984358802,
+      13.493665988789871
+    ]
+  },
+  "cached_vs_scan": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "config": {
+    "depth_bands": 4,
+    "frames": 16,
+    "iters": 5,
+    "seed": 23,
+    "support_scale": 1.4,
+    "target_size": 64,
+    "tile_capacity": 64,
+    "tile_size": 4,
+    "tile_t": 4,
+    "tubes": 256,
+    "warmup": 2
+  },
+  "fallback_tubes": 0,
+  "name": "depth_banded_homography_flow_atlas_cached_select_timing_probe",
+  "note": "F1i timing probe for cached atlas candidate ordering. The select variant caches candidate ids/depths unsorted and repeatedly selects the next depth during compositing, avoiding insertion-sort writes while preserving exact depth order.",
+  "pass": false,
+  "scan_render": {
+    "max_ms": 18.699000007472932,
+    "median_ms": 15.506958996411413,
+    "min_ms": 14.966416027164087,
+    "samples_ms": [
+      16.071416990598664,
+      15.471499995328486,
+      15.506958996411413,
+      14.966416027164087,
+      18.699000007472932
+    ]
+  },
+  "select_render": {
+    "max_ms": 20.513625000603497,
+    "median_ms": 19.346499990206212,
+    "min_ms": 17.911124974489212,
+    "samples_ms": [
+      18.45979201607406,
+      20.513625000603497,
+      20.385334006277844,
+      19.346499990206212,
+      17.911124974489212
+    ]
+  },
+  "select_vs_cached": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "select_vs_scan": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "speed_read": {
+    "select_beats_cached": false,
+    "select_beats_scan": false
+  },
+  "speedups": {
+    "cached_vs_scan": 1.1626295644814293,
+    "select_vs_cached": 0.6894183975303524,
+    "select_vs_scan": 0.8015382112661985
+  }
+}

@@ -895,6 +895,97 @@ def render_inverse_homography_atlas_residual_tiles_cached(
     )
 
 
+def render_inverse_homography_atlas_residual_tiles_cached_select(
+    atlas_ref_uv: Tensor,
+    atlas_residual_coeff: Tensor,
+    homographies: Tensor,
+    inv_homographies: Tensor,
+    depth: Tensor,
+    lambda_uv: Tensor,
+    lambda_t: Tensor,
+    center_t: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    band_ids: Tensor,
+    config: UVTRenderConfig,
+    *,
+    band_count: int,
+    support_scale: float = 1.4,
+    return_aux: bool = False,
+) -> Tensor | AtlasTileRenderResult:
+    _runtime_validate(config)
+    atlas_ref_uv = atlas_ref_uv.contiguous()
+    atlas_residual_coeff = atlas_residual_coeff.contiguous()
+    homographies = homographies.contiguous()
+    inv_homographies = inv_homographies.contiguous()
+    depth = depth.contiguous()
+    lambda_uv = lambda_uv.contiguous()
+    lambda_t = lambda_t.contiguous()
+    center_t = center_t.contiguous()
+    opacity = opacity.contiguous()
+    color = color.contiguous()
+    band_ids = band_ids.contiguous()
+    if band_count <= 0:
+        raise ValueError("band_count must be positive")
+    if band_count * config.tile_capacity > 256:
+        raise ValueError("cached-select atlas render requires band_count * tile_capacity <= 256")
+    if support_scale <= 0.0:
+        raise ValueError("support_scale must be positive")
+    _check_inverse_homography_atlas_render_inputs(
+        atlas_ref_uv,
+        atlas_residual_coeff,
+        homographies,
+        inv_homographies,
+        depth,
+        lambda_uv,
+        lambda_t,
+        center_t,
+        opacity,
+        color,
+        band_ids,
+        config=config,
+        band_count=band_count,
+        require_mps=True,
+    )
+    if band_ids.numel() > 0:
+        min_band = int(band_ids.min().detach().cpu().item())
+        max_band = int(band_ids.max().detach().cpu().item())
+        if min_band < 0 or max_band >= band_count:
+            raise ValueError("band_ids must be in [0, band_count)")
+    if not hasattr(torch.ops, "star_uvt_prt_v0"):
+        raise RuntimeError("star_uvt_prt_v0 custom ops not found. Build the extension first.")
+    meta_i32, meta_f32 = _make_depth_banded_atlas_meta(
+        config,
+        atlas_ref_uv.device,
+        atlas_ref_uv.shape[0],
+        atlas_terms=atlas_residual_coeff.shape[1],
+        depth_bands=band_count,
+        support_scale=support_scale,
+    )
+    image, tile_counts, tile_overflow = torch.ops.star_uvt_prt_v0.render_inverse_homography_atlas_residual_tiles_cached_select(
+        atlas_ref_uv,
+        atlas_residual_coeff,
+        homographies,
+        inv_homographies,
+        depth,
+        lambda_uv,
+        lambda_t,
+        center_t,
+        opacity,
+        color,
+        band_ids,
+        meta_i32,
+        meta_f32,
+    )
+    if not return_aux:
+        return image
+    return AtlasTileRenderResult(
+        image=image,
+        tile_counts=tile_counts,
+        tile_overflow=tile_overflow,
+    )
+
+
 def profile_projective_rational_tubes_tiled(
     h_coeff: Tensor,
     lambda_uv: Tensor,
