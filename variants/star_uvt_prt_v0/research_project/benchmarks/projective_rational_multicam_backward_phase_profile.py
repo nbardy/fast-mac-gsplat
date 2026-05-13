@@ -336,7 +336,7 @@ def main() -> None:
     parser.add_argument("--prt-tubes", type=int, default=128)
     parser.add_argument("--prt-lr", type=float, default=0.02)
     parser.add_argument("--prt-loss-mode", choices=("sampled_frame", "sequence"), default="sampled_frame")
-    parser.add_argument("--prt-train-mode", choices=("separate", "fused_mse"), default="separate")
+    parser.add_argument("--prt-train-mode", choices=("separate", "fused_mse", "fused_mse_train_used"), default="separate")
     parser.add_argument("--prt-init-precision-xy", type=float, default=36.0)
     parser.add_argument("--prt-init-lambda-t", type=float, default=0.25)
     parser.add_argument("--prt-init-opacity", type=float, default=0.35)

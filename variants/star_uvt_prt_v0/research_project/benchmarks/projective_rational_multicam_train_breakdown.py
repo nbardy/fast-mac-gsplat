@@ -32,6 +32,7 @@ from torch_gsplat_bridge_star_uvt_prt import (  # noqa: E402
     apply_projective_rational_tile_env,
     parse_projective_rational_tile_config,
     projective_rational_tile_pixel_fused_mse_backward,
+    projective_rational_tile_pixel_fused_mse_train_used_backward,
     recommend_projective_rational_tile_config,
 )
 
@@ -105,8 +106,13 @@ def _backward_projected_fused_mse(projected, result) -> None:
     torch.autograd.backward(tensors, grads)
 
 
-def _run_fused_mse_projected(projected, target: torch.Tensor, config: UVTRenderConfig):
-    result = projective_rational_tile_pixel_fused_mse_backward(
+def _run_fused_mse_projected(projected, target: torch.Tensor, config: UVTRenderConfig, train_mode: str):
+    op = (
+        projective_rational_tile_pixel_fused_mse_train_used_backward
+        if train_mode == "fused_mse_train_used"
+        else projective_rational_tile_pixel_fused_mse_backward
+    )
+    result = op(
         projected.h_coeff,
         projected.lambda_uv,
         projected.lambda_t,
@@ -137,10 +143,10 @@ def _fit_prt_with_breakdown(
 ) -> dict[str, Any]:
     if loss_mode not in {"sampled_frame", "sequence"}:
         raise ValueError("loss_mode must be one of: sampled_frame, sequence")
-    if train_mode not in {"separate", "fused_mse"}:
-        raise ValueError("train_mode must be one of: separate, fused_mse")
-    if train_mode == "fused_mse" and loss_mode != "sequence":
-        raise ValueError("fused_mse train mode currently requires --prt-loss-mode sequence")
+    if train_mode not in {"separate", "fused_mse", "fused_mse_train_used"}:
+        raise ValueError("train_mode must be one of: separate, fused_mse, fused_mse_train_used")
+    if train_mode in {"fused_mse", "fused_mse_train_used"} and loss_mode != "sequence":
+        raise ValueError("fused MSE train modes currently require --prt-loss-mode sequence")
     generator = torch.Generator(device=device).manual_seed(seed)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     losses = []
@@ -167,10 +173,15 @@ def _fit_prt_with_breakdown(
         loss_s = 0.0
         fused_mse_s = 0.0
         result = None
-        if train_mode == "fused_mse":
+        if train_mode in {"fused_mse", "fused_mse_train_used"}:
             (result, loss_value), fused_mse_s = _time_call(
                 device,
-                lambda projected=projected, target=target: _run_fused_mse_projected(projected, target, config),
+                lambda projected=projected, target=target: _run_fused_mse_projected(
+                    projected,
+                    target,
+                    config,
+                    train_mode,
+                ),
             )
         else:
             image, forward_s = _time_call(device, lambda: _render_projected_train(projected, config))
@@ -187,7 +198,7 @@ def _fit_prt_with_breakdown(
         clip_grad_s = 0.0
         optimizer_s = 0.0
         if step < steps:
-            if train_mode == "fused_mse":
+            if train_mode in {"fused_mse", "fused_mse_train_used"}:
                 _unused, backward_s = _time_call(device, lambda: _backward_projected_fused_mse(projected, result))
             else:
                 _unused, backward_s = _time_call(device, lambda: loss.backward())
@@ -392,7 +403,7 @@ def main() -> None:
     parser.add_argument("--prt-tubes", type=int, default=128)
     parser.add_argument("--prt-lr", type=float, default=0.02)
     parser.add_argument("--prt-loss-mode", choices=("sampled_frame", "sequence"), default="sampled_frame")
-    parser.add_argument("--prt-train-mode", choices=("separate", "fused_mse"), default="separate")
+    parser.add_argument("--prt-train-mode", choices=("separate", "fused_mse", "fused_mse_train_used"), default="separate")
     parser.add_argument("--prt-init-precision-xy", type=float, default=36.0)
     parser.add_argument("--prt-init-lambda-t", type=float, default=0.25)
     parser.add_argument("--prt-init-opacity", type=float, default=0.35)

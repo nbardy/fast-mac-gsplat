@@ -702,6 +702,72 @@ def projective_rational_tile_pixel_fused_mse_backward(
     )
 
 
+def projective_rational_tile_pixel_fused_mse_train_used_backward(
+    h_coeff: Tensor,
+    lambda_uv: Tensor,
+    lambda_t: Tensor,
+    center_t: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    target_image: Tensor,
+    config: UVTRenderConfig,
+) -> ProjectiveRationalFusedMSEResult:
+    _runtime_validate(config)
+    h_coeff = h_coeff.contiguous()
+    lambda_uv = lambda_uv.contiguous()
+    lambda_t = lambda_t.contiguous()
+    center_t = center_t.contiguous()
+    opacity = opacity.contiguous()
+    color = color.contiguous()
+    target_image = target_image.contiguous()
+    _check_prt_inputs(h_coeff, lambda_uv, lambda_t, center_t, opacity, color, require_mps=True)
+    if h_coeff.shape[1] > 8:
+        raise ValueError("train-used fused MSE PRT backward currently supports at most 8 h_coeff terms")
+    if target_image.shape != (config.frames, config.height, config.width, 3):
+        raise ValueError("target_image must have shape [frames,height,width,3]")
+    if target_image.dtype != torch.float32 or target_image.device != h_coeff.device:
+        raise ValueError("target_image must be float32 and on the same device as h_coeff")
+    if not hasattr(torch.ops, "star_uvt_prt_v0"):
+        raise RuntimeError("star_uvt_prt_v0 custom ops not found. Build the extension first.")
+    meta_i32, meta_f32 = _make_meta(config, h_coeff.device, h_coeff.shape[0], reserved0=h_coeff.shape[1])
+    (
+        grad_h_coeff,
+        grad_lambda_uv,
+        grad_lambda_t,
+        grad_center_t,
+        grad_opacity,
+        grad_color,
+        tile_counts,
+        tile_overflow,
+        tile_unstable,
+        loss_sum,
+    ) = torch.ops.star_uvt_prt_v0.projective_rational_tile_pixel_fused_mse_train_used_backward(
+        h_coeff,
+        lambda_uv,
+        lambda_t,
+        center_t,
+        opacity,
+        color,
+        target_image,
+        meta_i32,
+        meta_f32,
+    )
+    if h_coeff.device.type == "mps":
+        torch.mps.synchronize()
+    return ProjectiveRationalFusedMSEResult(
+        grad_h_coeff=grad_h_coeff,
+        grad_lambda_uv=grad_lambda_uv,
+        grad_lambda_t=grad_lambda_t,
+        grad_center_t=grad_center_t,
+        grad_opacity=grad_opacity,
+        grad_color=grad_color,
+        tile_counts=tile_counts,
+        tile_overflow=tile_overflow,
+        tile_unstable=tile_unstable,
+        loss_sum=loss_sum,
+    )
+
+
 def profile_projective_rational_tile_pixel_atomic_backward(
     h_coeff: Tensor,
     lambda_uv: Tensor,

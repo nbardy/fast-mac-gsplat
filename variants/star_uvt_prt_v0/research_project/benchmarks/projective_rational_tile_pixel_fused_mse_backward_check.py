@@ -20,6 +20,7 @@ from torch_gsplat_bridge_star_uvt_prt import (  # noqa: E402
     UVTRenderConfig,
     projective_rational_tile_pixel_atomic_backward,
     projective_rational_tile_pixel_fused_mse_backward,
+    projective_rational_tile_pixel_fused_mse_train_used_backward,
     render_projective_rational_tubes_tiled,
 )
 
@@ -67,8 +68,14 @@ def _fused(
     params: dict[str, torch.Tensor],
     target: torch.Tensor,
     config: UVTRenderConfig,
+    fused_mode: str,
 ) -> tuple[float, dict[str, torch.Tensor], int]:
-    result = projective_rational_tile_pixel_fused_mse_backward(
+    op = (
+        projective_rational_tile_pixel_fused_mse_train_used_backward
+        if fused_mode == "train_used"
+        else projective_rational_tile_pixel_fused_mse_backward
+    )
+    result = op(
         params["h_coeff"],
         params["lambda_uv"],
         params["lambda_t"],
@@ -91,7 +98,9 @@ def _fused(
     return float(loss), {name: grad.detach().cpu() for name, grad in zip(PARAM_NAMES, grads, strict=True)}, overflow_tile_count
 
 
-def run_check(*, abs_tol: float, rel_tol: float, loss_tol: float) -> dict[str, Any]:
+def run_check(*, abs_tol: float, rel_tol: float, loss_tol: float, fused_mode: str) -> dict[str, Any]:
+    if fused_mode not in {"full", "train_used"}:
+        raise ValueError("fused_mode must be one of: full, train_used")
     config = UVTRenderConfig(
         height=5,
         width=6,
@@ -112,9 +121,10 @@ def run_check(*, abs_tol: float, rel_tol: float, loss_tol: float) -> dict[str, A
     params = {name: value.detach().to("mps") for name, value in _params(requires_grad=False).items()}
     target = _target(config, "mps")
     reference_loss, reference_grads = _reference(params, target, config)
-    fused_loss, fused_grads, overflow_tile_count = _fused(params, target, config)
+    fused_loss, fused_grads, overflow_tile_count = _fused(params, target, config, fused_mode)
+    checked_names = PARAM_NAMES if fused_mode == "full" else ("h_coeff", "lambda_t", "opacity", "color")
     rows = []
-    for name in PARAM_NAMES:
+    for name in checked_names:
         diff = (fused_grads[name] - reference_grads[name]).abs()
         ref_abs = reference_grads[name].abs()
         rel = diff / torch.clamp(ref_abs, min=1.0e-8)
@@ -132,6 +142,7 @@ def run_check(*, abs_tol: float, rel_tol: float, loss_tol: float) -> dict[str, A
     return {
         "name": "projective_rational_tile_pixel_fused_mse_backward_check",
         "note": "Research-only fused MSE PRT backward against tiled forward plus tile-pixel backward.",
+        "fused_mode": fused_mode,
         "metal_checked": True,
         "abs_tol": abs_tol,
         "rel_tol": rel_tol,
@@ -149,6 +160,8 @@ def run_check(*, abs_tol: float, rel_tol: float, loss_tol: float) -> dict[str, A
         "fused_loss": fused_loss,
         "loss_abs_error": loss_abs_error,
         "overflow_tile_count": overflow_tile_count,
+        "checked_params": list(checked_names),
+        "skipped_params": [name for name in PARAM_NAMES if name not in checked_names],
         "max_abs_error": max(row["max_abs_error"] for row in rows),
         "max_rel_error": max(row["max_rel_error"] for row in rows),
         "pass": loss_abs_error <= loss_tol
@@ -163,10 +176,11 @@ def main() -> None:
     parser.add_argument("--abs-tol", type=float, default=5.0e-4)
     parser.add_argument("--rel-tol", type=float, default=5.0e-2)
     parser.add_argument("--loss-tol", type=float, default=1.0e-5)
+    parser.add_argument("--fused-mode", choices=("full", "train_used"), default="full")
     parser.add_argument("--out-json", type=Path)
     args = parser.parse_args()
 
-    summary = run_check(abs_tol=args.abs_tol, rel_tol=args.rel_tol, loss_tol=args.loss_tol)
+    summary = run_check(abs_tol=args.abs_tol, rel_tol=args.rel_tol, loss_tol=args.loss_tol, fused_mode=args.fused_mode)
     if args.out_json is not None:
         args.out_json.parent.mkdir(parents=True, exist_ok=True)
         args.out_json.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")

@@ -49,6 +49,7 @@ from torch_gsplat_bridge_star_uvt_prt import (  # noqa: E402
     apply_projective_rational_tile_env,
     parse_projective_rational_tile_config,
     projective_rational_tile_pixel_fused_mse_backward,
+    projective_rational_tile_pixel_fused_mse_train_used_backward,
     recommend_projective_rational_train_speed_tile_policy,
     recommend_projective_rational_tile_config,
     render_projective_rational_tubes_tiled,
@@ -278,9 +279,15 @@ def _fused_mse_prt_train_step(
     camera_path: CameraPathPolynomial,
     config: UVTRenderConfig,
     target: Tensor,
+    train_mode: str,
 ) -> float:
     projected = _compile_detached_footprint(model, camera_path)
-    result = projective_rational_tile_pixel_fused_mse_backward(
+    op = (
+        projective_rational_tile_pixel_fused_mse_train_used_backward
+        if train_mode == "fused_mse_train_used"
+        else projective_rational_tile_pixel_fused_mse_backward
+    )
+    result = op(
         projected.h_coeff,
         projected.lambda_uv,
         projected.lambda_t,
@@ -380,10 +387,10 @@ def _fit_prt(
 ) -> dict[str, Any]:
     if loss_mode not in {"sampled_frame", "sequence"}:
         raise ValueError("loss_mode must be one of: sampled_frame, sequence")
-    if train_mode not in {"separate", "fused_mse"}:
-        raise ValueError("train_mode must be one of: separate, fused_mse")
-    if train_mode == "fused_mse" and loss_mode != "sequence":
-        raise ValueError("fused_mse train mode currently requires --prt-loss-mode sequence")
+    if train_mode not in {"separate", "fused_mse", "fused_mse_train_used"}:
+        raise ValueError("train_mode must be one of: separate, fused_mse, fused_mse_train_used")
+    if train_mode in {"fused_mse", "fused_mse_train_used"} and loss_mode != "sequence":
+        raise ValueError("fused MSE train modes currently require --prt-loss-mode sequence")
     generator = torch.Generator(device=device).manual_seed(seed)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     losses = []
@@ -393,12 +400,13 @@ def _fit_prt(
         frame = int(torch.randint(0, bundle.frame_count, (1,), generator=generator, device=device).item())
         optimizer.zero_grad(set_to_none=True)
         target = bundle.train_frames[view].permute(0, 2, 3, 1).contiguous()
-        if train_mode == "fused_mse":
+        if train_mode in {"fused_mse", "fused_mse_train_used"}:
             loss_value = _fused_mse_prt_train_step(
                 model=model,
                 camera_path=train_camera_paths[view],
                 config=config,
                 target=target,
+                train_mode=train_mode,
             )
             losses.append({"step": step, "view": view, "frame": frame, "loss": loss_value})
             if step == steps:
@@ -911,7 +919,7 @@ def main() -> None:
     parser.add_argument("--prt-tubes", type=int, default=128)
     parser.add_argument("--prt-lr", type=float, default=0.02)
     parser.add_argument("--prt-loss-mode", choices=("sampled_frame", "sequence"), default="sampled_frame")
-    parser.add_argument("--prt-train-mode", choices=("separate", "fused_mse"), default="separate")
+    parser.add_argument("--prt-train-mode", choices=("separate", "fused_mse", "fused_mse_train_used"), default="separate")
     parser.add_argument("--prt-init-precision-xy", type=float, default=36.0)
     parser.add_argument("--prt-init-lambda-t", type=float, default=0.25)
     parser.add_argument("--prt-init-opacity", type=float, default=0.35)

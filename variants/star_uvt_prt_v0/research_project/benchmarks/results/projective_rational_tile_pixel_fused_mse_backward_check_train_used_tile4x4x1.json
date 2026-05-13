@@ -1,0 +1,61 @@
+{
+  "abs_tol": 5e-09,
+  "checked_params": [
+    "h_coeff",
+    "lambda_t",
+    "opacity",
+    "color"
+  ],
+  "config": {
+    "frames": 3,
+    "height": 5,
+    "tile_capacity": 512,
+    "tile_t": 1,
+    "tile_x": 4,
+    "tile_y": 4,
+    "width": 6
+  },
+  "fused_loss": 0.2951766550540924,
+  "fused_mode": "train_used",
+  "loss_abs_error": 0.0,
+  "loss_tol": 1e-07,
+  "max_abs_error": 1.862645149230957e-09,
+  "max_rel_error": 6.36891627436853e-07,
+  "metal_checked": true,
+  "name": "projective_rational_tile_pixel_fused_mse_backward_check",
+  "note": "Research-only fused MSE PRT backward against tiled forward plus tile-pixel backward.",
+  "overflow_tile_count": 0,
+  "pass": true,
+  "reference_loss": 0.2951766550540924,
+  "rel_tol": 0.0,
+  "rows": [
+    {
+      "max_abs_error": 2.3283064365386963e-10,
+      "max_rel_error": 1.0725468513328451e-07,
+      "param": "h_coeff",
+      "pass": true
+    },
+    {
+      "max_abs_error": 6.984919309616089e-10,
+      "max_rel_error": 6.36891627436853e-07,
+      "param": "lambda_t",
+      "pass": true
+    },
+    {
+      "max_abs_error": 1.862645149230957e-09,
+      "max_rel_error": 3.224518252409325e-07,
+      "param": "opacity",
+      "pass": true
+    },
+    {
+      "max_abs_error": 9.313225746154785e-10,
+      "max_rel_error": 1.1239657737860398e-07,
+      "param": "color",
+      "pass": true
+    }
+  ],
+  "skipped_params": [
+    "lambda_uv",
+    "center_t"
+  ]
+}

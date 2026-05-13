@@ -101,6 +101,7 @@ struct MetalKernels {
   std::shared_ptr<MetalKernelFunction> projective_rational_tile_pair_atomic_backward;
   std::shared_ptr<MetalKernelFunction> projective_rational_tile_pixel_atomic_backward;
   std::shared_ptr<MetalKernelFunction> projective_rational_tile_pixel_fused_mse_backward;
+  std::shared_ptr<MetalKernelFunction> projective_rational_tile_pixel_fused_mse_train_used_backward;
   std::shared_ptr<MetalKernelFunction> projective_rational_tile_pixel_compute_only_backward;
   std::shared_ptr<MetalKernelFunction> projective_rational_tile_pixel_replay_only_backward;
   std::shared_ptr<MetalKernelFunction> simple_backward_samples;
@@ -151,6 +152,8 @@ MetalKernels& kernels() {
         lib->getKernelFunction("projective_rational_tile_pixel_atomic_backward");
     out.projective_rational_tile_pixel_fused_mse_backward =
         lib->getKernelFunction("projective_rational_tile_pixel_fused_mse_backward");
+    out.projective_rational_tile_pixel_fused_mse_train_used_backward =
+        lib->getKernelFunction("projective_rational_tile_pixel_fused_mse_train_used_backward");
     out.projective_rational_tile_pixel_compute_only_backward =
         lib->getKernelFunction("projective_rational_tile_pixel_compute_only_backward");
     out.projective_rational_tile_pixel_replay_only_backward =
@@ -834,7 +837,8 @@ metal_projective_rational_tile_pixel_atomic_backward(
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
            torch::Tensor, torch::Tensor, torch::Tensor>
-metal_projective_rational_tile_pixel_fused_mse_backward(
+metal_projective_rational_tile_pixel_fused_mse_backward_impl(
+    const std::shared_ptr<MetalKernelFunction>& backward_kernel,
     const torch::Tensor& h_coeff,
     const torch::Tensor& lambda_uv,
     const torch::Tensor& lambda_t,
@@ -922,7 +926,7 @@ metal_projective_rational_tile_pixel_fused_mse_backward(
   });
 
   int64_t entry_count = (int64_t)meta.tile_count * (int64_t)sc.tile_x * (int64_t)sc.tile_y * (int64_t)sc.tile_t;
-  launch(k.projective_rational_tile_pixel_fused_mse_backward, [&](MetalKernelFunction& fn) {
+  launch(backward_kernel, [&](MetalKernelFunction& fn) {
     fn.setArg(0, h_coeff);
     fn.setArg(1, lambda_uv);
     fn.setArg(2, lambda_t);
@@ -948,6 +952,56 @@ metal_projective_rational_tile_pixel_fused_mse_backward(
 
   return std::make_tuple(grad_h_coeff, grad_lambda_uv, grad_lambda_t, grad_center_t, grad_opacity, grad_color,
                          tile_counts, tile_overflow, tile_unstable, loss_sum);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
+           torch::Tensor, torch::Tensor, torch::Tensor>
+metal_projective_rational_tile_pixel_fused_mse_backward(
+    const torch::Tensor& h_coeff,
+    const torch::Tensor& lambda_uv,
+    const torch::Tensor& lambda_t,
+    const torch::Tensor& center_t,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& target_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32) {
+  return metal_projective_rational_tile_pixel_fused_mse_backward_impl(
+      kernels().projective_rational_tile_pixel_fused_mse_backward,
+      h_coeff,
+      lambda_uv,
+      lambda_t,
+      center_t,
+      opacity,
+      color,
+      target_image,
+      meta_i32,
+      meta_f32);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,
+           torch::Tensor, torch::Tensor, torch::Tensor>
+metal_projective_rational_tile_pixel_fused_mse_train_used_backward(
+    const torch::Tensor& h_coeff,
+    const torch::Tensor& lambda_uv,
+    const torch::Tensor& lambda_t,
+    const torch::Tensor& center_t,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& target_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32) {
+  return metal_projective_rational_tile_pixel_fused_mse_backward_impl(
+      kernels().projective_rational_tile_pixel_fused_mse_train_used_backward,
+      h_coeff,
+      lambda_uv,
+      lambda_t,
+      center_t,
+      opacity,
+      color,
+      target_image,
+      meta_i32,
+      meta_f32);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,

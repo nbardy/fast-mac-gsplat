@@ -87,7 +87,7 @@ Last updated: 2026-05-13
 - [x] Gate D3v: current-code 190-step same-wall rerun after D3r.
 - [x] Gate D3w: reject tile-slot threadgroup gradient reductions.
 - [x] Gate D3x: current D3r backward phase profile and trace-cache viability read.
-- [ ] Gate D3y: train-used-gradient fused-MSE kernel that skips unused gradient families.
+- [x] Gate D3y: train-used-gradient fused-MSE kernel that skips unused gradient families.
 - [ ] Gate F0: depth-banded homography-flow gauge residual-tube projection/render falsifier.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
@@ -2458,21 +2458,49 @@ without per-slot tile barriers, reduce the number of visited tile-pixel-tube
 pairs, or fuse a cheaper sample-gradient accumulation path instead of caching
 all replay state.
 
-Gate D3y is the next focused train-speed candidate from the three-agent review:
-add an explicit train-used-gradient fused-MSE op that writes only the gradient
-families the current training harness actually consumes. The current train path
-does not train `lambda_uv`, and `center_t` is effectively fixed by the world
-tube `t0`, but the D3r fused kernel still computes and atomically writes those
-gradients. Unlike D3s/D3u, this changes the write set; unlike D3w, it does not
-add per-slot threadgroup reductions or barriers.
+Gate D3y adds the explicit train-used-gradient fused-MSE op from the
+three-agent review. It returns the same result shape as the full fused op but
+the Metal kernel skips `lambda_uv` and `center_t` gradient math/writes, because
+the current train path does not train `lambda_uv` and `center_t` is effectively
+fixed by the world-tube `t0`. Unlike D3s/D3u, this changes the write set;
+unlike D3w, it does not add per-slot threadgroup reductions or barriers.
 
-Smallest accept/reject gate:
+Validation:
 
 ```text
-Parity: compare against the current fused op on training-used grads only; loss abs <= 1e-7, max used-grad abs <= 5e-9, overflow 0.
-Timing: rerun the D3x 20-step 256px x 8f 2048-tube support64 breakdown; accept only if median fused_mse_s improves >=10% and median step_total_s improves >=8%.
-Reject if the win is under 5% or only appears in the synthetic timing probe.
+python3 setup.py build_ext --inplace
+STAR_UVT_TILE_X=4 STAR_UVT_TILE_Y=4 STAR_UVT_TILE_T=1 STAR_UVT_TILE_CAPACITY=512 python3 research_project/benchmarks/projective_rational_tile_pixel_fused_mse_backward_check.py --fused-mode train_used --abs-tol 5e-9 --rel-tol 0 --loss-tol 1e-7 --out-json research_project/benchmarks/results/projective_rational_tile_pixel_fused_mse_backward_check_train_used_tile4x4x1.json
+STAR_UVT_TILE_X=4 STAR_UVT_TILE_Y=4 STAR_UVT_TILE_T=1 STAR_UVT_TILE_CAPACITY=512 python3 research_project/benchmarks/projective_rational_tile_pixel_fused_mse_backward_check.py --fused-mode full --out-json research_project/benchmarks/results/projective_rational_tile_pixel_fused_mse_backward_check_full_after_train_used_tile4x4x1.json
+python3 research_project/benchmarks/projective_rational_multicam_train_breakdown.py --target-size 256 --max-frames 8 --steps 20 --prt-tubes 2048 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 1 --out-json research_project/benchmarks/results/projective_rational_multicam_train_breakdown_256_8f_2048t_20step_support64_fused_mse_d3y_baseline_rerun.json
+python3 research_project/benchmarks/projective_rational_multicam_train_breakdown.py --target-size 256 --max-frames 8 --steps 20 --prt-tubes 2048 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-loss-mode sequence --prt-train-mode fused_mse_train_used --render-warmups 1 --render-repeats 1 --out-json research_project/benchmarks/results/projective_rational_multicam_train_breakdown_256_8f_2048t_20step_support64_fused_mse_train_used_d3y.json
+STAR_UVT_TILE_T=1 python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 200 --prt-steps 200 --splat-steps 200 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.2823529411764706 --prt-eval-support-alpha-threshold 0.25098039215686274 --prt-extra-eval-support-alpha-thresholds 0.2823529411764706,0.2196078431372549,0.18823529411764706 --prt-loss-mode sequence --prt-train-mode fused_mse_train_used --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_samesteps_prt200_splat200_train72_eval64_extra72_56_48_fused_mse_train_used_d3y.json
 ```
+
+Result:
+
+```text
+Train-used parity: pass, loss abs error 0, max used-grad abs error 1.86e-09, overflow 0. Checked h_coeff, lambda_t, opacity, color; skipped lambda_uv and center_t by design.
+Full fused op after sibling addition: pass, loss abs error 2.98e-08, max grad abs error 3.73e-09, overflow 0.
+
+20-step baseline rerun: median fused MSE 41.33 ms, median step 50.29 ms, train loop 1.324 s.
+20-step train-used D3y: median fused MSE 33.92 ms, median step 42.05 ms, train loop 1.120 s.
+Improvement: fused MSE 17.9%, step 16.4%; loss still decreased, overflow 0.
+
+Exact 200-step D3y row: PRT wall 5.622 s vs splat wall 6.851 s.
+D3y eval64 PRT: PSNR 16.0183 / heldout 13.1600 dB, render 7.22 / 8.40 ms, max tile 112, overflow 0.
+D3y splat:      PSNR 15.6132 / heldout 12.4150 dB, render 69.50 / 67.23 ms.
+D3y eval72 PRT: PSNR 18.0062 / heldout 12.7301 dB, render 5.90 / 7.29 ms, max tile 69, overflow 0.
+D3y eval56 PRT: PSNR 14.5761 / heldout 13.2414 dB, render 9.96 / 11.04 ms, max tile 152, overflow 0.
+D3y eval48 PRT: PSNR 13.9711 / heldout 13.2702 dB, render 13.50 / 14.59 ms, max tile 190, overflow 0.
+```
+
+Read: D3y is the first accepted train-speed change that turns exact same-step
+training into a clean wall-clock win, not just a noise-band tie. The 200-step
+PRT row is about 18% faster than the paired 200-step direct-splat row while
+keeping the train PSNR, heldout PSNR, and render-speed wins. The tradeoff is
+explicit: D3y is a training op for the current model where `lambda_uv` and
+`center_t` are not train-used parameter families. Keep the full fused op for
+diagnostics or future runs that train those parameters.
 
 The separate representation idea queued after the three-agent review is
 depth-banded homography-flow gauge residual tubes. Compile a small bank of
@@ -2516,8 +2544,8 @@ should be measured before splitting a camera window.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
-8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p and current-code D3v show train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3t shows 195 steps is still under wall but not a quality improvement; D3q/D3r show exact 200-vs-200 steps is a quality/render win but still a train-wall near tie.
-9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, and D3x shows naive replay caching leaves a large atomic-write floor, so D3y should test a train-used-gradient fused kernel before another trace-cache attempt.
+8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p and current-code D3v show train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3t shows 195 steps is still under wall but not a quality improvement; D3q/D3r show exact 200-vs-200 steps was a quality/render win but a train-wall near tie before D3y.
+9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, D3x rejects naive replay caching, and D3y shows write-set pruning can turn exact 200-vs-200 into a train-wall win.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
-11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3l says train speed still needs fused-kernel work.
+11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, and D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model.
 12. Test depth-banded homography-flow gauge residual tubes as the next moving-camera representation branch: if shared camera flow makes most background tubes affine again, it can preserve STAR's cheap path for common moving-camera video while reserving PRT for hard residuals.
