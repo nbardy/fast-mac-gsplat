@@ -1,0 +1,64 @@
+{
+  "config": {
+    "depth_bands": 4,
+    "dolly_z": 0.12,
+    "fallback_max_px": 1.0,
+    "frames": 16,
+    "pan_x": 0.09,
+    "residual_degree": 3,
+    "seed": 47,
+    "support_scale": 1.4,
+    "target_size": 64,
+    "tile_capacity": 32,
+    "tile_size": 4,
+    "tile_t": 4,
+    "tubes": 128,
+    "velocity_scale": 0.01,
+    "zoom": 0.025
+  },
+  "cpu_render_stats": {
+    "candidate_eval_ratio_vs_dense": 0.06960201263427734,
+    "candidate_evals": 583864,
+    "dense_candidate_evals": 8388608,
+    "max_candidates_per_pixel": 76,
+    "missing_active_candidates": 0
+  },
+  "cpu_tile_stats": {
+    "bands": 4,
+    "max_pairs_per_tube_time_tile": 49,
+    "tile_pairs": 8983,
+    "tiles_t": 4,
+    "tiles_x": 16,
+    "tiles_y": 16
+  },
+  "cpu_tiled_vs_dense": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "fallback_tubes": 0,
+  "metal_checked": true,
+  "metal_tile_summary": {
+    "active_tile_count_metal": 1527,
+    "max_tile_count_metal": 25,
+    "overflow_sum": 0,
+    "overflow_tile_count": 0,
+    "tile_pairs_metal": 8983
+  },
+  "metal_vs_cpu_tiled": {
+    "l1": 2.96517832509835e-09,
+    "max_abs": 7.599592208862305e-07,
+    "mse": 1.766918801255249e-16,
+    "psnr": 120.0
+  },
+  "metal_vs_dense": {
+    "l1": 2.96517832509835e-09,
+    "max_abs": 7.599592208862305e-07,
+    "mse": 1.766918801255249e-16,
+    "psnr": 120.0
+  },
+  "name": "depth_banded_homography_flow_atlas_metal_render_probe",
+  "note": "F1b correctness-first Metal render parity for inverse-homography atlas-residual tubes. The render kernel scans candidate tiles per pixel in depth order; this is an image parity gate, not a final speed path.",
+  "pass": true
+}

@@ -47,9 +47,12 @@ class AtlasBinningScene:
     batch: Any
     lambda_uv: Tensor
     assignments: Tensor
+    homographies: Tensor
     atlas_ref_uv: Tensor
     atlas_residual_coeff: Tensor
     atlas_centers: Tensor
+    warped_centers: Tensor
+    direct_depth: Tensor
     fallback_mask: Tensor
 
 
@@ -84,9 +87,12 @@ def _build_scene(args: argparse.Namespace) -> AtlasBinningScene:
         batch=batch,
         lambda_uv=lambda_uv,
         assignments=assignments,
+        homographies=homographies,
         atlas_ref_uv=atlas_ref_uv,
         atlas_residual_coeff=residual_coeff.permute(1, 0, 2).contiguous(),
         atlas_centers=atlas_centers,
+        warped_centers=warped_centers,
+        direct_depth=direct_depth,
         fallback_mask=fallback_mask,
     )
 

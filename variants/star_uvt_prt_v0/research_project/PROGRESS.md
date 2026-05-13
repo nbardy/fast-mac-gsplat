@@ -102,6 +102,7 @@ Last updated: 2026-05-13
 - [x] Gate F0j: four-seed CPU atlas-tiled render coverage sweep.
 - [x] Gate F0k: CPU atlas support-scale sweep selects 1.4x support.
 - [x] Gate F1a: Metal bin-only parity for inverse-homography atlas-residual tile assignment.
+- [x] Gate F1b: correctness-first Metal render parity for inverse-homography atlas-residual tiles.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2927,6 +2928,37 @@ sublinear renderer: the next slice must inverse-warp screen pixels per depth
 band, gather the banded atlas tile candidates, sort/compose them, and compare
 the rendered image against the dense F0h/F0i reference.
 
+Gate F1b adds that first full render parity slice. It is deliberately
+correctness-first rather than fast: each output pixel inverse-warps into each
+depth-band atlas, scans the selected atlas tile lists, repeatedly selects the
+next candidate in depth order, and composites in screen space. This proves the
+complete Metal path from atlas tile bins to pixels, but it is not the final
+optimized renderer.
+
+Command:
+
+```text
+PYTHONPATH=variants/star_uvt_prt_v0 STAR_UVT_TILE_X=4 STAR_UVT_TILE_Y=4 STAR_UVT_TILE_T=4 STAR_UVT_TILE_CAPACITY=32 python3 variants/star_uvt_prt_v0/research_project/benchmarks/depth_banded_homography_flow_atlas_metal_render_probe.py --seed <17|23|31|47> --target-size 64 --frames 16 --tubes 128 --depth-bands 4 --residual-degree 3 --prt-degree 2 --tile-size 4 --tile-t 4 --support-scale 1.4 --tile-capacity 32 --out-json variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_metal_render_probe_f1b_64_16f_128t_seed<seed>_tile4_support14_cap32.json
+```
+
+Result:
+
+```text
+Four-seed cap32 render sweep: pass true for seeds 17, 23, 31, 47.
+Metal vs CPU tiled PSNR: 120 dB on every row.
+Metal vs dense PSNR: 120 dB on every row.
+Metal vs dense max_abs: min 3.87e-07, median 7.60e-07, max 8.94e-07.
+Overflow tiles: 0 on every row.
+Tile pairs: min 8747, median 9073, max 9338.
+Candidate eval ratio in the CPU reference: min 0.0675, median 0.0707, max 0.0732.
+```
+
+Read: the inverse-homography atlas-residual path now has a full Metal
+correctness path at the F0k target scale. The remaining work is speed:
+replace the per-pixel repeated scan with an efficient gather/sort strategy,
+profile it against the existing PRT and direct splat renderers, then wire only
+the winning path into training or playback.
+
 The separate representation idea tested by F0 is
 depth-banded homography-flow gauge residual tubes. Compile a small bank of
 camera-induced depth-band flows from `K_seq,w2c_seq`, let each world tube store
@@ -2973,4 +3005,4 @@ should be measured before splitting a camera window.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, D3x rejects naive replay caching, and D3y shows write-set pruning can turn exact 200-vs-200 into a train-wall win.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, and D3z/D4a are boundary results showing that more steps must still fit the train-wall budget and improve quality before replacing D3y.
-12. Continue depth-banded homography-flow gauge residual tubes after F0-F1a: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion originally needed a small PRT fallback/window-split tail under screen-additive residuals. F0h is now the better representation target: inverse-homography atlas residuals pass all four hard-camera/object-motion seeds with no fallback tubes, high PSNR, and the same 4x4 culling advantage. F0i/F0j add the CPU atlas-tiled render reference; F0k dials conservative atlas support to 1.4x, which covers dense exactly across four hard-camera/object-motion seeds at 64px/16f/128t while preserving an about 7% candidate-eval ratio. F1a moves the atlas tile assignment onto Metal and matches CPU per-tile tube-id sets exactly across the four seeds at tile_capacity 32. The current implementation is still not a full Metal renderer or training path.
+12. Continue depth-banded homography-flow gauge residual tubes after F0-F1b: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion originally needed a small PRT fallback/window-split tail under screen-additive residuals. F0h is now the better representation target: inverse-homography atlas residuals pass all four hard-camera/object-motion seeds with no fallback tubes, high PSNR, and the same 4x4 culling advantage. F0i/F0j add the CPU atlas-tiled render reference; F0k dials conservative atlas support to 1.4x, which covers dense exactly across four hard-camera/object-motion seeds at 64px/16f/128t while preserving an about 7% candidate-eval ratio. F1a moves the atlas tile assignment onto Metal and matches CPU per-tile tube-id sets exactly across the four seeds at tile_capacity 32. F1b renders through those Metal bins and matches dense/CPU tiled images to sub-micro max error across the same four seeds. The current implementation is still not a speed-optimized renderer or training path.
