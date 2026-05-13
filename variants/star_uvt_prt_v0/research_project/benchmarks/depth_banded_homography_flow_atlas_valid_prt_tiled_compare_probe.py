@@ -78,6 +78,12 @@ def _speedup(base_ms: float, candidate_ms: float) -> float:
     return float(base_ms) / max(float(candidate_ms), 1.0e-9)
 
 
+def _atlas_candidate_capacity(args: argparse.Namespace) -> int:
+    if args.atlas_max_pixel_candidates not in (64, 128, 256, 512):
+        raise ValueError("--atlas-max-pixel-candidates must be 64, 128, 256, or 512")
+    return int(args.atlas_max_pixel_candidates)
+
+
 def _batch_to_mps(batch: WorldTubeBatch) -> WorldTubeBatch:
     return WorldTubeBatch(
         x0=batch.x0.to("mps"),
@@ -126,8 +132,11 @@ def _direct_dense_fn(args: argparse.Namespace, scene: Any, lambda_uv_mps: torch.
 
 
 def _render_atlas_child(args: argparse.Namespace, tile_config: ProjectiveRationalTileConfig) -> dict[str, Any]:
-    if tile_config.tile_capacity * args.depth_bands > 256:
-        raise ValueError("cached atlas child requires depth_bands * tile_capacity <= 256")
+    atlas_candidate_capacity = _atlas_candidate_capacity(args)
+    if tile_config.tile_capacity * args.depth_bands > atlas_candidate_capacity:
+        raise ValueError(
+            "cached atlas child requires depth_bands * tile_capacity <= --atlas-max-pixel-candidates"
+        )
     scene = _build_scene(args)
     config = UVTRenderConfig(
         height=args.target_size,
@@ -358,6 +367,8 @@ def _child_args(args: argparse.Namespace, *, mode: str, tile_config: ProjectiveR
         str(args.fallback_max_px),
         "--support-scale",
         str(args.support_scale),
+        "--atlas-max-pixel-candidates",
+        str(args.atlas_max_pixel_candidates),
         "--max-alpha",
         str(args.max_alpha),
         "--warmup",
@@ -374,6 +385,8 @@ def _child_args(args: argparse.Namespace, *, mode: str, tile_config: ProjectiveR
 def _run_child(args: argparse.Namespace, *, mode: str, tile_config: ProjectiveRationalTileConfig) -> dict[str, Any]:
     env = os.environ.copy()
     env.update(tile_config.as_env())
+    if mode == "atlas_cached":
+        env["STAR_ATLAS_MAX_PIXEL_CANDIDATES"] = str(args.atlas_max_pixel_candidates)
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = str(ROOT) if not existing else f"{ROOT}{os.pathsep}{existing}"
     result = subprocess.run(
@@ -431,6 +444,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
             "atlas_tile_config": atlas_tile_config.as_dict(),
             "prt_tile_config": prt_tile_config.as_dict(),
             "support_scale": args.support_scale,
+            "atlas_max_pixel_candidates": args.atlas_max_pixel_candidates,
             "warmup": args.warmup,
             "iters": args.iters,
         },
@@ -467,6 +481,7 @@ def main() -> None:
     parser.add_argument("--alpha-threshold", type=float, default=1.0 / 255.0)
     parser.add_argument("--fallback-max-px", type=float, default=1.0)
     parser.add_argument("--support-scale", type=float, default=1.4)
+    parser.add_argument("--atlas-max-pixel-candidates", type=int, default=256)
     parser.add_argument("--max-alpha", type=float, default=0.99)
     parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--iters", type=int, default=5)

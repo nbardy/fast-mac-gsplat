@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from argparse import Namespace
+import os
 from pathlib import Path
 import sys
 
@@ -19,6 +20,7 @@ from torch_gsplat_bridge_star_uvt_prt.tile_config import (  # noqa: E402
     recommend_projective_rational_tile_config,
     select_projective_rational_tile_summary,
 )
+from torch_gsplat_bridge_star_uvt_prt.rasterize import _atlas_max_pixel_candidates  # noqa: E402
 from research_project.benchmarks.projective_rational_metal_forward_timing_probe import (  # noqa: E402
     _resolve_tile_config,
 )
@@ -55,6 +57,22 @@ def main() -> None:
     assert train_policy_1024.tile_config.key == "4x4x1:512"
     assert train_policy_1024.as_render_kwargs() == {"tile_x": 4, "tile_y": 4, "tile_t": 1, "tile_capacity": 512}
     assert train_policy_1024.support_alpha_threshold == PROJECTIVE_RATIONAL_1024_TRAIN_SPEED_SUPPORT_ALPHA_THRESHOLD
+
+    old_atlas_capacity = os.environ.get("STAR_ATLAS_MAX_PIXEL_CANDIDATES")
+    os.environ["STAR_ATLAS_MAX_PIXEL_CANDIDATES"] = "512"
+    assert _atlas_max_pixel_candidates() == 512
+    os.environ["STAR_ATLAS_MAX_PIXEL_CANDIDATES"] = "1024"
+    try:
+        _atlas_max_pixel_candidates()
+    except ValueError as exc:
+        assert "STAR_ATLAS_MAX_PIXEL_CANDIDATES" in str(exc)
+    else:
+        raise AssertionError("invalid atlas candidate capacity must fail")
+    if old_atlas_capacity is None:
+        os.environ.pop("STAR_ATLAS_MAX_PIXEL_CANDIDATES", None)
+    else:
+        os.environ["STAR_ATLAS_MAX_PIXEL_CANDIDATES"] = old_atlas_capacity
+
     assert (
         _resolve_tile_config(
             Namespace(

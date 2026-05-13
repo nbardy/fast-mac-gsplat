@@ -25,6 +25,7 @@ struct ShaderConfig {
   int tile_y;
   int tile_t;
   int tile_capacity;
+  int atlas_max_pixel_candidates;
   int threads;
   int fixedpoint_scale;
   int split_fixedpoint_coarse_scale;
@@ -44,6 +45,7 @@ ShaderConfig& shader_config() {
     c.tile_y = env_int("STAR_UVT_TILE_Y", 8);
     c.tile_t = env_int("STAR_UVT_TILE_T", 2);
     c.tile_capacity = env_int("STAR_UVT_TILE_CAPACITY", 128);
+    c.atlas_max_pixel_candidates = env_int("STAR_ATLAS_MAX_PIXEL_CANDIDATES", 256);
     c.fixedpoint_scale = env_int("STAR_UVT_FIXEDPOINT_SCALE", 1000000);
     c.split_fixedpoint_coarse_scale = env_int("STAR_UVT_SPLIT_FIXEDPOINT_COARSE_SCALE", 100);
     c.split_fixedpoint_fine_scale = env_int("STAR_UVT_SPLIT_FIXEDPOINT_FINE_SCALE", 1000000);
@@ -53,6 +55,9 @@ ShaderConfig& shader_config() {
     TORCH_CHECK(c.tile_capacity == 32 || c.tile_capacity == 64 || c.tile_capacity == 128 ||
                     c.tile_capacity == 256 || c.tile_capacity == 512,
                 "STAR_UVT_TILE_CAPACITY must be 32, 64, 128, 256, or 512");
+    TORCH_CHECK(c.atlas_max_pixel_candidates == 64 || c.atlas_max_pixel_candidates == 128 ||
+                    c.atlas_max_pixel_candidates == 256 || c.atlas_max_pixel_candidates == 512,
+                "STAR_ATLAS_MAX_PIXEL_CANDIDATES must be 64, 128, 256, or 512");
     TORCH_CHECK(c.fixedpoint_scale > 0, "STAR_UVT_FIXEDPOINT_SCALE must be positive");
     TORCH_CHECK(c.split_fixedpoint_coarse_scale > 0, "STAR_UVT_SPLIT_FIXEDPOINT_COARSE_SCALE must be positive");
     TORCH_CHECK(c.split_fixedpoint_fine_scale > 0, "STAR_UVT_SPLIT_FIXEDPOINT_FINE_SCALE must be positive");
@@ -77,6 +82,8 @@ std::string load_shader_source() {
   preamble += "#define STAR_TILE_T " + std::to_string(cfg.tile_t) + "u\n";
   preamble += "#define STAR_TILE_CAPACITY " + std::to_string(cfg.tile_capacity) + "u\n";
   preamble += "#define STAR_THREADS " + std::to_string(cfg.threads) + "u\n\n";
+  preamble += "#define STAR_ATLAS_MAX_PIXEL_CANDIDATES " +
+              std::to_string(cfg.atlas_max_pixel_candidates) + "u\n\n";
   preamble += "#define STAR_FIXEDPOINT_SCALE " + std::to_string(cfg.fixedpoint_scale) + ".0f\n\n";
   preamble += "#define STAR_SPLIT_FIXEDPOINT_COARSE_SCALE " +
               std::to_string(cfg.split_fixedpoint_coarse_scale) + ".0f\n";
@@ -669,8 +676,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> metal_render_inverse_hom
   auto meta = parse_meta(meta_i32, meta_f32);
   auto& sc = shader_config();
   check_inverse_homography_atlas_meta(meta, atlas_ref_uv.size(0), atlas_residual_coeff.size(1), sc);
-  TORCH_CHECK(meta.reserved1 * meta.tile_capacity <= 256,
-              "cached atlas render currently requires band_count * tile_capacity <= 256");
+  TORCH_CHECK(meta.reserved1 * meta.tile_capacity <= sc.atlas_max_pixel_candidates,
+              "cached atlas render requires band_count * tile_capacity <= STAR_ATLAS_MAX_PIXEL_CANDIDATES");
   check_float_mps_homographies(homographies, "homographies", meta.frames, meta.reserved1);
   check_float_mps_homographies(inv_homographies, "inv_homographies", meta.frames, meta.reserved1);
   TORCH_CHECK(depth.device().is_mps(), "depth must be on MPS");
@@ -767,8 +774,8 @@ metal_render_inverse_homography_atlas_residual_tiles_cached_select(
   auto meta = parse_meta(meta_i32, meta_f32);
   auto& sc = shader_config();
   check_inverse_homography_atlas_meta(meta, atlas_ref_uv.size(0), atlas_residual_coeff.size(1), sc);
-  TORCH_CHECK(meta.reserved1 * meta.tile_capacity <= 256,
-              "cached-select atlas render currently requires band_count * tile_capacity <= 256");
+  TORCH_CHECK(meta.reserved1 * meta.tile_capacity <= sc.atlas_max_pixel_candidates,
+              "cached-select atlas render requires band_count * tile_capacity <= STAR_ATLAS_MAX_PIXEL_CANDIDATES");
   check_float_mps_homographies(homographies, "homographies", meta.frames, meta.reserved1);
   check_float_mps_homographies(inv_homographies, "inv_homographies", meta.frames, meta.reserved1);
   TORCH_CHECK(depth.device().is_mps(), "depth must be on MPS");

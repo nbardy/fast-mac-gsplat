@@ -20,6 +20,13 @@ def _env_int(name: str, default: int) -> int:
     return int(default) if raw is None or raw == "" else int(raw)
 
 
+def _atlas_max_pixel_candidates() -> int:
+    value = _env_int("STAR_ATLAS_MAX_PIXEL_CANDIDATES", 256)
+    if value not in (64, 128, 256, 512):
+        raise ValueError("STAR_ATLAS_MAX_PIXEL_CANDIDATES must be 64, 128, 256, or 512")
+    return value
+
+
 @dataclass(frozen=True)
 class UVTRenderConfig:
     height: int
@@ -836,8 +843,11 @@ def render_inverse_homography_atlas_residual_tiles_cached(
     band_ids = band_ids.contiguous()
     if band_count <= 0:
         raise ValueError("band_count must be positive")
-    if band_count * config.tile_capacity > 256:
-        raise ValueError("cached atlas render requires band_count * tile_capacity <= 256")
+    max_pixel_candidates = _atlas_max_pixel_candidates()
+    if band_count * config.tile_capacity > max_pixel_candidates:
+        raise ValueError(
+            "cached atlas render requires band_count * tile_capacity <= STAR_ATLAS_MAX_PIXEL_CANDIDATES"
+        )
     if support_scale <= 0.0:
         raise ValueError("support_scale must be positive")
     _check_inverse_homography_atlas_render_inputs(
@@ -927,8 +937,11 @@ def render_inverse_homography_atlas_residual_tiles_cached_select(
     band_ids = band_ids.contiguous()
     if band_count <= 0:
         raise ValueError("band_count must be positive")
-    if band_count * config.tile_capacity > 256:
-        raise ValueError("cached-select atlas render requires band_count * tile_capacity <= 256")
+    max_pixel_candidates = _atlas_max_pixel_candidates()
+    if band_count * config.tile_capacity > max_pixel_candidates:
+        raise ValueError(
+            "cached-select atlas render requires band_count * tile_capacity <= STAR_ATLAS_MAX_PIXEL_CANDIDATES"
+        )
     if support_scale <= 0.0:
         raise ValueError("support_scale must be positive")
     _check_inverse_homography_atlas_render_inputs(

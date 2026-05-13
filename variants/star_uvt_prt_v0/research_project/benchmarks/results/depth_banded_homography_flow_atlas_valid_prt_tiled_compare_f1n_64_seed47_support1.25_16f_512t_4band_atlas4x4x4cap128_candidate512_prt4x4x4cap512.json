@@ -1,0 +1,196 @@
+{
+  "atlas_cached": {
+    "child_returncode": 0,
+    "child_stderr": "",
+    "fallback_tubes": 0,
+    "metrics": {
+      "cached_atlas_vs_dense_atlas_reference": {
+        "l1": 2.025896492341417e-06,
+        "max_abs": 0.007701759226620197,
+        "mse": 5.123979907040166e-09,
+        "psnr": 82.90392581948174
+      },
+      "cached_atlas_vs_direct_dense_reference": {
+        "l1": 5.980566129437648e-06,
+        "max_abs": 0.007702067494392395,
+        "mse": 5.805651071000284e-09,
+        "psnr": 82.36149069519313
+      },
+      "cached_atlas_vs_scan_atlas": {
+        "l1": 0.0,
+        "max_abs": 0.0,
+        "mse": 0.0,
+        "psnr": 120.0
+      },
+      "scan_atlas_vs_direct_dense_reference": {
+        "l1": 5.980566129437648e-06,
+        "max_abs": 0.007702067494392395,
+        "mse": 5.805651071000284e-09,
+        "psnr": 82.36149069519313
+      }
+    },
+    "mode": "atlas_cached",
+    "pass": true,
+    "tile_config": {
+      "tile_capacity": 128,
+      "tile_t": 4,
+      "tile_x": 4,
+      "tile_y": 4
+    },
+    "tile_summary": {
+      "active_tile_count": 1779,
+      "max_tile_count": 79,
+      "overflow_sum": 0,
+      "overflow_tile_count": 0,
+      "tile_pairs": 31550
+    },
+    "timing_ms": {
+      "atlas_cached": {
+        "max_ms": 38.45866600750014,
+        "median_ms": 30.935624992707744,
+        "min_ms": 27.843667019624263,
+        "samples_ms": [
+          38.45866600750014,
+          30.935624992707744,
+          27.843667019624263
+        ]
+      },
+      "atlas_scan": {
+        "max_ms": 28.988415986532345,
+        "median_ms": 26.73775001312606,
+        "min_ms": 26.149999990593642,
+        "samples_ms": [
+          28.988415986532345,
+          26.73775001312606,
+          26.149999990593642
+        ]
+      },
+      "direct_dense_reference": {
+        "max_ms": 604.1786249843426,
+        "median_ms": 602.6647920079995,
+        "min_ms": 601.4441669976804,
+        "samples_ms": [
+          601.4441669976804,
+          604.1786249843426,
+          602.6647920079995
+        ]
+      }
+    }
+  },
+  "config": {
+    "atlas_max_pixel_candidates": 512,
+    "atlas_tile_config": {
+      "tile_capacity": 128,
+      "tile_t": 4,
+      "tile_x": 4,
+      "tile_y": 4
+    },
+    "depth_bands": 4,
+    "frames": 16,
+    "iters": 3,
+    "prt_tile_config": {
+      "tile_capacity": 512,
+      "tile_t": 4,
+      "tile_x": 4,
+      "tile_y": 4
+    },
+    "seed": 47,
+    "support_scale": 1.25,
+    "target_size": 64,
+    "tubes": 512,
+    "warmup": 1
+  },
+  "name": "depth_banded_homography_flow_atlas_valid_prt_tiled_compare_probe",
+  "note": "Cross-process comparison. Cached atlas and PRT tiled run in separate processes with independent process-static Metal tile configs.",
+  "pass": true,
+  "speed_read": {
+    "cached_beats_direct_dense_reference": true,
+    "cached_beats_scan": false,
+    "cached_beats_valid_prt_direct": true,
+    "cached_beats_valid_prt_tiled": true
+  },
+  "speedups": {
+    "cached_vs_direct_dense_reference": 19.48125477180635,
+    "cached_vs_scan": 0.8643028876716982,
+    "cached_vs_valid_prt_direct": 1.561224575858719,
+    "cached_vs_valid_prt_tiled": 1.0481618528939312,
+    "valid_prt_tiled_vs_valid_prt_direct": 1.4894880705191123
+  },
+  "valid_prt_tiled": {
+    "camera_fit_error": 1.0264926686431863e-07,
+    "child_returncode": 0,
+    "child_stderr": "",
+    "fallback_tubes": 0,
+    "metrics": {
+      "prt_direct_vs_direct_dense_reference": {
+        "l1": 1.1678145028781728e-07,
+        "max_abs": 6.222724914550781e-05,
+        "mse": 2.427672429403116e-12,
+        "psnr": 116.14809913848873
+      },
+      "prt_tiled_vs_direct_dense_reference": {
+        "l1": 1.1275861311332847e-07,
+        "max_abs": 6.22868537902832e-05,
+        "mse": 2.424595463637602e-12,
+        "psnr": 116.15360711727945
+      },
+      "prt_tiled_vs_prt_direct": {
+        "l1": 2.0481678575379192e-08,
+        "max_abs": 7.152557373046875e-07,
+        "mse": 2.7070732537114867e-15,
+        "psnr": 120.0
+      }
+    },
+    "mode": "prt_tiled",
+    "pass": true,
+    "tile_config": {
+      "tile_capacity": 512,
+      "tile_t": 4,
+      "tile_x": 4,
+      "tile_y": 4
+    },
+    "tile_summary": {
+      "active_tile_count": 599,
+      "max_tile_count": 297,
+      "overflow_sum": 0,
+      "overflow_tile_count": 0,
+      "tile_pairs": 29703
+    },
+    "timing_ms": {
+      "direct_dense_reference": {
+        "max_ms": 610.8580000000075,
+        "median_ms": 609.405916009564,
+        "min_ms": 606.7179999954533,
+        "samples_ms": [
+          606.7179999954533,
+          609.405916009564,
+          610.8580000000075
+        ]
+      },
+      "prt_direct": {
+        "max_ms": 53.54420799994841,
+        "median_ms": 48.29745800816454,
+        "min_ms": 48.115790996234864,
+        "samples_ms": [
+          48.115790996234864,
+          53.54420799994841,
+          48.29745800816454
+        ]
+      },
+      "prt_tiled": {
+        "max_ms": 32.92462497483939,
+        "median_ms": 32.425542012788355,
+        "min_ms": 32.07491699140519,
+        "samples_ms": [
+          32.92462497483939,
+          32.425542012788355,
+          32.07491699140519
+        ]
+      }
+    },
+    "validity": {
+      "matches_direct_dense_reference": false,
+      "matches_prt_direct": true
+    }
+  }
+}

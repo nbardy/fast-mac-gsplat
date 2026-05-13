@@ -114,6 +114,7 @@ Last updated: 2026-05-13
 - [x] Gate F1k: 128px stress keeps support 1.25 speed win and support 1.4 fidelity split.
 - [x] Gate F1l: overfit-artifact audit separates PRT training evidence from atlas support-policy evidence.
 - [x] Gate F1m: 512-tube scaling rejects support/band retuning under the fixed candidate store.
+- [x] Gate F1n: candidate512 atlas cache restores a robust 512-tube speed-mode row.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -3306,6 +3307,52 @@ the 80 dB direct-dense quality gate. The 512-tube path needs a different
 candidate strategy: exact streamed chunks, split passes with accumulation, or
 explicitly larger candidate storage if the memory tradeoff is acceptable.
 
+Gate F1n tests that explicit larger candidate-storage branch. The code now
+accepts `STAR_ATLAS_MAX_PIXEL_CANDIDATES=512`, while preserving the 256 default.
+This is not a memory-free win; it is a conscious per-pixel local-array budget
+increase for atlas cached rendering.
+
+Command:
+
+```text
+(cd variants/star_uvt_prt_v0 && python3 setup.py build_ext --inplace)
+PYTHONPATH=variants/star_uvt_prt_v0 python3 variants/star_uvt_prt_v0/tests/projective_rational_tile_config_check.py
+PYTHONPATH=variants/star_uvt_prt_v0 python3 variants/star_uvt_prt_v0/research_project/benchmarks/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_probe.py --seed <17|23|31|47> --target-size 64 --frames 16 --tubes 512 --depth-bands <2|4> --residual-degree 3 --prt-degree 2 --atlas-tile-config <4x4x4:256|4x4x4:128> --prt-tile-config 4x4x4:512 --support-scale 1.25 --atlas-max-pixel-candidates 512 --warmup 1 --iters 3 --out-json variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1n_64_seed<seed>_support1.25_16f_512t_<2band|4band>_atlas4x4x4cap<256|128>_candidate512_prt4x4x4cap512.json
+```
+
+Seed-17 boundary rows:
+
+```text
+4band support1.40 cap128 candidate512: pass true, direct-dense PSNR 93.95 dB, max_abs 0.00313, max tile count 91, overflow 0, cached 42.496 ms, valid PRT tiled 30.313 ms, cached-vs-PRT speedup 0.713x
+4band support1.25 cap128 candidate512: pass true, direct-dense PSNR 84.22 dB, max_abs 0.00566, max tile count 83, overflow 0, cached 28.593 ms, valid PRT tiled 29.937 ms, cached-vs-PRT speedup 1.047x
+2band support1.25 cap256 candidate512: pass true, direct-dense PSNR 81.31 dB, max_abs 0.00751, max tile count 154, overflow 0, cached 23.843 ms, valid PRT tiled 29.836 ms, cached-vs-PRT speedup 1.251x
+```
+
+Four-seed 4band/support1.25 row:
+
+```text
+seed 17: pass true, direct-dense PSNR 84.22 dB, max_abs 0.00566, max tile count 83, overflow 0, cached 28.593 ms, valid PRT tiled 29.937 ms, cached-vs-PRT speedup 1.047x
+seed 23: pass true, direct-dense PSNR 85.12 dB, max_abs 0.00519, max tile count 89, overflow 0, cached 27.513 ms, valid PRT tiled 33.129 ms, cached-vs-PRT speedup 1.204x
+seed 31: pass true, direct-dense PSNR 84.00 dB, max_abs 0.00491, max tile count 81, overflow 0, cached 24.789 ms, valid PRT tiled 30.807 ms, cached-vs-PRT speedup 1.243x
+seed 47: pass true, direct-dense PSNR 82.36 dB, max_abs 0.00770, max tile count 79, overflow 0, cached 30.936 ms, valid PRT tiled 32.426 ms, cached-vs-PRT speedup 1.048x
+```
+
+The faster 2band/support1.25 row is not robust:
+
+```text
+seed 17: pass true, direct-dense PSNR 81.31 dB, cached-vs-PRT speedup 1.251x
+seed 23: pass true, direct-dense PSNR 82.71 dB, cached-vs-PRT speedup 1.317x
+seed 31: pass false, direct-dense PSNR 78.95 dB, cached-vs-PRT speedup 1.391x
+seed 47: pass true, direct-dense PSNR 81.28 dB, cached-vs-PRT speedup 1.234x
+```
+
+Read: candidate512 is a viable 512-tube atlas-cache speed-mode budget. It
+clears the F1m overflow/quality failure and recovers a four-seed speed win, but
+only with 4 bands at support 1.25. The 2-band row is faster but fails seed 31,
+and support 1.4 is the high-fidelity row but loses badly to valid PRT tiled.
+Keep `STAR_ATLAS_MAX_PIXEL_CANDIDATES=512` explicit; do not silently change the
+default until the memory and 128px stress rows are measured.
+
 The separate representation idea tested by F0 is
 depth-banded homography-flow gauge residual tubes. Compile a small bank of
 camera-induced depth-band flows from `K_seq,w2c_seq`, let each world tube store
@@ -3352,4 +3399,4 @@ should be measured before splitting a camera window.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, D3x rejects naive replay caching, and D3y shows write-set pruning can turn exact 200-vs-200 into a train-wall win.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, and D3z/D4a are boundary results showing that more steps must still fit the train-wall budget and improve quality before replacing D3y.
-12. Continue depth-banded homography-flow gauge residual tubes after F0-F1m: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion originally needed a small PRT fallback/window-split tail under screen-additive residuals. F0h is now the better representation target: inverse-homography atlas residuals pass all four hard-camera/object-motion seeds with no fallback tubes, high PSNR, and the same 4x4 culling advantage. F0i/F0j add the CPU atlas-tiled render reference; F0k dials conservative atlas support to 1.4x, which covers dense exactly across four hard-camera/object-motion seeds at 64px/16f/128t while preserving an about 7% candidate-eval ratio. F1a moves the atlas tile assignment onto Metal and matches CPU per-tile tube-id sets exactly across the four seeds at tile_capacity 32. F1b renders through those Metal bins and matches dense/CPU tiled images to sub-micro max error across the same four seeds. F1c caches and sorts each pixel's candidate list once, keeps exact parity with F1b, and improves median render timing by 1.35x-2.17x on the same four seeds. F1d shows the cached path also beats dense direct per-frame world-tube render and PRT direct Metal on the same scene, while PRT tiled at the cached-compatible cap32 is invalid from overflow. F1e reruns PRT tiled in a separate process at a valid `4x4x4:128` capacity and cached atlas remains faster by 1.14x-1.93x. F1f rejects scaling the current cached atlas cap32 path to 256 tubes: all four seeds overflow atlas tiles, while valid PRT tiled at `4x4x4:256` passes. F1g raises the cached local candidate store to 256 and restores 256-tube parity at atlas cap64, but loses to valid PRT tiled by 12%-19%. F1h confirms cap64 cached still beats the scan renderer at 256 tubes by 1.07x-1.54x with exact cached-vs-scan parity, so the remaining speed gap is specifically against valid PRT tiled. F1i rejects the cached-select ordering variant: it is exact, but only 0.65x-0.69x the speed of insertion-cached on the same four seeds. F1j finds a support-1.25 speed-mode row that beats valid PRT tiled by 1.08x-1.23x at 83.0-85.8 dB direct-dense PSNR. F1k shows the same speed/fidelity split at 128px: support 1.25 beats valid PRT tiled by 1.04x-1.34x at 81.3-83.2 dB, while support 1.4 reaches 91.6-92.7 dB but loses or roughly ties speed. F1l confirms existing C5/C5c overfit artifacts are PRT screen-time training evidence, not atlas-support-policy evidence, because the atlas-residual renderer has no backward/training harness. F1m rejects scaling support/band retuning to 512 tubes under the fixed candidate-store budget: multi-band rows overflow, while the no-overflow 1-band/support1.25 row is fast but misses the 80 dB quality gate at 77.99 dB. Support 1.25 is still not exact dense coverage and should not replace the fidelity policy without actual atlas overfit/training-quality checks. The current implementation is still not promoted into training/backward or large-scene playback.
+12. Continue depth-banded homography-flow gauge residual tubes after F0-F1n: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion originally needed a small PRT fallback/window-split tail under screen-additive residuals. F0h is now the better representation target: inverse-homography atlas residuals pass all four hard-camera/object-motion seeds with no fallback tubes, high PSNR, and the same 4x4 culling advantage. F0i/F0j add the CPU atlas-tiled render reference; F0k dials conservative atlas support to 1.4x, which covers dense exactly across four hard-camera/object-motion seeds at 64px/16f/128t while preserving an about 7% candidate-eval ratio. F1a moves the atlas tile assignment onto Metal and matches CPU per-tile tube-id sets exactly across the four seeds at tile_capacity 32. F1b renders through those Metal bins and matches dense/CPU tiled images to sub-micro max error across the same four seeds. F1c caches and sorts each pixel's candidate list once, keeps exact parity with F1b, and improves median render timing by 1.35x-2.17x on the same four seeds. F1d shows the cached path also beats dense direct per-frame world-tube render and PRT direct Metal on the same scene, while PRT tiled at the cached-compatible cap32 is invalid from overflow. F1e reruns PRT tiled in a separate process at a valid `4x4x4:128` capacity and cached atlas remains faster by 1.14x-1.93x. F1f rejects scaling the current cached atlas cap32 path to 256 tubes: all four seeds overflow atlas tiles, while valid PRT tiled at `4x4x4:256` passes. F1g raises the cached local candidate store to 256 and restores 256-tube parity at atlas cap64, but loses to valid PRT tiled by 12%-19%. F1h confirms cap64 cached still beats the scan renderer at 256 tubes by 1.07x-1.54x with exact cached-vs-scan parity, so the remaining speed gap is specifically against valid PRT tiled. F1i rejects the cached-select ordering variant: it is exact, but only 0.65x-0.69x the speed of insertion-cached on the same four seeds. F1j finds a support-1.25 speed-mode row that beats valid PRT tiled by 1.08x-1.23x at 83.0-85.8 dB direct-dense PSNR. F1k shows the same speed/fidelity split at 128px: support 1.25 beats valid PRT tiled by 1.04x-1.34x at 81.3-83.2 dB, while support 1.4 reaches 91.6-92.7 dB but loses or roughly ties speed. F1l confirms existing C5/C5c overfit artifacts are PRT screen-time training evidence, not atlas-support-policy evidence, because the atlas-residual renderer has no backward/training harness. F1m rejects scaling support/band retuning to 512 tubes under the fixed candidate-store budget: multi-band rows overflow, while the no-overflow 1-band/support1.25 row is fast but misses the 80 dB quality gate at 77.99 dB. F1n adds an explicit candidate512 atlas-cache budget and recovers a robust 512-tube speed-mode row: 4 bands, cap128, support1.25 passes all four seeds at 82.4-85.1 dB and beats valid PRT tiled by 1.05x-1.24x. Support 1.25 is still not exact dense coverage and should not replace the fidelity policy without actual atlas overfit/training-quality checks. The current implementation is still not promoted into training/backward or large-scene playback.
