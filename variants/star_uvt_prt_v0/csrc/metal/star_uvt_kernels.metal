@@ -2288,10 +2288,12 @@ kernel void projective_rational_tile_pixel_fused_mse_backward(
     device atomic_float* grad_opacity [[buffer(17)]],
     device atomic_float* grad_color [[buffer(18)]],
     device atomic_float* loss_sum [[buffer(19)]],
-    uint gid [[thread_position_in_grid]]) {
+    uint gid [[thread_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]]) {
   uint pixels_per_tile = uint(STAR_TILE_X * STAR_TILE_Y * STAR_TILE_T);
   uint tile_id = gid / pixels_per_tile;
-  uint local_pixel = gid - tile_id * pixels_per_tile;
+  uint local_tid = tid;
+  uint local_pixel = local_tid;
   if (tile_id >= uint(mi.tile_count)) return;
   uint h_terms = uint(mi.reserved0);
 
@@ -2310,20 +2312,26 @@ kernel void projective_rational_tile_pixel_fused_mse_backward(
   uint y = ty * STAR_TILE_Y + ly;
   if (f >= uint(mi.frames) || x >= uint(mi.width) || y >= uint(mi.height)) return;
 
-  uint local_ids[STAR_TILE_CAPACITY];
-  float local_depths[STAR_TILE_CAPACITY];
-  for (uint i = 0u; i < count; ++i) {
+  threadgroup uint local_ids[STAR_TILE_CAPACITY];
+  threadgroup float local_depths[STAR_TILE_CAPACITY];
+  for (uint i = local_tid; i < count; i += STAR_THREADS) {
     uint idx = tile_id * STAR_TILE_CAPACITY + i;
     local_ids[i] = tile_tube_ids[idx];
     local_depths[i] = tile_depths[idx];
   }
-  sort_by_depth_thread(local_ids, local_depths, count);
-  if (count > 1u) {
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  sort_by_depth(local_ids, local_depths, count, local_tid);
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (local_tid == 0u && count > 1u) {
     atomic_store_explicit(tile_unstable + tile_id, 1u, memory_order_relaxed);
   }
 
   float t = frame_time(f, mi);
   float2 pixel = float2(float(x) + 0.5f, float(y) + 0.5f);
+  uint sorted_ids[STAR_TILE_CAPACITY];
+  for (uint i = 0u; i < count; ++i) {
+    sorted_ids[i] = local_ids[i];
+  }
   uint ordered_ids[STAR_TILE_CAPACITY];
   float t_before[STAR_TILE_CAPACITY];
   float alpha_values[STAR_TILE_CAPACITY];
@@ -2334,7 +2342,7 @@ kernel void projective_rational_tile_pixel_fused_mse_backward(
   if (uint(STAR_TILE_T) == 1u) {
     ordered_count = count;
     for (uint i = 0u; i < count; ++i) {
-      ordered_ids[i] = local_ids[i];
+      ordered_ids[i] = sorted_ids[i];
     }
   } else {
     float last_depth = -INFINITY;
@@ -2342,7 +2350,7 @@ kernel void projective_rational_tile_pixel_fused_mse_backward(
     for (uint rank = 0u; rank < count; ++rank) {
       float selected_depth;
       uint tube_id = select_prt_sample_order_id_thread(
-          local_ids,
+          sorted_ids,
           count,
           h_coeff,
           center_t,

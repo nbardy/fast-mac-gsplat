@@ -943,7 +943,7 @@ metal_projective_rational_tile_pixel_fused_mse_backward(
     fn.setArg(17, grad_opacity);
     fn.setArg(18, grad_color);
     fn.setArg(19, loss_sum);
-    fn.dispatch((uint64_t)entry_count, 256);
+    fn.dispatch((uint64_t)entry_count, (uint64_t)sc.threads);
   });
 
   return std::make_tuple(grad_h_coeff, grad_lambda_uv, grad_lambda_t, grad_center_t, grad_opacity, grad_color,
