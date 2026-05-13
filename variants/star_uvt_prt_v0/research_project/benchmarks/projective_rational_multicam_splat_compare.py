@@ -78,6 +78,12 @@ def _resolve_dynaworld_path(path: str | Path) -> Path:
     return DYNAWORLD_ROOT / value
 
 
+def _parse_float_csv(value: str) -> list[float]:
+    if value.strip() == "":
+        return []
+    return [float(part.strip()) for part in value.split(",") if part.strip()]
+
+
 def _sync(device: torch.device) -> None:
     if device.type == "mps":
         torch.mps.synchronize()
@@ -661,6 +667,8 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
     device = torch.device(args.device)
     if device.type != "mps":
         raise ValueError("projective rational multicam compare currently requires --device=mps")
+    prt_steps = args.steps if args.prt_steps is None else args.prt_steps
+    splat_steps = args.steps if args.splat_steps is None else args.splat_steps
     torch.manual_seed(args.seed)
 
     config = load_config_file(_resolve_dynaworld_path(args.baseline_config))
@@ -716,25 +724,26 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
         if args.prt_eval_support_alpha_threshold is None
         else args.prt_eval_support_alpha_threshold
     )
+    prt_extra_eval_support_alpha_thresholds = [
+        threshold
+        for threshold in _parse_float_csv(args.prt_extra_eval_support_alpha_thresholds)
+        if prt_eval_support_alpha_threshold is None or not math.isclose(threshold, prt_eval_support_alpha_threshold)
+    ]
     apply_projective_rational_tile_env(tile_config)
-    prt_train_config = UVTRenderConfig(
-        height=height,
-        width=width,
-        frames=frames,
-        alpha_threshold=args.prt_alpha_threshold,
-        support_alpha_threshold=prt_support_alpha_threshold,
-        background=(1.0, 1.0, 1.0),
-        **tile_config.as_render_kwargs(),
-    )
-    prt_eval_config = UVTRenderConfig(
-        height=height,
-        width=width,
-        frames=frames,
-        alpha_threshold=args.prt_alpha_threshold,
-        support_alpha_threshold=prt_eval_support_alpha_threshold,
-        background=(1.0, 1.0, 1.0),
-        **tile_config.as_render_kwargs(),
-    )
+
+    def make_prt_config(support_alpha_threshold: float | None) -> UVTRenderConfig:
+        return UVTRenderConfig(
+            height=height,
+            width=width,
+            frames=frames,
+            alpha_threshold=args.prt_alpha_threshold,
+            support_alpha_threshold=support_alpha_threshold,
+            background=(1.0, 1.0, 1.0),
+            **tile_config.as_render_kwargs(),
+        )
+
+    prt_train_config = make_prt_config(prt_support_alpha_threshold)
+    prt_eval_config = make_prt_config(prt_eval_support_alpha_threshold)
     prt_model = MulticamPRTWorldTubeModel(
         bundle=bundle,
         tube_count=args.prt_tubes,
@@ -750,7 +759,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
         bundle=bundle,
         train_camera_paths=train_camera_paths,
         config=prt_train_config,
-        steps=args.steps,
+        steps=prt_steps,
         lr=args.prt_lr,
         loss_mode=args.prt_loss_mode,
         train_mode=args.prt_train_mode,
@@ -768,11 +777,29 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
         render_repeats=args.render_repeats,
         cache_compiled=args.prt_eval_cache_compiled,
     )
+    prt_extra_evals = []
+    for support_alpha_threshold in prt_extra_eval_support_alpha_thresholds:
+        prt_extra_evals.append(
+            {
+                "support_alpha_threshold": support_alpha_threshold,
+                "eval": _eval_prt(
+                    model=prt_model,
+                    bundle=bundle,
+                    train_camera_paths=train_camera_paths,
+                    heldout_camera_paths=heldout_camera_paths,
+                    config=make_prt_config(support_alpha_threshold),
+                    device=device,
+                    render_warmups=args.render_warmups,
+                    render_repeats=args.render_repeats,
+                    cache_compiled=args.prt_eval_cache_compiled,
+                ),
+            }
+        )
 
     splat_model, splat_render_cfg, splat_train = _fit_splats(
         bundle=bundle,
         splat_count=args.splat_count,
-        steps=args.steps,
+        steps=splat_steps,
         lr=args.splat_lr,
         init_depth=args.init_depth,
         init_scale=args.splat_init_scale,
@@ -812,6 +839,8 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
             "device": str(device),
             "seed": args.seed,
             "steps": args.steps,
+            "prt_steps": prt_steps,
+            "splat_steps": splat_steps,
             "render_warmups": args.render_warmups,
             "render_repeats": args.render_repeats,
             "prt_eval_cache_compiled": args.prt_eval_cache_compiled,
@@ -824,6 +853,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
             "prt_support_alpha_threshold": prt_support_alpha_threshold,
             "prt_train_support_alpha_threshold": prt_support_alpha_threshold,
             "prt_eval_support_alpha_threshold": prt_eval_support_alpha_threshold,
+            "prt_extra_eval_support_alpha_thresholds": prt_extra_eval_support_alpha_thresholds,
             "prt_tile_policy": prt_tile_policy,
             "train_camera_fit_errors": train_fit_errors,
             "heldout_camera_fit_errors": heldout_fit_errors,
@@ -844,6 +874,7 @@ def run_compare(args: argparse.Namespace) -> dict[str, Any]:
             "init_opacity": args.prt_init_opacity,
             "train": prt_train,
             "eval": prt_eval,
+            "extra_evals": prt_extra_evals,
         },
         "free_dynamic_splats": {
             "splat_count": args.splat_count,
@@ -866,6 +897,8 @@ def main() -> None:
     parser.add_argument("--target-size", type=int, default=64)
     parser.add_argument("--max-frames", type=int, default=4)
     parser.add_argument("--steps", type=int, default=10)
+    parser.add_argument("--prt-steps", type=int)
+    parser.add_argument("--splat-steps", type=int)
     parser.add_argument("--seed", type=int, default=31)
     parser.add_argument("--camera-poly-degree", type=int, default=1)
     parser.add_argument("--tile-config", default="auto", help="'auto' or an explicit config like 8x8x2:128")
@@ -885,6 +918,7 @@ def main() -> None:
     parser.add_argument("--prt-alpha-threshold", type=float, default=1.0 / 255.0)
     parser.add_argument("--prt-support-alpha-threshold", type=float)
     parser.add_argument("--prt-eval-support-alpha-threshold", type=float)
+    parser.add_argument("--prt-extra-eval-support-alpha-thresholds", default="")
     parser.add_argument("--splat-count", type=int, default=128)
     parser.add_argument("--splat-lr", type=float, default=0.002)
     parser.add_argument("--splat-renderer", choices=("dense", "fast_mac"), default="dense")

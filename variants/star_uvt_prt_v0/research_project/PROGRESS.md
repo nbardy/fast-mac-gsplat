@@ -72,6 +72,7 @@ Last updated: 2026-05-13
 - [x] Gate D3g: 2048-tube support-threshold dial and rejected global policy promotion.
 - [x] Gate D3h: 256px x 8-frame 2048-tube scaling rows.
 - [x] Gate D3i: split train/eval support-threshold probe for 256px 2048-tube rows.
+- [x] Gate D3j: same-wall 256px PRT/splat row with multi-support eval on one PRT checkpoint.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1935,6 +1936,37 @@ per-pixel sample-order replay. Backward and fused MSE already have a `tile_t=1`
 presorted-order shortcut, so the next rasterizer experiment should test the same
 shortcut in forward render with parity and cached-eval timing rows.
 
+Gate D3j adds separate `--prt-steps` / `--splat-steps` controls and
+`--prt-extra-eval-support-alpha-thresholds`, then runs the 256px x 8-frame
+same-wall row. The tracked row trains one PRT support64 checkpoint for 135 steps
+and one 2048-splat baseline for 200 steps; the same PRT checkpoint is evaluated
+at eval support56 primary, plus support64 and support48 extras.
+
+Validation:
+
+```text
+python3 setup.py build_ext --inplace
+python3 -m py_compile research_project/benchmarks/projective_rational_multicam_splat_compare.py
+python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 200 --prt-steps 135 --splat-steps 200 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-eval-support-alpha-threshold 0.2196078431372549 --prt-extra-eval-support-alpha-thresholds 0.25098039215686274,0.18823529411764706 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_samewall_prt135_splat200_train64_eval56_extra64_48_fused_mse.json
+```
+
+Result:
+
+```text
+same-wall primary eval56 PRT: train wall 6.039 s, PSNR 15.9708 / heldout 13.2449 dB, render 37.95 / 52.00 ms, max tile 158, overflow 0.
+same-wall 200-step splat:    train wall 6.135 s, PSNR 15.6135 / heldout 12.4150 dB, render 73.98 / 92.68 ms.
+
+same checkpoint eval64 PRT:  PSNR 17.3970 / heldout 13.0040 dB, render 20.91 / 28.88 ms, max tile 114, overflow 0.
+same checkpoint eval48 PRT:  PSNR 14.8970 / heldout 13.3000 dB, render 64.87 / 85.88 ms, max tile 209, overflow 0.
+```
+
+Read: this is the cleanest current answer to the same-wall overfit question.
+At approximately equal train wall, PRT eval56 beats the direct-splat baseline on
+train PSNR, heldout PSNR, and render speed. Eval64 is the fastest/overfit
+render and still beats splat heldout; eval48 gives the best heldout but loses
+train PSNR and most of the render-speed margin. Eval56 remains the compromise
+point for 256px support64 training.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1959,7 +1991,6 @@ should be measured before splitting a camera window.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
 8. Treat split train/eval support as a diagnostic only; pursue support scheduling or residual-certified support inflation before making it a policy.
-9. Add a same-wall 256px row: train PRT support64 for roughly the 2048-splat 200-step wall budget, then evaluate that checkpoint at support64/56/48 against one fixed splat baseline.
-10. Add a parity-gated `tile_t=1` presorted-order shortcut to the forward render kernel and rerun cached eval timing on the selected 1024 and 2048 rows.
-11. Keep accumulation-only and derivative-math rewrites behind fused-train-step work unless a new profile changes the cost split.
-12. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
+9. Add a parity-gated `tile_t=1` presorted-order shortcut to the forward render kernel and rerun cached eval timing on the selected 1024 and 2048 rows.
+10. Keep accumulation-only and derivative-math rewrites behind fused-train-step work unless a new profile changes the cost split.
+11. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
