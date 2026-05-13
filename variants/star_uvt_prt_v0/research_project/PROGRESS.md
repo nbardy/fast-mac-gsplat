@@ -82,6 +82,7 @@ Last updated: 2026-05-13
 - [x] Gate D3q: exact 200-step PRT vs 200-step splat comparison on train72/eval64.
 - [x] Gate D3r: fused-MSE tile-level loss reduction micro-kernel cleanup.
 - [x] Gate D3s: reject fused-MSE `h_terms == 3` specialization after timing regression.
+- [x] Gate D3t: 195-step same-wall schedule boundary after D3r.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2295,6 +2296,33 @@ current fused-MSE bottleneck, or the branch/extra helper shape makes register
 pressure worse. Do not retry h-terms specialization unless it is coupled to a
 larger replay-cache or gradient-accumulation rewrite with fresh profiling.
 
+Gate D3t tests whether D3r leaves enough headroom to spend 195 PRT steps under
+the paired 200-step direct-splat wall on the train72/eval64 support schedule.
+
+Validation:
+
+```text
+python3 setup.py build_ext --inplace
+STAR_UVT_TILE_T=1 python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 200 --prt-steps 195 --splat-steps 200 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.2823529411764706 --prt-eval-support-alpha-threshold 0.25098039215686274 --prt-extra-eval-support-alpha-thresholds 0.2823529411764706,0.2196078431372549,0.18823529411764706 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_samewall_prt195_splat200_train72_eval64_extra72_56_48_loss_threadgroup_reduce_fused_mse.json
+```
+
+Result:
+
+```text
+195-step train72/eval64: PRT wall 6.638 s vs splat wall 7.081 s.
+195-step eval64 PRT: PSNR 15.6399 / heldout 13.2195 dB, render 8.44 / 13.19 ms, max tile 116, overflow 0.
+195-step splat:      PSNR 15.6136 / heldout 12.4152 dB, render 71.57 / 95.65 ms.
+195-step eval72 PRT: PSNR 17.8086 / heldout 13.0072 dB, render 6.39 / 11.38 ms, max tile 81, overflow 0.
+195-step eval56 PRT: PSNR 14.3863 / heldout 13.2086 dB, render 13.48 / 18.60 ms, max tile 170, overflow 0.
+195-step eval48 PRT: PSNR 13.8160 / heldout 13.1270 dB, render 15.17 / 20.09 ms, max tile 214, overflow 0.
+```
+
+Read: 195 steps still fits under the paired splat wall and keeps the PSNR/render
+wins, but it does not improve the quality row over D3p's 190-step result. Keep
+D3p as the cleaner same-budget recommendation and D3t as the boundary point
+showing the train72/eval64 schedule can spend up to roughly 195 steps before
+becoming an exact-step noise-band result.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -2318,7 +2346,7 @@ should be measured before splitting a camera window.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
-8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p shows train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3q/D3r show exact 200-vs-200 steps is a quality/render win but still a train-wall near tie.
+8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p shows train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3t shows 195 steps is still under wall but not a quality improvement; D3q/D3r show exact 200-vs-200 steps is a quality/render win but still a train-wall near tie.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, and D3s rejects isolated h-terms specialization, but the fused MSE path remains the 256px train-wall bottleneck.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3l says train speed still needs fused-kernel work.
