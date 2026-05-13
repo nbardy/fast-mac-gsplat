@@ -61,6 +61,7 @@ Last updated: 2026-05-13
 - [x] Gate D2v: profile PRT backward compute-only vs atomic writes.
 - [x] Gate D2w: selected 1024 PRT backward replay workload shape.
 - [x] Gate D2x: isolate alpha/order replay as the PRT backward cost center.
+- [x] Gate D2y: trace-cache memory viability planner.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1521,6 +1522,42 @@ compositing trace or fuse forward and backward during training so backward can
 consume per-pixel order, alpha, and transmittance state instead of replaying the
 whole PRT shader.
 
+Gate D2y adds `projective_rational_trace_cache_planner.py`, a benchmark-side
+planner that converts the measured D2x tile-pixel-tube visits into trace memory
+budgets. It does not claim an exact future implementation cost; sparse trace
+rows are upper bounds because not every binned tube survives alpha and
+transmittance replay.
+
+Validation:
+
+```text
+python3 -m py_compile research_project/benchmarks/projective_rational_trace_cache_planner.py
+python3 research_project/benchmarks/projective_rational_trace_cache_planner.py --profile-json research_project/benchmarks/results/projective_rational_multicam_backward_phase_profile_64_4f_1024t_20step_train_speed_support32_replayonly.json --projection 128x128x4 --projection 256x256x4 --projection 256x256x16 --out-json research_project/benchmarks/results/projective_rational_trace_cache_planner_64_4f_1024t_train_speed_support32.json
+```
+
+Result for the minimal `id + alpha + t_before` trace layout:
+
+```text
+observed 64x64x4:   dense 96.1 MiB, sparse upper bound 26.6 MiB, visits 2.31M
+projected 128x128x4: dense 384.2 MiB, sparse upper bound 106.3 MiB, visits 9.24M
+projected 256x256x4: dense 1537.0 MiB, sparse upper bound 425.2 MiB, visits 36.98M
+projected 256x256x16: dense 6148.0 MiB, sparse upper bound 1700.7 MiB, visits 147.91M
+```
+
+The D2x timing ceiling is:
+
+```text
+replay-only kernel: 17.036 ms
+optimistic cached backward floor: 1.080 ms
+```
+
+Read: a dense per-pixel slot trace is already too large for the tiny 64x64x4
+row and becomes absurd at fuller resolution. A compact sparse trace may be
+viable for small training/eval probes, but it still has substantial write/read
+bandwidth and scales linearly with visit count. The cleaner implementation bet
+is a fused training path that keeps forward compositing and backward adjacent
+without materializing a generic full-frame trace.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1543,6 +1580,6 @@ should be measured before splitting a camera window.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
-7. Design a cached-trace or fused train-step path so backward can reuse forward order/alpha/transmittance state; D2x shows replay-only is about 97% of compute-only time.
-8. Keep accumulation-only and derivative-math rewrites behind cached-trace work unless a new profile changes the cost split.
+7. Prototype a fused PRT train-step path before a generic cached-trace renderer; D2y shows dense traces are too large and sparse traces still have meaningful bandwidth cost.
+8. Keep accumulation-only and derivative-math rewrites behind fused-train-step work unless a new profile changes the cost split.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
