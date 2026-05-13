@@ -506,6 +506,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
             "target_size": args.target_size,
             "max_frames": args.frames,
             "tubes": args.tubes,
+            "seed": args.seed,
             "fallback_max_px": args.fallback_max_px,
             "pan_x": args.pan_x,
             "zoom": args.zoom,

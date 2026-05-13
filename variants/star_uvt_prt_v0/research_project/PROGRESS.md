@@ -93,6 +93,7 @@ Last updated: 2026-05-13
 - [x] Gate F0: depth-banded homography-flow gauge residual-tube projection/render falsifier.
 - [x] Gate F0b: depth-banded residual robustness rows for object velocity and harder camera motion.
 - [x] Gate F0c: quantify PRT-fallback outliers for the hard-camera/object-motion residual row.
+- [x] Gate F0d: four-seed hybrid fallback robustness sweep.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2650,6 +2651,32 @@ estimate below segmented_f4 and the rendered tube count at N. This is still an
 upper-bound probe, not a renderer claim: the next real implementation would be
 a hybrid flow-sheared tiled renderer plus PRT fallback path.
 
+Gate F0d checks whether that small fallback tail is stable across seeds. It
+wraps the F0c hard-camera/object-motion configuration in a four-seed sweep:
+
+```text
+python3 research_project/benchmarks/depth_banded_homography_flow_hybrid_seed_sweep.py --out-json research_project/benchmarks/results/depth_banded_homography_flow_hybrid_seed_sweep_f0d_hardcam_velocity001_4seeds.json
+```
+
+Result:
+
+```text
+Seeds: 17, 23, 31, 47.
+Pure gauge pass count: 1 / 4.
+Hybrid pass count: 4 / 4.
+Fallback tubes: min 0, median 3, max 6 out of 256.
+Hybrid max residual: min 0.8084 px, median 0.9545 px, max 0.9978 px.
+Hybrid p95 residual: min 0.1695 px, median 0.1826 px, max 0.2007 px.
+Hybrid PSNR: min 59.81 dB, median 60.70 dB, max 61.30 dB.
+Hybrid tile-pair ratio vs segmented_f4: min 0.830, median 0.847, max 0.848.
+```
+
+Read: F0d strengthens the hybrid policy read. Pure gauge is too brittle under
+hard camera plus object motion, but a small PRT fallback tail clears all four
+sampled seeds while still estimating fewer tile pairs than segmented_f4. The
+next implementation step should be an actual flow-sheared tiled forward path
+with fallback routing, not more dense upper-bound probes.
+
 The separate representation idea tested by F0 is
 depth-banded homography-flow gauge residual tubes. Compile a small bank of
 camera-induced depth-band flows from `K_seq,w2c_seq`, let each world tube store
@@ -2696,4 +2723,4 @@ should be measured before splitting a camera window.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, D3x rejects naive replay caching, and D3y shows write-set pruning can turn exact 200-vs-200 into a train-wall win.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, and D3z/D4a are boundary results showing that more steps must still fit the train-wall budget and improve quality before replacing D3y.
-12. Continue depth-banded homography-flow gauge residual tubes after F0/F0b/F0c: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion needs PRT fallback/window split for a small max-residual outlier tail. The current implementation is still a dense upper-bound with exact direct depth, not a Metal flow-sheared renderer or training path.
+12. Continue depth-banded homography-flow gauge residual tubes after F0-F0d: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion needs a small PRT fallback/window-split tail. Four hard-camera/object-motion seeds all pass the hybrid upper-bound. The current implementation is still a dense upper-bound with exact direct depth, not a Metal flow-sheared renderer or training path.
