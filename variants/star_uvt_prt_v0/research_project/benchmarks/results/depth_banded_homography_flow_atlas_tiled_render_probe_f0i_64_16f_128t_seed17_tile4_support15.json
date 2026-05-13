@@ -1,0 +1,43 @@
+{
+  "config": {
+    "depth_bands": 4,
+    "dolly_z": 0.12,
+    "fallback_max_px": 1.0,
+    "frames": 16,
+    "pan_x": 0.09,
+    "residual_degree": 3,
+    "seed": 17,
+    "support_scale": 1.5,
+    "target_size": 64,
+    "tile_size": 4,
+    "tile_t": 4,
+    "tubes": 128,
+    "velocity_scale": 0.01,
+    "zoom": 0.025
+  },
+  "fallback_tubes": 0,
+  "image_metrics_vs_dense_atlas_residual": {
+    "l1": 0.0,
+    "max_abs": 0.0,
+    "mse": 0.0,
+    "psnr": 120.0
+  },
+  "name": "depth_banded_homography_flow_atlas_tiled_render_probe",
+  "note": "CPU tiled reference for inverse-homography atlas-residual tubes. It builds atlas-coordinate tile lists, inverse-warps each screen pixel per depth band to find candidates, then shades with the same screen-space Gaussian approximation used by the dense F0h render.",
+  "pass": true,
+  "render_stats": {
+    "candidate_eval_ratio_vs_dense": 0.07428514957427979,
+    "candidate_evals": 623149,
+    "dense_candidate_evals": 8388608,
+    "max_candidates_per_pixel": 77,
+    "missing_active_candidates": 0
+  },
+  "tile_stats": {
+    "bands": 4,
+    "max_pairs_per_tube_time_tile": 49,
+    "tile_pairs": 9646,
+    "tiles_t": 4,
+    "tiles_x": 16,
+    "tiles_y": 16
+  }
+}
