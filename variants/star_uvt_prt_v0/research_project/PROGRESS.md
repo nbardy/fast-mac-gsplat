@@ -89,6 +89,7 @@ Last updated: 2026-05-13
 - [x] Gate D3x: current D3r backward phase profile and trace-cache viability read.
 - [x] Gate D3y: train-used-gradient fused-MSE kernel that skips unused gradient families.
 - [x] Gate D3z: 240-step D3y same-wall boundary row rejects spending the whole train-wall margin.
+- [x] Gate D4a: 205/210/220-step D3y boundary sweep rejects replacing the accepted 200-step row.
 - [ ] Gate F0: depth-banded homography-flow gauge residual-tube projection/render falsifier.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
@@ -2535,6 +2536,28 @@ faster render. If we spend the wall margin at all, it should be a smaller
 schedule search around roughly 210-225 steps or a different optimizer/support
 schedule, not a blind 240-step run.
 
+Gate D4a runs that smaller schedule search at 205/210/220 PRT steps against
+paired 200-step fast-mac direct-splat baselines. All rows use the same D3y
+train-used fused-MSE op, train72/eval64 support schedule, 2048 PRT tubes,
+2048 direct splats, 256px, 8 frames, and cached compiled PRT eval.
+
+Result:
+
+```text
+D3y accepted row: PRT 200 steps 5.622 s vs splat 200 steps 6.851 s; eval64 PSNR 16.0183 / heldout 13.1600 dB; render 7.22 / 8.40 ms.
+
+D4a 220-step row: PRT 6.210 s vs splat 5.888 s; delta +0.321 s. Eval64 PSNR 16.0298 / heldout 13.2719 dB; render 7.88 / 13.04 ms; max tile 110; overflow 0.
+D4b 210-step row: PRT 5.945 s vs splat 5.834 s; delta +0.111 s. Eval64 PSNR 15.9993 / heldout 13.2027 dB; render 11.25 / 14.15 ms; max tile 118; overflow 0.
+D4c 205-step row: PRT 5.669 s vs splat 5.842 s; delta -0.173 s. Eval64 PSNR 15.9945 / heldout 13.0611 dB; render 7.83 / 10.53 ms; max tile 115; overflow 0.
+```
+
+Read: do not replace D3y with a step-spend row. Under the faster current
+paired-splat wall, 205 steps is the only under-wall point, and it is lower
+quality than D3y on both balanced train PSNR and heldout PSNR. 210 and 220 keep
+the PSNR/render win over splats, but both miss the paired train wall. The useful
+next path is not blind extra steps; it is either a better optimizer/support
+schedule or the next representation/rasterizer branch.
+
 The separate representation idea queued after the three-agent review is
 depth-banded homography-flow gauge residual tubes. Compile a small bank of
 camera-induced depth-band flows from `K_seq,w2c_seq`, let each world tube store
@@ -2577,8 +2600,8 @@ should be measured before splitting a camera window.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
-8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p and current-code D3v show train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3t shows 195 steps is still under wall but not a quality improvement; D3q/D3r show exact 200-vs-200 steps was a quality/render win but a train-wall near tie before D3y; D3z shows 240 D3y PRT steps overspend the wall margin for little balanced-quality gain.
+8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p and current-code D3v show train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3t shows 195 steps is still under wall but not a quality improvement; D3q/D3r show exact 200-vs-200 steps was a quality/render win but a train-wall near tie before D3y; D3z shows 240 D3y PRT steps overspend the wall margin for little balanced-quality gain; D4a shows 205 is the only under-wall point in the 205/210/220 sweep and does not beat D3y quality.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, D3x rejects naive replay caching, and D3y shows write-set pruning can turn exact 200-vs-200 into a train-wall win.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
-11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, and D3z is only a boundary result showing that more steps must still fit the train-wall budget.
+11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, and D3z/D4a are boundary results showing that more steps must still fit the train-wall budget and improve quality before replacing D3y.
 12. Test depth-banded homography-flow gauge residual tubes as the next moving-camera representation branch: if shared camera flow makes most background tubes affine again, it can preserve STAR's cheap path for common moving-camera video while reserving PRT for hard residuals.
