@@ -80,6 +80,7 @@ Last updated: 2026-05-13
 - [x] Gate D3o: 2048-tube support-schedule boundary sweep after replay cleanup.
 - [x] Gate D3p: spend train72/eval64 wall savings on a 190-step PRT same-wall row.
 - [x] Gate D3q: exact 200-step PRT vs 200-step splat comparison on train72/eval64.
+- [x] Gate D3r: fused-MSE tile-level loss reduction micro-kernel cleanup.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -2232,6 +2233,40 @@ and render win, train wall near-tie/slightly slower." Keep D3p for a strict
 under-wall row and D3n train64/eval56 for strongest overfit quality under the
 splat wall.
 
+Gate D3r reduces fused-MSE loss accumulation from one global atomic per pixel to
+one threadgroup reduction plus one global atomic per tile. This does not change
+the gradient path.
+
+Validation:
+
+```text
+python3 setup.py build_ext --inplace
+python3 research_project/benchmarks/projective_rational_tile_pixel_fused_mse_backward_check.py --out-json research_project/benchmarks/results/projective_rational_tile_pixel_fused_mse_backward_check_loss_threadgroup_reduce.json
+python3 research_project/benchmarks/projective_rational_fused_mse_timing_probe.py --tube-counts 2048 --frames 8 --width 256 --height 256 --tile-config 4x4x1:512 --support-alpha-threshold 0.25098039215686274 --warmups 1 --repeats 5 --out-json research_project/benchmarks/results/projective_rational_fused_mse_timing_probe_2048_256_8f_support64_tile4x4x1_loss_threadgroup_reduce.json
+python3 research_project/benchmarks/projective_rational_multicam_train_breakdown.py --target-size 256 --max-frames 8 --steps 20 --prt-tubes 2048 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.25098039215686274 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 1 --out-json research_project/benchmarks/results/projective_rational_multicam_train_breakdown_256_8f_2048t_20step_support64_fused_mse_loss_threadgroup_reduce.json
+STAR_UVT_TILE_T=1 python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 200 --prt-steps 200 --splat-steps 200 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.2823529411764706 --prt-eval-support-alpha-threshold 0.25098039215686274 --prt-extra-eval-support-alpha-thresholds 0.2823529411764706,0.2196078431372549,0.18823529411764706 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_samesteps_prt200_splat200_train72_eval64_extra72_56_48_loss_threadgroup_reduce_fused_mse.json
+STAR_UVT_TILE_T=1 python3 research_project/benchmarks/projective_rational_multicam_splat_compare.py --target-size 256 --max-frames 8 --steps 200 --prt-steps 200 --splat-steps 200 --prt-tubes 2048 --splat-count 2048 --splat-renderer fast_mac --init-depth 0.5 --tile-config 4x4x1:512 --prt-support-alpha-threshold 0.2823529411764706 --prt-eval-support-alpha-threshold 0.25098039215686274 --prt-extra-eval-support-alpha-thresholds 0.2823529411764706,0.2196078431372549,0.18823529411764706 --prt-loss-mode sequence --prt-train-mode fused_mse --render-warmups 1 --render-repeats 3 --prt-eval-cache-compiled --out-json research_project/benchmarks/results/projective_rational_multicam_splat_compare_256_8f_2048t_2048s_samesteps_prt200_splat200_train72_eval64_extra72_56_48_loss_threadgroup_reduce_fused_mse_repeat2.json
+```
+
+Result:
+
+```text
+Parity: pass, loss abs error 0, max grad abs error 1.86e-09, overflow 0.
+Projected fused MSE: 12.21 ms -> 10.76 ms, separate 21.78 ms, speedup 2.02x.
+Real 20-step breakdown: median step 50.84 ms, fused MSE 41.46 ms, train loop 1.301 s.
+
+200-step loss-reduce run 1: PRT wall 6.742 s vs splat 6.969 s; PSNR 15.8585 / heldout 13.1293 dB; render 8.52 / 12.15 ms.
+200-step loss-reduce run 2: PRT wall 6.794 s vs splat 6.743 s; PSNR 16.1061 / heldout 13.2066 dB; render 7.30 / 8.39 ms.
+```
+
+Read: D3r is worth keeping as a small parity-safe cleanup, but it is not a
+robust exact-step train-wall unlock by itself. The projected fused kernel gets
+faster, and the 20-step diagnostic total improves, but the full 200-step
+comparison is still a noise-band near tie: one paired run is under splat wall
+and the repeat is slightly over. The honest report is now "same steps: PRT wins
+quality and render speed; train wall is essentially tied and needs one more
+structural fused-kernel improvement for a decisive exact-step wall-clock win."
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -2255,7 +2290,7 @@ should be measured before splitting a camera window.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
-8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p shows train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3q shows exact 200-vs-200 steps is a quality/render win but a train-wall near-tie/slightly slower row.
+8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p shows train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3q/D3r show exact 200-vs-200 steps is a quality/render win but still a train-wall near tie.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, but the fused MSE path remains the 256px train-wall bottleneck.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3l says train speed still needs fused-kernel work.

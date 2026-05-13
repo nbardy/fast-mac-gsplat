@@ -2314,6 +2314,7 @@ kernel void projective_rational_tile_pixel_fused_mse_backward(
 
   threadgroup uint local_ids[STAR_TILE_CAPACITY];
   threadgroup float local_depths[STAR_TILE_CAPACITY];
+  threadgroup float loss_reduce[STAR_THREADS];
   for (uint i = local_tid; i < count; i += STAR_THREADS) {
     uint idx = tile_id * STAR_TILE_CAPACITY + i;
     local_ids[i] = tile_tube_ids[idx];
@@ -2399,7 +2400,10 @@ kernel void projective_rational_tile_pixel_fused_mse_backward(
   float3 rgb = accum + T * float3(mf.bg_r, mf.bg_g, mf.bg_b);
   float3 target_rgb = float3(target_image[image_base + 0u], target_image[image_base + 1u], target_image[image_base + 2u]);
   float3 diff = rgb - target_rgb;
-  atomic_fetch_add_explicit(loss_sum, dot(diff, diff), memory_order_relaxed);
+  float tile_loss = reduce_threadgroup_sum(loss_reduce, dot(diff, diff), local_tid);
+  if (local_tid == 0u) {
+    atomic_fetch_add_explicit(loss_sum, tile_loss, memory_order_relaxed);
+  }
   float inv_numel = 1.0f / float(uint(mi.frames) * uint(mi.height) * uint(mi.width) * 3u);
   float3 grad_rgb = 2.0f * diff * inv_numel;
 
