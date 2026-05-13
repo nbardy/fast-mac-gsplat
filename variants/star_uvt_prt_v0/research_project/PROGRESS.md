@@ -107,6 +107,7 @@ Last updated: 2026-05-13
 - [x] Gate F1d: same-scene cached atlas render compare against scan, dense direct, and existing PRT renderers.
 - [x] Gate F1e: cross-process valid-capacity PRT tiled comparison against cached atlas.
 - [x] Gate F1f: 256-tube scaling boundary rejects cached atlas cap32 without candidate scaling.
+- [x] Gate F1g: cap64 cached atlas restores 256-tube parity but loses valid PRT tiled speed.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -3101,6 +3102,42 @@ blocks, per-band/window split passes, or a larger local candidate store. Until
 one of those exists, do not wire this path into training/backward or claim
 large-scene playback.
 
+Gate F1g tests the smallest candidate-scaling change: raise the cached atlas
+per-pixel local candidate array and wrapper/host guards from `128` to `256`, then
+run the 256-tube row with cached atlas at `4x4x4:64`. This is not a new
+algorithm; it is a capacity bump to test whether correctness and speed move in
+the right direction.
+
+Command:
+
+```text
+PYTHONPATH=variants/star_uvt_prt_v0 python3 variants/star_uvt_prt_v0/research_project/benchmarks/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_probe.py --seed <17|23|31|47> --target-size 64 --frames 16 --tubes 256 --depth-bands 4 --residual-degree 3 --prt-degree 2 --atlas-tile-config 4x4x4:64 --prt-tile-config 4x4x4:256 --support-scale 1.4 --warmup 2 --iters 5 --out-json variants/star_uvt_prt_v0/research_project/benchmarks/results/depth_banded_homography_flow_atlas_valid_prt_tiled_compare_f1g_64_16f_256t_seed<seed>_atlas4x4x4cap64_prt4x4x4cap256.json
+```
+
+Result:
+
+```text
+seed 17: atlas pass true, max tile count 52, overflow 0, cached 10.894 ms, valid PRT tiled 9.718 ms, cached-vs-PRT-tiled speedup 0.892x
+seed 23: atlas pass true, max tile count 53, overflow 0, cached 11.036 ms, valid PRT tiled 9.748 ms, cached-vs-PRT-tiled speedup 0.883x
+seed 31: atlas pass true, max tile count 48, overflow 0, cached 10.934 ms, valid PRT tiled 9.164 ms, cached-vs-PRT-tiled speedup 0.838x
+seed 47: atlas pass true, max tile count 55, overflow 0, cached 10.663 ms, valid PRT tiled 9.295 ms, cached-vs-PRT-tiled speedup 0.872x
+```
+
+Validity:
+
+```text
+Cached atlas: pass true on all four seeds; cached-vs-scan max_abs 0; direct-dense PSNR 92.56/91.90/91.45/91.14 dB; atlas overflow 0.
+Valid PRT tiled: pass true on all four seeds; overflow 0; tiled-vs-dense max_abs <= 1.52e-6.
+128-tube regression smoke after the candidate bump: pass true, cached-vs-scan max_abs 0.
+```
+
+Read: the larger local candidate store fixes the 256-tube correctness boundary,
+but it is not the speed answer. Cached atlas remains faster than scan atlas,
+dense direct, and PRT direct, but it is 12%-19% slower than valid PRT tiled at
+`4x4x4:256`. This points away from a simple larger local array and toward a
+more structured candidate strategy: streamed blocks, band/window split passes,
+or a selection scheme that avoids sorting all possible candidates per pixel.
+
 The separate representation idea tested by F0 is
 depth-banded homography-flow gauge residual tubes. Compile a small bank of
 camera-induced depth-band flows from `K_seq,w2c_seq`, let each world tube store
@@ -3147,4 +3184,4 @@ should be measured before splitting a camera window.
 9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, D3w rejects per-slot threadgroup reductions at 4x4x1, D3x rejects naive replay caching, and D3y shows write-set pruning can turn exact 200-vs-200 into a train-wall win.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3y is the first current-code exact-step train-wall win for the current fixed-`lambda_uv`/fixed-`center_t` model, and D3z/D4a are boundary results showing that more steps must still fit the train-wall budget and improve quality before replacing D3y.
-12. Continue depth-banded homography-flow gauge residual tubes after F0-F1f: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion originally needed a small PRT fallback/window-split tail under screen-additive residuals. F0h is now the better representation target: inverse-homography atlas residuals pass all four hard-camera/object-motion seeds with no fallback tubes, high PSNR, and the same 4x4 culling advantage. F0i/F0j add the CPU atlas-tiled render reference; F0k dials conservative atlas support to 1.4x, which covers dense exactly across four hard-camera/object-motion seeds at 64px/16f/128t while preserving an about 7% candidate-eval ratio. F1a moves the atlas tile assignment onto Metal and matches CPU per-tile tube-id sets exactly across the four seeds at tile_capacity 32. F1b renders through those Metal bins and matches dense/CPU tiled images to sub-micro max error across the same four seeds. F1c caches and sorts each pixel's candidate list once, keeps exact parity with F1b, and improves median render timing by 1.35x-2.17x on the same four seeds. F1d shows the cached path also beats dense direct per-frame world-tube render and PRT direct Metal on the same scene, while PRT tiled at the cached-compatible cap32 is invalid from overflow. F1e reruns PRT tiled in a separate process at a valid `4x4x4:128` capacity and cached atlas remains faster by 1.14x-1.93x. F1f rejects scaling the current cached atlas cap32 path to 256 tubes: all four seeds overflow atlas tiles, while valid PRT tiled at `4x4x4:256` passes. The current implementation is still not promoted into training/backward or large-scene playback.
+12. Continue depth-banded homography-flow gauge residual tubes after F0-F1g: degree-2 residual passed the clean projection/render falsifier and mild object-motion row, hard camera needs degree 3, and hard camera plus object motion originally needed a small PRT fallback/window-split tail under screen-additive residuals. F0h is now the better representation target: inverse-homography atlas residuals pass all four hard-camera/object-motion seeds with no fallback tubes, high PSNR, and the same 4x4 culling advantage. F0i/F0j add the CPU atlas-tiled render reference; F0k dials conservative atlas support to 1.4x, which covers dense exactly across four hard-camera/object-motion seeds at 64px/16f/128t while preserving an about 7% candidate-eval ratio. F1a moves the atlas tile assignment onto Metal and matches CPU per-tile tube-id sets exactly across the four seeds at tile_capacity 32. F1b renders through those Metal bins and matches dense/CPU tiled images to sub-micro max error across the same four seeds. F1c caches and sorts each pixel's candidate list once, keeps exact parity with F1b, and improves median render timing by 1.35x-2.17x on the same four seeds. F1d shows the cached path also beats dense direct per-frame world-tube render and PRT direct Metal on the same scene, while PRT tiled at the cached-compatible cap32 is invalid from overflow. F1e reruns PRT tiled in a separate process at a valid `4x4x4:128` capacity and cached atlas remains faster by 1.14x-1.93x. F1f rejects scaling the current cached atlas cap32 path to 256 tubes: all four seeds overflow atlas tiles, while valid PRT tiled at `4x4x4:256` passes. F1g raises the cached local candidate store to 256 and restores 256-tube parity at atlas cap64, but loses to valid PRT tiled by 12%-19%. The current implementation is still not promoted into training/backward or large-scene playback.

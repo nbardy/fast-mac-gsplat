@@ -126,8 +126,8 @@ def _direct_dense_fn(args: argparse.Namespace, scene: Any, lambda_uv_mps: torch.
 
 
 def _render_atlas_child(args: argparse.Namespace, tile_config: ProjectiveRationalTileConfig) -> dict[str, Any]:
-    if tile_config.tile_capacity * args.depth_bands > 128:
-        raise ValueError("cached atlas child requires depth_bands * tile_capacity <= 128")
+    if tile_config.tile_capacity * args.depth_bands > 256:
+        raise ValueError("cached atlas child requires depth_bands * tile_capacity <= 256")
     scene = _build_scene(args)
     config = UVTRenderConfig(
         height=args.target_size,
@@ -419,8 +419,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "name": "depth_banded_homography_flow_atlas_valid_prt_tiled_compare_probe",
         "note": (
-            "F1e cross-process comparison. Cached atlas runs at the cap32 candidate-cache limit; "
-            "PRT tiled runs in a separate process at a valid higher-capacity tile config."
+            "Cross-process comparison. Cached atlas and PRT tiled run in separate processes with "
+            "independent process-static Metal tile configs."
         ),
         "config": {
             "seed": args.seed,

@@ -836,8 +836,8 @@ def render_inverse_homography_atlas_residual_tiles_cached(
     band_ids = band_ids.contiguous()
     if band_count <= 0:
         raise ValueError("band_count must be positive")
-    if band_count * config.tile_capacity > 128:
-        raise ValueError("cached atlas render requires band_count * tile_capacity <= 128")
+    if band_count * config.tile_capacity > 256:
+        raise ValueError("cached atlas render requires band_count * tile_capacity <= 256")
     if support_scale <= 0.0:
         raise ValueError("support_scale must be positive")
     _check_inverse_homography_atlas_render_inputs(

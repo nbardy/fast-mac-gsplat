@@ -666,8 +666,8 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> metal_render_inverse_hom
   auto meta = parse_meta(meta_i32, meta_f32);
   auto& sc = shader_config();
   check_inverse_homography_atlas_meta(meta, atlas_ref_uv.size(0), atlas_residual_coeff.size(1), sc);
-  TORCH_CHECK(meta.reserved1 * meta.tile_capacity <= 128,
-              "cached atlas render currently requires band_count * tile_capacity <= 128");
+  TORCH_CHECK(meta.reserved1 * meta.tile_capacity <= 256,
+              "cached atlas render currently requires band_count * tile_capacity <= 256");
   check_float_mps_homographies(homographies, "homographies", meta.frames, meta.reserved1);
   check_float_mps_homographies(inv_homographies, "inv_homographies", meta.frames, meta.reserved1);
   TORCH_CHECK(depth.device().is_mps(), "depth must be on MPS");
