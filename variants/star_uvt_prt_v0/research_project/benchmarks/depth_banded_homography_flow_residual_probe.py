@@ -183,6 +183,10 @@ def _center_metrics(approx: Tensor, reference: Tensor) -> dict[str, float]:
     }
 
 
+def _per_tube_max_error(approx: Tensor, reference: Tensor) -> Tensor:
+    return (approx - reference).norm(dim=-1).max(dim=0).values
+
+
 def _image_metrics(image: Tensor, reference: Tensor) -> dict[str, float]:
     diff = image - reference
     mse = float(diff.square().mean().detach().cpu())
@@ -250,15 +254,21 @@ def _estimate_tile_pairs(
     tile_t: int,
     alpha_threshold: float,
     clamp_to_image: bool,
+    tube_mask: Tensor | None = None,
 ) -> dict[str, int]:
     frames = int(times.numel())
     tube_count = int(centers.shape[1])
+    tube_ids = range(tube_count)
+    if tube_mask is not None:
+        if tuple(tube_mask.shape) != (tube_count,):
+            raise ValueError(f"tube_mask must have shape ({tube_count},)")
+        tube_ids = [int(v) for v in torch.nonzero(tube_mask.detach().cpu(), as_tuple=False).flatten().tolist()]
     min_eig = _min_eigenvalue(lambda_uv)
     support_tau = 2.0 * torch.log((batch.opacity / float(alpha_threshold)).clamp_min(1.0 + 1.0e-6))
     total = 0
     active = 0
     max_pairs_per_tube_tile = 0
-    for tube in range(tube_count):
+    for tube in tube_ids:
         for start in range(0, frames, tile_t):
             end = min(frames, start + tile_t)
             frame_slice = slice(start, end)
@@ -325,6 +335,9 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
     residual = direct_centers - flow_centers
     _, residual_recon = _fit_poly(residual, times, degree=args.residual_degree)
     gauge_centers = flow_centers + residual_recon
+    per_tube_max = _per_tube_max_error(gauge_centers, direct_centers)
+    fallback_mask = per_tube_max > args.fallback_max_px
+    hybrid_centers = torch.where(fallback_mask.view(1, -1, 1), prt_centers, gauge_centers)
 
     with torch.no_grad():
         reference_image = _render_from_centers(
@@ -377,6 +390,16 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
             width=args.target_size,
             alpha_threshold=args.alpha_threshold,
         )
+        hybrid_image = _render_from_centers(
+            batch,
+            hybrid_centers,
+            direct_depth,
+            lambda_uv,
+            times,
+            height=args.target_size,
+            width=args.target_size,
+            alpha_threshold=args.alpha_threshold,
+        )
 
     gauge_metrics = _center_metrics(gauge_centers, direct_centers)
     first_metrics = _center_metrics(first_centers, direct_centers)
@@ -421,13 +444,56 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
         alpha_threshold=args.alpha_threshold,
         clamp_to_image=True,
     )
+    gauge_nonfallback_tile_pairs = _estimate_tile_pairs(
+        residual_recon,
+        batch,
+        lambda_uv,
+        times,
+        width=args.target_size,
+        height=args.target_size,
+        tile_x=args.tile_x,
+        tile_y=args.tile_y,
+        tile_t=args.tile_t,
+        alpha_threshold=args.alpha_threshold,
+        clamp_to_image=False,
+        tube_mask=~fallback_mask,
+    )
+    prt_fallback_tile_pairs = _estimate_tile_pairs(
+        prt_centers,
+        batch,
+        lambda_uv,
+        times,
+        width=args.target_size,
+        height=args.target_size,
+        tile_x=args.tile_x,
+        tile_y=args.tile_y,
+        tile_t=args.tile_t,
+        alpha_threshold=args.alpha_threshold,
+        clamp_to_image=True,
+        tube_mask=fallback_mask,
+    )
+    hybrid_tile_pairs = {
+        "gauge_residual_tile_pairs": gauge_nonfallback_tile_pairs["total_tile_pairs"],
+        "prt_fallback_tile_pairs": prt_fallback_tile_pairs["total_tile_pairs"],
+        "total_tile_pairs": gauge_nonfallback_tile_pairs["total_tile_pairs"] + prt_fallback_tile_pairs["total_tile_pairs"],
+        "fallback_tube_count": int(fallback_mask.sum().item()),
+    }
     p95_ratio = gauge_metrics["p95_px"] / max(first_metrics["p95_px"], 1.0e-9)
+    hybrid_metrics = _center_metrics(hybrid_centers, direct_centers)
+    hybrid_image_metrics = _image_metrics(hybrid_image, reference_image)
     kill_criteria = {
         "center_residual_p95_clearly_below_projective_first_order": p95_ratio <= args.p95_ratio_gate,
         "center_residual_max_at_most_1px": gauge_metrics["max_px"] <= 1.0,
         "flow_sheared_tile_pairs_below_segmented_f4": residual_tile_pairs["total_tile_pairs"] < segmented_tile_pairs["total_tile_pairs"],
         "rendered_tubes_not_more_than_n": int(gauge_centers.shape[1]) <= args.tubes,
         "render_psnr_at_least_50db": _image_metrics(gauge_image, reference_image)["psnr"] >= 50.0,
+    }
+    hybrid_criteria = {
+        "center_residual_max_at_most_fallback_threshold": hybrid_metrics["max_px"] <= args.fallback_max_px,
+        "center_residual_p95_clearly_below_projective_first_order": hybrid_metrics["p95_px"] / max(first_metrics["p95_px"], 1.0e-9) <= args.p95_ratio_gate,
+        "hybrid_tile_pairs_below_segmented_f4": hybrid_tile_pairs["total_tile_pairs"] < segmented_tile_pairs["total_tile_pairs"],
+        "rendered_tubes_not_more_than_n": int(hybrid_centers.shape[1]) <= args.tubes,
+        "render_psnr_at_least_50db": hybrid_image_metrics["psnr"] >= 50.0,
     }
     return {
         "name": "depth_banded_homography_flow_residual_probe",
@@ -440,6 +506,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
             "target_size": args.target_size,
             "max_frames": args.frames,
             "tubes": args.tubes,
+            "fallback_max_px": args.fallback_max_px,
             "pan_x": args.pan_x,
             "zoom": args.zoom,
             "dolly_z": args.dolly_z,
@@ -461,6 +528,22 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
             "center_metrics_vs_direct": gauge_metrics,
             "image_metrics_vs_direct": _image_metrics(gauge_image, reference_image),
             "flow_sheared_tile_pair_estimate": residual_tile_pairs,
+            "fallback_outliers": {
+                "max_px_threshold": args.fallback_max_px,
+                "tube_count": int(fallback_mask.sum().item()),
+                "fraction": float(fallback_mask.float().mean().item()),
+                "largest_outlier_max_px": float(per_tube_max[fallback_mask].max().item()) if bool(fallback_mask.any()) else 0.0,
+            },
+        },
+        "hybrid_gauge_with_prt_fallback": {
+            "rendered_tubes": args.tubes,
+            "fallback_tubes": int(fallback_mask.sum().item()),
+            "gauge_residual_tubes": int((~fallback_mask).sum().item()),
+            "center_metrics_vs_direct": hybrid_metrics,
+            "image_metrics_vs_direct": hybrid_image_metrics,
+            "tile_pair_estimate": hybrid_tile_pairs,
+            "criteria": hybrid_criteria,
+            "pass": all(bool(value) for value in hybrid_criteria.values()),
         },
         "projective_first_order": {
             "rendered_tubes": args.tubes,
@@ -509,6 +592,7 @@ def main() -> None:
     parser.add_argument("--tile-t", type=int, default=4)
     parser.add_argument("--alpha-threshold", type=float, default=1.0 / 255.0)
     parser.add_argument("--p95-ratio-gate", type=float, default=0.75)
+    parser.add_argument("--fallback-max-px", type=float, default=1.0)
     parser.add_argument("--out-json", type=Path)
     args = parser.parse_args()
 
