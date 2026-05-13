@@ -63,6 +63,7 @@ Last updated: 2026-05-13
 - [x] Gate D2x: isolate alpha/order replay as the PRT backward cost center.
 - [x] Gate D2y: trace-cache memory viability planner.
 - [x] Gate D2z: fused MSE train-step backward parity smoke.
+- [x] Gate D3a: fused MSE timing on selected 1024 train-speed row.
 - [ ] Gate C3c: decide whether bitwise deterministic gradients are required for PRT training.
 - [ ] Gate D: variable-camera timing against `static_view`, `per_frame_loop`, segmented, and direct splats.
 - [ ] Gate E: heldout/novel-camera sanity with world-state-only learned parameters.
@@ -1592,6 +1593,38 @@ a planner conclusion. The next gate should time this fused MSE path on the
 selected 1024 train-speed row against the current `render -> loss -> backward`
 step and only then decide how to expose it in the trainer harness.
 
+Gate D3a adds `projective_rational_fused_mse_timing_probe.py` and times the
+selected 1024 train-speed row against the separate manual path:
+`tiled render -> MSE grad image -> tile-pixel backward`. This deliberately
+excludes optimizer updates so the row isolates the fused kernel decision.
+
+Validation:
+
+```text
+python3 -m py_compile research_project/benchmarks/projective_rational_fused_mse_timing_probe.py
+python3 setup.py build_ext --inplace
+python3 research_project/benchmarks/projective_rational_fused_mse_timing_probe.py --tube-counts 1024 --frames 4 --width 64 --height 64 --prt-tile-policy train_speed --warmups 1 --repeats 5 --out-json research_project/benchmarks/results/projective_rational_fused_mse_timing_probe_64_4f_1024t_train_speed_support32.json
+```
+
+Result:
+
+```text
+pass true, policy train_speed_support32_1024, support 32/255, tile 4x4x1:512
+max tile 266, overflow 0, fused overflow 0
+loss abs error: 4.66e-10
+max grad abs error: 2.33e-10
+max grad rel error: 1.97e-04
+separate median: 25.466 ms
+fused median: 6.990 ms
+fused speedup: 3.64x
+```
+
+Read: D3a is the first strong speed result after the backward investigation.
+The fused MSE path removes the replay duplicate exactly where D2x/D2y predicted
+and cuts the selected 1024 training kernel slice by about 72.5%. The next step
+is to put this behind an explicit research-harness mode and measure full train
+wall, PSNR, and render timing against the existing non-fused path.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -1614,6 +1647,6 @@ should be measured before splitting a camera window.
 4. Decide whether stable depth shortcuts are worth adding or whether sample-level ordering is the right first training path.
 5. Split train-speed and render-speed tile policy if the 512-tube `tile_t=1` train win should become default for training only.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
-7. Time the fused MSE PRT path on the selected 1024 train-speed row against the current `render -> loss -> backward` step.
+7. Wire the fused MSE PRT path into an explicit research-harness train mode and measure full train wall, PSNR, and render timing against the non-fused path.
 8. Keep accumulation-only and derivative-math rewrites behind fused-train-step work unless a new profile changes the cost split.
 9. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
