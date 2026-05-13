@@ -2384,6 +2384,42 @@ of a paired 200-step direct-splat run while still winning train PSNR, heldout
 PSNR, and render speed. For heldout-only selection in this row, eval56 is best;
 for train-overfit selection, eval72 is best; eval64 remains the balanced row.
 
+Gate D3w tested tile-slot gradient reductions in the fused-MSE backward path for
+the `STAR_TILE_T == 1` training configuration. The first variant reduced all
+per-slot gradients across the tile and emitted one atomic set per slot. The
+second reduced only color gradients and left the shape/opacity/camera gradients
+on the existing per-pixel atomics. Both passed parity, but both were slower than
+the accepted D3r kernel, so the source changes were reverted and only rejection
+artifacts are kept.
+
+Validation:
+
+```text
+python3 setup.py build_ext --inplace
+STAR_UVT_TILE_X=4 STAR_UVT_TILE_Y=4 STAR_UVT_TILE_T=1 STAR_UVT_TILE_CAPACITY=512 python3 research_project/benchmarks/projective_rational_tile_pixel_fused_mse_backward_check.py --out-json research_project/benchmarks/results/projective_rational_tile_pixel_fused_mse_backward_check_tile_slot_reduce_tile4x4x1.json
+python3 research_project/benchmarks/projective_rational_fused_mse_timing_probe.py --tube-counts 2048 --frames 8 --width 256 --height 256 --tile-config 4x4x1:512 --support-alpha-threshold 0.25098039215686274 --warmups 1 --repeats 5 --out-json research_project/benchmarks/results/projective_rational_fused_mse_timing_probe_2048_256_8f_support64_tile4x4x1_tile_slot_reduce.json
+STAR_UVT_TILE_X=4 STAR_UVT_TILE_Y=4 STAR_UVT_TILE_T=1 STAR_UVT_TILE_CAPACITY=512 python3 research_project/benchmarks/projective_rational_tile_pixel_fused_mse_backward_check.py --out-json research_project/benchmarks/results/projective_rational_tile_pixel_fused_mse_backward_check_tile_slot_color_reduce_tile4x4x1.json
+python3 research_project/benchmarks/projective_rational_fused_mse_timing_probe.py --tube-counts 2048 --frames 8 --width 256 --height 256 --tile-config 4x4x1:512 --support-alpha-threshold 0.25098039215686274 --warmups 1 --repeats 5 --out-json research_project/benchmarks/results/projective_rational_fused_mse_timing_probe_2048_256_8f_support64_tile4x4x1_tile_slot_color_reduce.json
+```
+
+Result:
+
+```text
+Full tile-slot reduction parity: pass, loss abs error 2.98e-08, max grad abs error 1.86e-09.
+Full tile-slot reduction projected fused MSE: 18.58 ms.
+
+Color-only tile-slot reduction parity: pass, loss abs error 2.98e-08, max grad abs error 9.31e-10.
+Color-only tile-slot reduction projected fused MSE: 14.04 ms.
+
+Previous accepted D3r projected fused MSE: 10.76 ms.
+```
+
+Read: reject threadgroup slot reductions for the current 4x4x1 training tile.
+The barrier cost dominates the saved global atomics at this tile size. The next
+train-speed attempt should avoid per-slot threadgroup reductions and instead
+look for fewer replay passes, cheaper ordering/support, or a separate compact
+sample-gradient path with an actually cheap reducer.
+
 Read: this is the first actual video-overfit result for the PRT fork. It is a
 good local sanity check for the rasterizer and optimizer path, but it is not yet
 the requested full comparison against direct splats or world-camera heldout.
@@ -2408,6 +2444,6 @@ should be measured before splitting a camera window.
 6. Decide the policy surface for 1024 support-only pruning: default fidelity mode, explicit train-speed mode, support schedule, or capacity fallback; `tile_t=1` with support `32/255` is the current measured train-speed choice.
 7. Do not globally promote 2048 by tube count alone: support `48/255` is the balanced 128px x 8f row, while 256px prefers `64/255` for speed; the selector needs target-size or density context before 2048 can become `--prt-tile-policy train_speed`.
 8. Treat static split train/eval support as a diagnostic, but keep support scheduling alive: D3o shows train72/eval64 is a faster under-wall candidate while train74+ is too tight for overfit PSNR; D3p and current-code D3v show train72/eval64 can spend that wall saving on 190 PRT steps and still finish under one 200-step splat wall; D3t shows 195 steps is still under wall but not a quality improvement; D3q/D3r show exact 200-vs-200 steps is a quality/render win but still a train-wall near tie.
-9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, and D3s/D3u reject isolated scalar-loop micro-specializations, but the fused MSE path remains the 256px train-wall bottleneck.
+9. Move gradient accumulation structure, derivative-math simplification, and trace/replay reuse to the front of the train-speed queue; D3m/D3n remove redundant fused-kernel sorting and replay bookkeeping, D3r removes loss atomics, D3s/D3u reject isolated scalar-loop micro-specializations, and D3w rejects per-slot threadgroup reductions at 4x4x1, but the fused MSE path remains the 256px train-wall bottleneck.
 10. Promote the cached or fused camera-compiler path from benchmark flag to the intended playback and bake contract.
 11. Keep playback/bake speed and training speed as separate claims: D3k supports the sublinear render story, D3l says train speed still needs fused-kernel work.
