@@ -38,6 +38,16 @@ from camera import CameraSpec  # noqa: E402
 from config_utils import load_config_file, serialize_config_value  # noqa: E402
 from common import prefix_metrics, robust_l1, save_preview_strip, save_side_by_side_mp4, video_metrics, write_json  # noqa: E402
 from multicam_video_data import load_multicam_video_bundle  # noqa: E402
+from paper_training_protocol import (  # noqa: E402
+    PaperCostTracker,
+    SpacetimeEpochSampler,
+    normalize_image_size,
+    normalize_paper_stages,
+    paper_stage_for_step,
+    resize_video_frames,
+    scale_intrinsics,
+)
+from paper_training_types import MetalKernelSpec  # noqa: E402
 from renderers.projection import project_points_camera  # noqa: E402
 from train_splat_baseline import (  # noqa: E402
     FreeDynamic3DGS,
@@ -837,6 +847,7 @@ class WorldTubeModel(nn.Module):
         self.position_reg_weight = float(position_reg_weight)
         self.static_tube_count = int(static_tube_count)
         self.static_velocity_reg_weight = float(static_velocity_reg_weight)
+        self.active_tube_count = tube_count
         if self.static_tube_count < 0 or self.static_tube_count > tube_count:
             raise ValueError("static_tube_count must be between 0 and tube_count")
         if self.static_velocity_reg_weight < 0.0:
@@ -859,27 +870,37 @@ class WorldTubeModel(nn.Module):
         self.raw_color = nn.Parameter(_logit(init_color))
         self.t0 = nn.Parameter(init_t0)
 
+    def set_active_tube_count(self, count: int) -> None:
+        if not 1 <= int(count) <= self.tube_count:
+            raise ValueError(f"active tube count must be in [1, {self.tube_count}], got {count}")
+        self.active_tube_count = int(count)
+
     def batch(self) -> WorldTubeBatch:
+        active = slice(0, self.active_tube_count)
         return WorldTubeBatch(
-            x0=self.x0,
-            velocity=self.velocity,
-            t0=self.t0,
-            precision_xy=F.softplus(self.raw_precision_xy) + self.min_precision_xy,
-            lambda_t=F.softplus(self.raw_lambda_t) + self.min_lambda_t,
-            opacity=torch.sigmoid(self.raw_opacity) * 0.99,
-            color=torch.sigmoid(self.raw_color),
+            x0=self.x0[active],
+            velocity=self.velocity[active],
+            t0=self.t0[active],
+            precision_xy=F.softplus(self.raw_precision_xy[active]) + self.min_precision_xy,
+            lambda_t=F.softplus(self.raw_lambda_t[active]) + self.min_lambda_t,
+            opacity=torch.sigmoid(self.raw_opacity[active]) * 0.99,
+            color=torch.sigmoid(self.raw_color[active]),
         )
 
     def regularization(self) -> Tensor:
         reg = self.x0.new_tensor(0.0)
         if self.velocity_reg_weight:
-            reg = reg + self.velocity_reg_weight * self.velocity.square().mean()
+            reg = reg + self.velocity_reg_weight * self.velocity[: self.active_tube_count].square().mean()
         if self.depth_velocity_reg_weight:
-            reg = reg + self.depth_velocity_reg_weight * self.velocity[:, 2].square().mean()
+            reg = reg + self.depth_velocity_reg_weight * self.velocity[: self.active_tube_count, 2].square().mean()
         if self.position_reg_weight:
-            reg = reg + self.position_reg_weight * self.x0.square().mean()
+            reg = reg + self.position_reg_weight * self.x0[: self.active_tube_count].square().mean()
         if self.static_velocity_reg_weight and self.static_tube_count:
-            reg = reg + self.static_velocity_reg_weight * self.velocity[-self.static_tube_count :].square().mean()
+            static_start = self.tube_count - self.static_tube_count
+            if self.active_tube_count > static_start:
+                reg = reg + self.static_velocity_reg_weight * self.velocity[
+                    static_start : self.active_tube_count
+                ].square().mean()
         return reg
 
 
@@ -1314,9 +1335,10 @@ def train_world_tubes(
     static_tube_fraction: float = 0.0,
     static_init_lambda_t: float = 0.02,
     static_velocity_reg_weight: float = 0.0,
+    paper_protocol: dict[str, Any] | None = None,
 ) -> tuple[WorldTubeModel, dict[str, Any], list[dict[str, Any]]]:
-    if loss_scope not in {"sampled_frame", "view_sequence", "temporal_window"}:
-        raise ValueError("loss_scope must be one of: sampled_frame, view_sequence, temporal_window")
+    if loss_scope not in {"sampled_frame", "view_sequence", "temporal_window", "paper_batch"}:
+        raise ValueError("loss_scope must be one of: sampled_frame, view_sequence, temporal_window, paper_batch")
     if backend != "metal_tile" and (reduction_mode != "index_add" or sample_emission_mode != "atomic_append"):
         raise ValueError("custom reduction/sample emission modes require backend=metal_tile")
     if reduction_mode in (
@@ -1397,6 +1419,20 @@ def train_world_tubes(
     train_frames = bundle.train_frames
     device = train_frames.device
     view_count, frames, _, height, width = train_frames.shape
+    source_image_size = normalize_image_size((height, width))
+    paper_values = paper_protocol or {}
+    paper_enabled = bool(paper_values.get("enabled", False))
+    if paper_enabled != (loss_scope == "paper_batch"):
+        raise ValueError("paper_protocol.enabled and loss_scope='paper_batch' must be selected together")
+    paper_stages = normalize_paper_stages(
+        paper_values.get("stages") if paper_enabled else None,
+        total_steps=max_steps,
+        default_image_size=source_image_size,
+        default_primitive_count=tube_count,
+        default_frames_per_step=int(paper_values.get("frames_per_step", 1)),
+    )
+    if paper_stages[-1].image_size != source_image_size:
+        raise ValueError("the final paper stage image size must match the loaded multicam image size")
     if sequence_consistency_frames > frames:
         raise ValueError(f"sequence_consistency_frames={sequence_consistency_frames} exceeds frame count {frames}")
     active_train_views = optimizer_train_view_indices(view_count, optimizer_train_views)
@@ -1478,6 +1514,44 @@ def train_world_tubes(
         max_alpha=full_config.max_alpha,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    paper_sampler = (
+        SpacetimeEpochSampler(
+            view_count=len(active_train_views),
+            frame_indices=active_train_frames,
+            batch_size=max(stage.frames_per_step for stage in paper_stages),
+            same_time_count=int(paper_values.get("same_time_count", 1)),
+            local_time_count=int(paper_values.get("local_time_count", 0)),
+            local_time_radius=int(paper_values.get("local_time_radius", 0)),
+            seed=seed + int(paper_values.get("sampler_seed_offset", 7001)),
+        )
+        if paper_enabled
+        else None
+    )
+    paper_costs = PaperCostTracker()
+    paper_stage_cache: dict[str, tuple[Tensor, Tensor, UVTRenderConfig]] = {}
+
+    def paper_stage_payload(stage) -> tuple[Tensor, Tensor, UVTRenderConfig]:
+        cached = paper_stage_cache.get(stage.label)
+        if cached is not None:
+            return cached
+        stage_frames = resize_video_frames(train_frames, stage.image_size)
+        stage_K = scale_intrinsics(bundle.train_K, source=source_image_size, target=stage.image_size)
+        stage_config = UVTRenderConfig(
+            height=stage.image_size.height,
+            width=stage.image_size.width,
+            frames=frames,
+            tile_x=full_config.tile_x,
+            tile_y=full_config.tile_y,
+            tile_t=full_config.tile_t,
+            tile_capacity=full_config.tile_capacity,
+            alpha_threshold=full_config.alpha_threshold,
+            transmittance_threshold=full_config.transmittance_threshold,
+            background=full_config.background,
+            max_alpha=full_config.max_alpha,
+        )
+        cached = (stage_frames, stage_K, stage_config)
+        paper_stage_cache[stage.label] = cached
+        return cached
     started_at = time.perf_counter()
     logs = []
     checkpoints: list[dict[str, Any]] = []
@@ -1493,12 +1567,14 @@ def train_world_tubes(
         frame_start_value: int,
         lens_model_value: str,
         distortion_value: Tensor | None,
+        K_value: Tensor | None = None,
     ) -> ProjectedTubeSequence:
         full_frame_count = int(frames)
+        selected_K = bundle.train_K if K_value is None else K_value
         if camera_sequence_mode == "static_view" and not synthetic_camera_active:
             return project_world_tube_sequence(
                 model,
-                select_view_K(bundle.train_K, view),
+                select_view_K(selected_K, view),
                 select_view_w2c(bundle.train_w2c, view),
                 render_cfg,
                 camera_projection=camera_projection,
@@ -1508,7 +1584,7 @@ def train_world_tubes(
                 frame_start=frame_start_value,
             )
         K_seq, w2c_seq = camera_sequences_for_view(
-            bundle.train_K,
+            selected_K,
             bundle.train_w2c,
             view=view,
             frames=full_frame_count,
@@ -1579,12 +1655,17 @@ def train_world_tubes(
         elapsed = time.perf_counter() - started_at
         if step > 0 and elapsed >= train_seconds:
             break
-        current_lr = lr * lr_decay_factor if lr_decay_step > 0 and step >= lr_decay_step else lr
+        paper_stage = paper_stage_for_step(paper_stages, step)
+        model.set_active_tube_count(paper_stage.primitive_count)
+        current_lr = (lr * lr_decay_factor if lr_decay_step > 0 and step >= lr_decay_step else lr) * paper_stage.lr_multiplier
         for param_group in optimizer.param_groups:
             param_group["lr"] = current_lr
         frame_override: int | None = None
         window_start_override: int | None = None
-        if train_schedule in {
+        paper_batch = paper_sampler.next_batch(paper_stage.frames_per_step) if paper_sampler is not None else None
+        if paper_batch is not None:
+            view = paper_batch.samples[0].view_index
+        elif train_schedule in {
             "shuffled_cycle",
             "reshuffled_cycle",
             "phase_rotated_cycle",
@@ -1650,8 +1731,68 @@ def train_world_tubes(
             view,
             camera_projection=camera_projection,
         )
+        step_train_frames = train_frames
+        step_K = bundle.train_K
+        step_full_config = full_config
+        if paper_batch is not None:
+            step_train_frames, step_K, step_full_config = paper_stage_payload(paper_stage)
         optimizer.zero_grad(set_to_none=True)
-        if loss_scope == "sampled_frame":
+        if loss_scope == "paper_batch":
+            if paper_batch is None:
+                raise RuntimeError("paper_batch loss requires an active paper sampler")
+            predictions = []
+            targets = []
+            projected_sequences = []
+            samples_by_view: dict[int, list[int]] = {}
+            for sample in paper_batch.samples:
+                samples_by_view.setdefault(sample.view_index, []).append(sample.frame_index)
+            for batch_view, batch_frames in samples_by_view.items():
+                batch_lens, batch_distortion = select_lens(
+                    bundle.train_lens_models,
+                    bundle.train_distortions,
+                    batch_view,
+                    camera_projection=camera_projection,
+                )
+                projected = project_for_view(
+                    view=batch_view,
+                    render_cfg=step_full_config,
+                    frame_start_value=0,
+                    lens_model_value=batch_lens,
+                    distortion_value=batch_distortion,
+                    K_value=step_K,
+                )
+                projected_sequences.append(projected)
+                rendered = render_projected_sequence(
+                    projected,
+                    step_full_config,
+                    backend=backend,
+                    reduction_mode=reduction_mode,
+                    sample_emission_mode=sample_emission_mode,
+                )
+                indices = torch.tensor(batch_frames, dtype=torch.long, device=device)
+                predictions.append(rendered.rgb.index_select(0, indices))
+                targets.append(
+                    step_train_frames[batch_view]
+                    .permute(0, 2, 3, 1)
+                    .contiguous()
+                    .index_select(0, indices)
+                )
+            rendered_active = torch.cat(predictions, dim=0)
+            target_active = torch.cat(targets, dim=0)
+            recon_loss = robust_l1(rendered_active - target_active)
+            multiscale_loss = (
+                downsampled_robust_l1(rendered_active, target_active, multiscale_loss_factor)
+                if multiscale_loss_weight > 0.0
+                else train_frames.new_tensor(0.0)
+            )
+            crop_loss = (
+                crop_robust_l1(rendered_active, target_active, crop_loss_size, step)
+                if crop_loss_weight > 0.0
+                else train_frames.new_tensor(0.0)
+            )
+            step_target_frames = len(paper_batch.samples)
+            step_rasterized_frames = len(samples_by_view) * frames
+        elif loss_scope == "sampled_frame":
             frame = (
                 frame_override
                 if frame_override is not None
@@ -1683,6 +1824,9 @@ def train_world_tubes(
                 if crop_loss_weight > 0.0
                 else train_frames.new_tensor(0.0)
             )
+            projected_sequences = [projected]
+            step_target_frames = 1
+            step_rasterized_frames = frames
         elif loss_scope == "view_sequence":
             projected = project_for_view(
                 view=view,
@@ -1715,6 +1859,9 @@ def train_world_tubes(
                 if crop_loss_weight > 0.0
                 else train_frames.new_tensor(0.0)
             )
+            projected_sequences = [projected]
+            step_target_frames = len(active_train_frames)
+            step_rasterized_frames = frames
         else:
             frame_start = (
                 window_start_override
@@ -1753,6 +1900,9 @@ def train_world_tubes(
                 if crop_loss_weight > 0.0
                 else train_frames.new_tensor(0.0)
             )
+            projected_sequences = [projected]
+            step_target_frames = window_frames
+            step_rasterized_frames = window_frames
         sequence_consistency_loss = train_frames.new_tensor(0.0)
         consistency_due = (
             sequence_consistency_weight > 0.0
@@ -1762,17 +1912,17 @@ def train_world_tubes(
         if consistency_due:
             if consistency_window_frames > 0 and consistency_window_frames < frames:
                 consistency_config = UVTRenderConfig(
-                    height=height,
-                    width=width,
+                    height=step_full_config.height,
+                    width=step_full_config.width,
                     frames=consistency_window_frames,
-                    tile_x=full_config.tile_x,
-                    tile_y=full_config.tile_y,
-                    tile_t=full_config.tile_t,
-                    tile_capacity=full_config.tile_capacity,
-                    alpha_threshold=full_config.alpha_threshold,
-                    transmittance_threshold=full_config.transmittance_threshold,
-                    background=full_config.background,
-                    max_alpha=full_config.max_alpha,
+                    tile_x=step_full_config.tile_x,
+                    tile_y=step_full_config.tile_y,
+                    tile_t=step_full_config.tile_t,
+                    tile_capacity=step_full_config.tile_capacity,
+                    alpha_threshold=step_full_config.alpha_threshold,
+                    transmittance_threshold=step_full_config.transmittance_threshold,
+                    background=step_full_config.background,
+                    max_alpha=step_full_config.max_alpha,
                 )
                 if train_schedule in {"random", "cycle"}:
                     consistency_start = select_train_window_start(
@@ -1803,7 +1953,7 @@ def train_world_tubes(
                 else:
                     raise ValueError(f"Unsupported train_schedule for consistency: {train_schedule}")
             else:
-                consistency_config = full_config
+                consistency_config = step_full_config
                 consistency_start = 0
             sequence_projected = project_for_view(
                 view=view,
@@ -1811,6 +1961,7 @@ def train_world_tubes(
                 frame_start_value=consistency_start,
                 lens_model_value=lens_model,
                 distortion_value=distortion,
+                K_value=step_K,
             )
             sequence_rendered = render_projected_sequence(
                 sequence_projected,
@@ -1820,27 +1971,39 @@ def train_world_tubes(
                 sample_emission_mode=sample_emission_mode,
             )
             if consistency_config.frames == frames:
-                sequence_target = train_frames[view].permute(0, 2, 3, 1).contiguous()
+                sequence_target = step_train_frames[view].permute(0, 2, 3, 1).contiguous()
                 sequence_consistency_loss = robust_l1(
                     sequence_rendered.rgb.index_select(0, active_train_frame_tensor)
                     - sequence_target.index_select(0, active_train_frame_tensor)
                 )
             else:
-                sequence_target = train_frames[
+                sequence_target = step_train_frames[
                     view, consistency_start : consistency_start + consistency_window_frames
                 ].permute(0, 2, 3, 1).contiguous()
                 sequence_consistency_loss = robust_l1(sequence_rendered.rgb - sequence_target)
-        train_render_config = window_config if loss_scope == "temporal_window" else full_config
-        model_reg = model.regularization()
-        projected_reg, projected_reg_metrics = projected_regularization(
-            projected,
-            train_render_config,
-            tile_load_weight=tile_load_reg_weight,
-            tile_load_target=tile_load_target,
-            depth_slope_weight=depth_slope_reg_weight,
-            depth_margin_weight=depth_margin_reg_weight,
-            depth_margin=depth_margin,
+        train_render_config = (
+            window_config
+            if loss_scope == "temporal_window"
+            else (step_full_config if loss_scope == "paper_batch" else full_config)
         )
+        model_reg = model.regularization()
+        projected_reg_rows = [
+            projected_regularization(
+                projected_item,
+                train_render_config,
+                tile_load_weight=tile_load_reg_weight,
+                tile_load_target=tile_load_target,
+                depth_slope_weight=depth_slope_reg_weight,
+                depth_margin_weight=depth_margin_reg_weight,
+                depth_margin=depth_margin,
+            )
+            for projected_item in projected_sequences
+        ]
+        projected_reg = torch.stack([row[0] for row in projected_reg_rows]).mean()
+        projected_reg_metrics = {
+            key: torch.stack([row[1][key] for row in projected_reg_rows]).mean()
+            for key in projected_reg_rows[0][1]
+        }
         consistency_term = float(sequence_consistency_weight) * sequence_consistency_loss
         multiscale_term = float(multiscale_loss_weight) * multiscale_loss
         crop_term = float(crop_loss_weight) * crop_loss
@@ -1874,6 +2037,11 @@ def train_world_tubes(
         loss.backward()
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
+        paper_costs.record(
+            stage=paper_stage,
+            target_frames=step_target_frames,
+            rasterized_frames=step_rasterized_frames,
+        )
         elapsed_after_step = time.perf_counter() - started_at
         if checkpoint_every_steps <= 0:
             last_finite_state = snapshot_world_tube_state(model)
@@ -1896,6 +2064,17 @@ def train_world_tubes(
                 projected_reg_metrics=projected_reg_metrics,
                 grad_norm=grad_norm,
             )
+            logs[-1].update(
+                {
+                    "paper_stage": paper_stage.label,
+                    "paper_height": paper_stage.image_size.height,
+                    "paper_width": paper_stage.image_size.width,
+                    "paper_active_tubes": model.active_tube_count,
+                    "paper_epoch": None if paper_batch is None else paper_batch.epoch,
+                    "paper_batch_index": None if paper_batch is None else paper_batch.batch_index,
+                    "paper_epoch_complete": None if paper_batch is None else paper_batch.completes_epoch,
+                }
+            )
         if checkpoint_every_steps > 0 and completed_step % checkpoint_every_steps == 0:
             checkpoint_state = snapshot_world_tube_state(model)
             checkpoints.append(
@@ -1909,6 +2088,7 @@ def train_world_tubes(
             last_finite_step = completed_step
         step += 1
     train_elapsed = time.perf_counter() - started_at
+    model.set_active_tube_count(tube_count)
     if checkpoint_every_steps > 0 and (not checkpoints or checkpoints[-1]["step"] != step):
         checkpoints.append({"step": step, "elapsed_s": train_elapsed, "state": snapshot_world_tube_state(model)})
     return (
@@ -1933,6 +2113,25 @@ def train_world_tubes(
             "crop_loss_size": crop_loss_size,
             "stopped_reason": stopped_reason,
             "stopped_step": stopped_step,
+            "paper_protocol": {
+                "enabled": paper_enabled,
+                "kernel": MetalKernelSpec(
+                    representation="world_tubes",
+                    family="star_uvt",
+                    forward=backend,
+                    backward=sample_emission_mode,
+                    deterministic=sample_emission_mode != "direct_atomic",
+                    implementation="third_party/fast-mac-gsplat/variants/star_uvt_v0",
+                ).as_dict(),
+                "sampling": {
+                    "mode": "spacetime_epoch" if paper_enabled else train_schedule,
+                    "same_time_count": int(paper_values.get("same_time_count", 1)),
+                    "local_time_count": int(paper_values.get("local_time_count", 0)),
+                    "local_time_radius": int(paper_values.get("local_time_radius", 0)),
+                },
+                "stages": [stage.as_dict() for stage in paper_stages],
+                "cost": paper_costs.snapshot(model=model, optimizer=optimizer, elapsed_s=train_elapsed).as_dict(),
+            },
             "logs": logs,
         },
         checkpoints,
@@ -1951,10 +2150,23 @@ def train_free_splats(
     seed: int,
     renderer: str,
     camera_projection: str,
+    paper_protocol: dict[str, Any] | None = None,
 ) -> tuple[FreeDynamic3DGS, SplatRenderConfig, dict[str, Any]]:
     torch.manual_seed(seed)
     train_video = bundle.train_frames
     view_count, frames, _, height, width = train_video.shape
+    source_image_size = normalize_image_size((height, width))
+    paper_values = paper_protocol or {}
+    paper_enabled = bool(paper_values.get("enabled", False))
+    paper_stages = normalize_paper_stages(
+        paper_values.get("stages") if paper_enabled else None,
+        total_steps=max_steps,
+        default_image_size=source_image_size,
+        default_primitive_count=splat_count,
+        default_frames_per_step=int(paper_values.get("frames_per_step", 1)),
+    )
+    if paper_stages[-1].image_size != source_image_size:
+        raise ValueError("the final paper stage image size must match the loaded multicam image size")
     init_xyz, init_rgb = initialize_material_points_from_first_frame(
         video=train_video[0].permute(0, 2, 3, 1).contiguous(),
         K=bundle.train_K[0],
@@ -1985,6 +2197,42 @@ def train_free_splats(
         camera_projection="camera_model" if camera_projection == "dataset_lens" else "legacy_pinhole",
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    paper_sampler = (
+        SpacetimeEpochSampler(
+            view_count=view_count,
+            frame_indices=range(frames),
+            batch_size=max(stage.frames_per_step for stage in paper_stages),
+            same_time_count=int(paper_values.get("same_time_count", 1)),
+            local_time_count=int(paper_values.get("local_time_count", 0)),
+            local_time_radius=int(paper_values.get("local_time_radius", 0)),
+            seed=seed + int(paper_values.get("sampler_seed_offset", 7001)),
+        )
+        if paper_enabled
+        else None
+    )
+    paper_costs = PaperCostTracker()
+    paper_stage_cache: dict[str, tuple[Tensor, Tensor, SplatRenderConfig]] = {}
+
+    def splat_stage_payload(stage) -> tuple[Tensor, Tensor, SplatRenderConfig]:
+        cached = paper_stage_cache.get(stage.label)
+        if cached is not None:
+            return cached
+        stage_frames = resize_video_frames(train_video, stage.image_size)
+        stage_K = scale_intrinsics(bundle.train_K, source=source_image_size, target=stage.image_size)
+        stage_render_cfg = SplatRenderConfig(
+            height=stage.image_size.height,
+            width=stage.image_size.width,
+            renderer=renderer,
+            tile_size=16 if renderer == "fast_mac" else 8,
+            bound_scale=3.0,
+            alpha_threshold=1.0 / 255.0,
+            near_plane=1.0e-3,
+            camera_projection="camera_model" if camera_projection == "dataset_lens" else "legacy_pinhole",
+        )
+        cached = (stage_frames, stage_K, stage_render_cfg)
+        paper_stage_cache[stage.label] = cached
+        return cached
+
     started_at = time.perf_counter()
     logs = []
     step = 0
@@ -1992,37 +2240,104 @@ def train_free_splats(
         elapsed = time.perf_counter() - started_at
         if step > 0 and elapsed >= train_seconds:
             break
-        view = int(torch.randint(0, view_count, (1,), device=train_video.device).item())
-        frame = int(torch.randint(0, frames, (1,), device=train_video.device).item())
+        paper_stage = paper_stage_for_step(paper_stages, step)
+        model.set_active_splat_count(paper_stage.primitive_count)
+        for param_group in optimizer.param_groups:
+            param_group["lr"] = lr * paper_stage.lr_multiplier
+        paper_batch = paper_sampler.next_batch(paper_stage.frames_per_step) if paper_sampler is not None else None
+        if paper_batch is None:
+            sample_pairs = [
+                (
+                    int(torch.randint(0, view_count, (1,), device=train_video.device).item()),
+                    int(torch.randint(0, frames, (1,), device=train_video.device).item()),
+                )
+            ]
+            stage_video, stage_K, stage_render_cfg = train_video, bundle.train_K, render_cfg
+        else:
+            sample_pairs = [(sample.view_index, sample.frame_index) for sample in paper_batch.samples]
+            stage_video, stage_K, stage_render_cfg = splat_stage_payload(paper_stage)
         optimizer.zero_grad(set_to_none=True)
-        camera = splat_camera_for_view_time(
-            bundle,
-            split="train",
-            view=view,
-            frame=frame,
-            camera_projection=camera_projection,
-        )
-        image = render_gaussian_frame(
-            model.frame(frame),
-            camera,
-            height=height,
-            width=width,
-            mode=render_cfg.renderer,
-            tile_size=render_cfg.tile_size,
-            bound_scale=render_cfg.bound_scale,
-            alpha_threshold=render_cfg.alpha_threshold,
-            near_plane=render_cfg.near_plane,
-            camera_projection=render_cfg.camera_projection,
-        ).permute(1, 2, 0)
-        loss = robust_l1(image - train_video[view, frame].permute(1, 2, 0))
+        images = []
+        target_rows = []
+        for view, frame in sample_pairs:
+            lens_model, distortion = select_lens(
+                bundle.train_lens_models,
+                bundle.train_distortions,
+                view,
+                camera_projection=camera_projection,
+            )
+            camera = camera_from_K_w2c_lens(
+                select_K_for_view_time(stage_K, view=view, t=frame, view_count=view_count),
+                select_w2c_for_view_time(bundle.train_w2c, view=view, t=frame),
+                lens_model=lens_model,
+                distortion=distortion,
+            )
+            images.append(
+                render_gaussian_frame(
+                    model.frame(frame),
+                    camera,
+                    height=stage_render_cfg.height,
+                    width=stage_render_cfg.width,
+                    mode=stage_render_cfg.renderer,
+                    tile_size=stage_render_cfg.tile_size,
+                    bound_scale=stage_render_cfg.bound_scale,
+                    alpha_threshold=stage_render_cfg.alpha_threshold,
+                    near_plane=stage_render_cfg.near_plane,
+                    camera_projection=stage_render_cfg.camera_projection,
+                ).permute(1, 2, 0)
+            )
+            target_rows.append(stage_video[view, frame].permute(1, 2, 0))
+        loss = robust_l1(torch.stack(images) - torch.stack(target_rows))
         loss = loss + 1.0e-4 * model.scale_loss() + 1.0e-3 * model.temporal_smoothness_loss()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
+        paper_costs.record(
+            stage=paper_stage,
+            target_frames=len(sample_pairs),
+            rasterized_frames=len(sample_pairs),
+        )
         if step == 0 or (step + 1) % 10 == 0:
-            logs.append({"step": step + 1, "loss": float(loss.detach().cpu()), "elapsed_s": time.perf_counter() - started_at})
+            logs.append(
+                {
+                    "step": step + 1,
+                    "loss": float(loss.detach().cpu()),
+                    "elapsed_s": time.perf_counter() - started_at,
+                    "paper_stage": paper_stage.label,
+                    "paper_height": paper_stage.image_size.height,
+                    "paper_width": paper_stage.image_size.width,
+                    "paper_active_splats": model.active_splat_count,
+                    "paper_epoch": None if paper_batch is None else paper_batch.epoch,
+                    "paper_batch_index": None if paper_batch is None else paper_batch.batch_index,
+                }
+            )
         step += 1
-    return model, render_cfg, {"steps": step, "train_loop_elapsed_s": time.perf_counter() - started_at, "logs": logs}
+    train_elapsed = time.perf_counter() - started_at
+    model.set_active_splat_count(splat_count)
+    return model, render_cfg, {
+        "steps": step,
+        "train_loop_elapsed_s": train_elapsed,
+        "paper_protocol": {
+            "enabled": paper_enabled,
+            "kernel": MetalKernelSpec(
+                representation="dynamic_3dgs",
+                family="fast_mac",
+                forward=renderer,
+                backward="fast_mac_autograd",
+                deterministic=False,
+                implementation="third_party/fast-mac-gsplat",
+            ).as_dict(),
+            "sampling": {
+                "mode": "spacetime_epoch" if paper_enabled else "iid_with_replacement",
+                "same_time_count": int(paper_values.get("same_time_count", 1)),
+                "local_time_count": int(paper_values.get("local_time_count", 0)),
+                "local_time_radius": int(paper_values.get("local_time_radius", 0)),
+            },
+            "stages": [stage.as_dict() for stage in paper_stages],
+            "cost": paper_costs.snapshot(model=model, optimizer=optimizer, elapsed_s=train_elapsed).as_dict(),
+        },
+        "logs": logs,
+    }
 
 
 @torch.no_grad()
@@ -2780,7 +3095,11 @@ def main() -> None:
     parser.add_argument("--uvt-synthetic-zoom", type=float, default=0.0)
     parser.add_argument("--uvt-synthetic-principal-x", type=float, default=0.0)
     parser.add_argument("--uvt-synthetic-principal-y", type=float, default=0.0)
-    parser.add_argument("--uvt-loss-scope", choices=("sampled_frame", "view_sequence", "temporal_window"), default="sampled_frame")
+    parser.add_argument(
+        "--uvt-loss-scope",
+        choices=("sampled_frame", "view_sequence", "temporal_window", "paper_batch"),
+        default="sampled_frame",
+    )
     parser.add_argument("--uvt-window-frames", type=int, default=4)
     parser.add_argument("--uvt-sequence-consistency-every-steps", type=int, default=0)
     parser.add_argument("--uvt-sequence-consistency-frames", type=int, default=0)
@@ -2820,6 +3139,7 @@ def main() -> None:
     parser.add_argument("--splat-lr", type=float, default=0.002)
     parser.add_argument("--splat-renderer", choices=("dense", "fast_mac"), default="dense")
     parser.add_argument("--splat-camera-projection", choices=("legacy_pinhole", "dataset_lens"), default="legacy_pinhole")
+    parser.add_argument("--paper-protocol", type=Path, default=None)
     parser.add_argument("--skip-splats", action="store_true")
     parser.add_argument("--init-depth", type=float, default=2.0)
     parser.add_argument("--uvt-init-views", choices=("first", "all_train"), default="first")
@@ -2833,9 +3153,29 @@ def main() -> None:
 
     device = resolve_device(args.device)
     config = load_config_file(resolve_dynaworld_path(args.baseline_config))
+    paper_protocol = None if args.paper_protocol is None else load_config_file(resolve_dynaworld_path(args.paper_protocol))
+    if paper_protocol is not None and not bool(paper_protocol.get("enabled", False)):
+        raise ValueError("--paper-protocol requires enabled=true")
+    if paper_protocol is not None and args.uvt_loss_scope != "paper_batch":
+        raise ValueError("--paper-protocol requires --uvt-loss-scope=paper_batch")
+    load_image_size = normalize_image_size(args.target_size)
+    if paper_protocol is not None:
+        protocol_stages = normalize_paper_stages(
+            paper_protocol.get("stages"),
+            total_steps=args.max_steps,
+            default_image_size=load_image_size,
+            default_primitive_count=args.uvt_tubes,
+            default_frames_per_step=int(paper_protocol.get("frames_per_step", 1)),
+        )
+        load_image_size = protocol_stages[-1].image_size
     data_cfg = config_data_for_run(config, target_size=args.target_size, max_frames=args.max_frames)
     camera_cfg = dict(config["camera"])
-    bundle = load_multicam_video_bundle(data_cfg=data_cfg, camera_cfg=camera_cfg, target_size=args.target_size, device=device)
+    bundle = load_multicam_video_bundle(
+        data_cfg=data_cfg,
+        camera_cfg=camera_cfg,
+        target_size=(load_image_size.height, load_image_size.width),
+        device=device,
+    )
     backward_policy = None
     if args.uvt_backward_policy != "manual":
         backward_policy = resolve_backward_policy(args.uvt_backward_policy)
@@ -2905,7 +3245,7 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     run_meta = {
         "baseline_config": str(resolve_dynaworld_path(args.baseline_config)),
-        "target_size": args.target_size,
+        "target_size": load_image_size.as_list(),
         "max_frames": args.max_frames,
         "train_seconds": args.train_seconds,
         "device": str(device),
@@ -3021,6 +3361,7 @@ def main() -> None:
         render_config=render_config,
         reduction_mode=args.uvt_reduction_mode,
         sample_emission_mode=args.uvt_sample_emission_mode,
+        paper_protocol=paper_protocol,
     )
     uvt_eval = eval_world_tubes(
         uvt_model,
@@ -3137,6 +3478,7 @@ def main() -> None:
             seed=args.seed,
             renderer=args.splat_renderer,
             camera_projection=args.splat_camera_projection,
+            paper_protocol=paper_protocol,
         )
         splat_eval = eval_free_splats(
             splat_model,
