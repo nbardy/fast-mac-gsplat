@@ -122,6 +122,32 @@ def _check_inputs(
         raise ValueError("Metal STAR-UVT render requires MPS tensors")
 
 
+def _check_active_intervals(
+    active_start: Tensor,
+    active_stop: Tensor,
+    *,
+    tube_count: int,
+    frames: int,
+    device: torch.device,
+    require_mps: bool,
+) -> None:
+    if active_start.shape != (tube_count,) or active_stop.shape != (tube_count,):
+        raise ValueError("active_start and active_stop must have shape [N]")
+    for name, tensor in {"active_start": active_start, "active_stop": active_stop}.items():
+        if tensor.dtype != torch.int32:
+            raise ValueError(f"{name} must be int32")
+        if tensor.device != device:
+            raise ValueError(f"{name} must be on the same device as ma")
+        if not tensor.is_contiguous():
+            raise ValueError(f"{name} must be contiguous")
+    if require_mps and active_start.device.type != "mps":
+        raise ValueError("Metal STAR-UVT interval gates require MPS tensors")
+    if bool(torch.any(active_start < 0).item()) or bool(torch.any(active_stop > frames).item()):
+        raise ValueError("active intervals must stay inside [0, frames]")
+    if bool(torch.any(active_start >= active_stop).item()):
+        raise ValueError("active intervals must be non-empty [start, stop)")
+
+
 def _make_meta(config: UVTRenderConfig, device: torch.device, tube_count: int) -> tuple[Tensor, Tensor]:
     _runtime_validate(config)
     tiles_x = (config.width + config.tile_x - 1) // config.tile_x
@@ -191,9 +217,23 @@ def brute_force_render_uvt_tubes(
     opacity: Tensor,
     color: Tensor,
     config: UVTRenderConfig,
+    *,
+    active_start: Tensor | None = None,
+    active_stop: Tensor | None = None,
 ) -> Tensor:
     _runtime_validate(config)
     _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=False)
+    if (active_start is None) != (active_stop is None):
+        raise ValueError("active_start and active_stop must be provided together")
+    if active_start is not None and active_stop is not None:
+        _check_active_intervals(
+            active_start,
+            active_stop,
+            tube_count=int(ma.shape[0]),
+            frames=config.frames,
+            device=ma.device,
+            require_mps=False,
+        )
     device = ma.device
     bg = torch.tensor(config.background, dtype=torch.float32, device=device)
     out = torch.empty((config.frames, config.height, config.width, 3), dtype=torch.float32, device=device)
@@ -205,6 +245,9 @@ def brute_force_render_uvt_tubes(
                 d = a.unsqueeze(0) - ma
                 qv = _quadratic(q_uvt, d)
                 alpha = torch.clamp(opacity * torch.exp(-0.5 * qv), max=config.max_alpha)
+                if active_start is not None and active_stop is not None:
+                    active_window = (active_start <= f) & (f < active_stop)
+                    alpha = torch.where(active_window, alpha, torch.zeros_like(alpha))
                 active = torch.nonzero(alpha >= config.alpha_threshold, as_tuple=False).flatten()
                 if active.numel() == 0:
                     out[f, y, x] = bg
@@ -380,6 +423,55 @@ def render_uvt_tubes(
     return UVTRenderResult(image=image, tile_counts=tile_counts, tile_overflow=tile_overflow, tile_unstable=tile_unstable, stats=stats)
 
 
+def render_uvt_tubes_gated(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    active_start: Tensor,
+    active_stop: Tensor,
+    config: UVTRenderConfig,
+) -> Tensor:
+    _runtime_validate(config)
+    ma = ma.contiguous()
+    q_uvt = q_uvt.contiguous()
+    depth0 = depth0.contiguous()
+    depth_beta = depth_beta.contiguous()
+    opacity = opacity.contiguous()
+    color = color.contiguous()
+    active_start = active_start.contiguous()
+    active_stop = active_stop.contiguous()
+    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=True)
+    _check_active_intervals(
+        active_start,
+        active_stop,
+        tube_count=int(ma.shape[0]),
+        frames=config.frames,
+        device=ma.device,
+        require_mps=True,
+    )
+    if not hasattr(torch.ops, "star_uvt_v0"):
+        raise RuntimeError("star_uvt_v0 custom ops not found. Build the extension first.")
+    if not hasattr(torch.ops.star_uvt_v0, "render_gated"):
+        raise RuntimeError("star_uvt_v0.render_gated custom op not found. Rebuild the extension.")
+    meta_i32, meta_f32 = _make_meta(config, ma.device, ma.shape[0])
+    image, _tile_counts, _tile_overflow, _tile_unstable = torch.ops.star_uvt_v0.render_gated(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        active_start,
+        active_stop,
+        meta_i32,
+        meta_f32,
+    )
+    return image
+
+
 def simple_backward_samples(
     ma: Tensor,
     q_uvt: Tensor,
@@ -442,6 +534,676 @@ def stable_backward_samples(
         grad_opacity[:count],
         grad_color[:count],
         tile_unstable,
+    )
+
+
+def stable_backward_samples_with_keys(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    _runtime_validate(config)
+    ma = ma.contiguous()
+    q_uvt = q_uvt.contiguous()
+    depth0 = depth0.contiguous()
+    depth_beta = depth_beta.contiguous()
+    opacity = opacity.contiguous()
+    color = color.contiguous()
+    grad_image = grad_image.contiguous()
+    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=True)
+    if grad_image.shape != (config.frames, config.height, config.width, 3):
+        raise ValueError("grad_image must have shape [frames,height,width,3]")
+    if grad_image.dtype != torch.float32 or grad_image.device != ma.device:
+        raise ValueError("grad_image must be float32 and on the same device as ma")
+    meta_i32, meta_f32 = _make_meta(config, ma.device, ma.shape[0])
+    ids, grad_ma, grad_q, grad_opacity, grad_color, keys, tile_unstable, grad_count = (
+        torch.ops.star_uvt_v0.stable_backward_samples_with_keys(
+            ma, q_uvt, depth0, depth_beta, opacity, color, grad_image, meta_i32, meta_f32
+        )
+    )
+    if ma.device.type == "mps":
+        torch.mps.synchronize()
+    count = int(grad_count.detach().cpu().item())
+    return (
+        ids[:count],
+        grad_ma[:count],
+        grad_q[:count],
+        grad_opacity[:count],
+        grad_color[:count],
+        keys[:count],
+        tile_unstable,
+    )
+
+
+def _tile_pair_backward_samples_op(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+    op_name: str,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    _runtime_validate(config)
+    ma = ma.contiguous()
+    q_uvt = q_uvt.contiguous()
+    depth0 = depth0.contiguous()
+    depth_beta = depth_beta.contiguous()
+    opacity = opacity.contiguous()
+    color = color.contiguous()
+    grad_image = grad_image.contiguous()
+    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=True)
+    if grad_image.shape != (config.frames, config.height, config.width, 3):
+        raise ValueError("grad_image must have shape [frames,height,width,3]")
+    if grad_image.dtype != torch.float32 or grad_image.device != ma.device:
+        raise ValueError("grad_image must be float32 and on the same device as ma")
+    meta_i32, meta_f32 = _make_meta(config, ma.device, ma.shape[0])
+    ids, grad_ma, grad_q, grad_opacity, grad_color, keys, tile_unstable = getattr(torch.ops.star_uvt_v0, op_name)(
+        ma, q_uvt, depth0, depth_beta, opacity, color, grad_image, meta_i32, meta_f32
+    )
+    if ma.device.type == "mps":
+        torch.mps.synchronize()
+    valid = torch.nonzero((ids >= 0) & (ids < ma.shape[0]), as_tuple=False).flatten()
+    return (
+        ids.index_select(0, valid),
+        grad_ma.index_select(0, valid),
+        grad_q.index_select(0, valid),
+        grad_opacity.index_select(0, valid),
+        grad_color.index_select(0, valid),
+        keys.index_select(0, valid),
+        tile_unstable,
+    )
+
+
+def tile_pair_backward_samples(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _tile_pair_backward_samples_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "tile_pair_backward_samples",
+    )
+
+
+def tile_pair_backward_samples_compensated(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _tile_pair_backward_samples_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "tile_pair_backward_samples_compensated",
+    )
+
+
+def tile_pair_target_bounds_backward_samples(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _tile_pair_backward_samples_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "tile_pair_target_bounds_backward_samples",
+    )
+
+
+def tile_pair_suffix_backward_samples(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _tile_pair_backward_samples_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "tile_pair_suffix_backward_samples",
+    )
+
+
+def tile_pair_parallel_backward_samples(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _tile_pair_backward_samples_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "tile_pair_parallel_backward_samples",
+    )
+
+
+def tile_pair_grouped_backward_samples(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _tile_pair_backward_samples_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "tile_pair_grouped_backward_samples",
+    )
+
+
+def tile_pair_sharedsort_backward_samples(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _tile_pair_backward_samples_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "tile_pair_sharedsort_backward_samples",
+    )
+
+
+def tile_pair_scanline_backward_samples(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _tile_pair_backward_samples_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "tile_pair_scanline_backward_samples",
+    )
+
+
+def _direct_backward_op(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+    op_name: str,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    _runtime_validate(config)
+    ma = ma.contiguous()
+    q_uvt = q_uvt.contiguous()
+    depth0 = depth0.contiguous()
+    depth_beta = depth_beta.contiguous()
+    opacity = opacity.contiguous()
+    color = color.contiguous()
+    grad_image = grad_image.contiguous()
+    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=True)
+    if grad_image.shape != (config.frames, config.height, config.width, 3):
+        raise ValueError("grad_image must have shape [frames,height,width,3]")
+    if grad_image.dtype != torch.float32 or grad_image.device != ma.device:
+        raise ValueError("grad_image must be float32 and on the same device as ma")
+    meta_i32, meta_f32 = _make_meta(config, ma.device, ma.shape[0])
+    grad_ma, grad_q, grad_opacity, grad_color, tile_unstable = getattr(torch.ops.star_uvt_v0, op_name)(
+        ma, q_uvt, depth0, depth_beta, opacity, color, grad_image, meta_i32, meta_f32
+    )
+    if ma.device.type == "mps":
+        torch.mps.synchronize()
+    return grad_ma, grad_q, grad_opacity, grad_color, tile_unstable
+
+
+def direct_atomic_backward(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _direct_backward_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "direct_atomic_backward",
+    )
+
+
+def direct_atomic_backward_gated(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    active_start: Tensor,
+    active_stop: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    _runtime_validate(config)
+    ma = ma.contiguous()
+    q_uvt = q_uvt.contiguous()
+    depth0 = depth0.contiguous()
+    depth_beta = depth_beta.contiguous()
+    opacity = opacity.contiguous()
+    color = color.contiguous()
+    grad_image = grad_image.contiguous()
+    active_start = active_start.contiguous()
+    active_stop = active_stop.contiguous()
+    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=True)
+    _check_active_intervals(
+        active_start,
+        active_stop,
+        tube_count=int(ma.shape[0]),
+        frames=config.frames,
+        device=ma.device,
+        require_mps=True,
+    )
+    if grad_image.shape != (config.frames, config.height, config.width, 3):
+        raise ValueError("grad_image must have shape [frames,height,width,3]")
+    if grad_image.dtype != torch.float32 or grad_image.device != ma.device:
+        raise ValueError("grad_image must be float32 and on the same device as ma")
+    if not hasattr(torch.ops, "star_uvt_v0"):
+        raise RuntimeError("star_uvt_v0 custom ops not found. Build the extension first.")
+    if not hasattr(torch.ops.star_uvt_v0, "direct_atomic_backward_gated"):
+        raise RuntimeError("star_uvt_v0.direct_atomic_backward_gated custom op not found. Rebuild the extension.")
+    meta_i32, meta_f32 = _make_meta(config, ma.device, ma.shape[0])
+    grad_ma, grad_q, grad_opacity, grad_color, tile_unstable = torch.ops.star_uvt_v0.direct_atomic_backward_gated(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        active_start,
+        active_stop,
+        meta_i32,
+        meta_f32,
+    )
+    if ma.device.type == "mps":
+        torch.mps.synchronize()
+    return grad_ma, grad_q, grad_opacity, grad_color, tile_unstable
+
+
+def direct_fixedpoint_backward(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _direct_backward_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "direct_fixedpoint_backward",
+    )
+
+
+def tile_pair_atomic_backward(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _direct_backward_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "tile_pair_atomic_backward",
+    )
+
+
+def tile_pair_fixedpoint_backward(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _direct_backward_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "tile_pair_fixedpoint_backward",
+    )
+
+
+def direct_split_fixedpoint_backward(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _direct_backward_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "direct_split_fixedpoint_backward",
+    )
+
+
+def direct_serial_backward(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _direct_backward_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "direct_serial_backward",
+    )
+
+
+def tile_pair_reduced_backward(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _direct_backward_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "tile_pair_reduced_backward",
+    )
+
+
+def tile_pair_reduced_parallel_backward(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _direct_backward_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "tile_pair_reduced_parallel_backward",
+    )
+
+
+def tile_pair_suffix_reduced_backward(
+    ma: Tensor,
+    q_uvt: Tensor,
+    depth0: Tensor,
+    depth_beta: Tensor,
+    opacity: Tensor,
+    color: Tensor,
+    grad_image: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    return _direct_backward_op(
+        ma,
+        q_uvt,
+        depth0,
+        depth_beta,
+        opacity,
+        color,
+        grad_image,
+        config,
+        "tile_pair_suffix_reduced_backward",
+    )
+
+
+def _reduce_sample_bundle_scan_op(
+    ids: Tensor,
+    grad_ma_samples: Tensor,
+    grad_q_samples: Tensor,
+    grad_opacity_samples: Tensor,
+    grad_color_samples: Tensor,
+    tube_count: int,
+    op_name: str,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    ids = ids.contiguous()
+    grad_ma_samples = grad_ma_samples.contiguous()
+    grad_q_samples = grad_q_samples.contiguous()
+    grad_opacity_samples = grad_opacity_samples.contiguous()
+    grad_color_samples = grad_color_samples.contiguous()
+    if ids.device.type != "mps":
+        raise ValueError("reduce_sample_bundle_scan requires ids on MPS")
+    if ids.dtype != torch.int32:
+        raise ValueError("reduce_sample_bundle_scan requires int32 ids")
+    if grad_ma_samples.device != ids.device or grad_q_samples.device != ids.device:
+        raise ValueError("sample gradients must be on the same device as ids")
+    if grad_opacity_samples.device != ids.device or grad_color_samples.device != ids.device:
+        raise ValueError("sample gradients must be on the same device as ids")
+    if grad_ma_samples.dtype != torch.float32 or grad_q_samples.dtype != torch.float32:
+        raise ValueError("sample gradients must be float32")
+    if grad_opacity_samples.dtype != torch.float32 or grad_color_samples.dtype != torch.float32:
+        raise ValueError("sample gradients must be float32")
+    if grad_ma_samples.shape != (ids.shape[0], 3):
+        raise ValueError("grad_ma_samples must have shape [samples,3]")
+    if grad_q_samples.shape != (ids.shape[0], 6):
+        raise ValueError("grad_q_samples must have shape [samples,6]")
+    if grad_opacity_samples.shape != (ids.shape[0],):
+        raise ValueError("grad_opacity_samples must have shape [samples]")
+    if grad_color_samples.shape != (ids.shape[0], 3):
+        raise ValueError("grad_color_samples must have shape [samples,3]")
+    if tube_count <= 0:
+        raise ValueError("tube_count must be positive")
+    return getattr(torch.ops.star_uvt_v0, op_name)(
+        ids,
+        grad_ma_samples,
+        grad_q_samples,
+        grad_opacity_samples,
+        grad_color_samples,
+        int(tube_count),
+    )
+
+
+def reduce_sample_bundle_scan(
+    ids: Tensor,
+    grad_ma_samples: Tensor,
+    grad_q_samples: Tensor,
+    grad_opacity_samples: Tensor,
+    grad_color_samples: Tensor,
+    tube_count: int,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    return _reduce_sample_bundle_scan_op(
+        ids,
+        grad_ma_samples,
+        grad_q_samples,
+        grad_opacity_samples,
+        grad_color_samples,
+        tube_count,
+        "reduce_sample_bundle_scan",
+    )
+
+
+def reduce_sample_bundle_scan_compensated(
+    ids: Tensor,
+    grad_ma_samples: Tensor,
+    grad_q_samples: Tensor,
+    grad_opacity_samples: Tensor,
+    grad_color_samples: Tensor,
+    tube_count: int,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    return _reduce_sample_bundle_scan_op(
+        ids,
+        grad_ma_samples,
+        grad_q_samples,
+        grad_opacity_samples,
+        grad_color_samples,
+        tube_count,
+        "reduce_sample_bundle_scan_compensated",
+    )
+
+
+def reduce_sample_bundle_sorted_segments(
+    ids: Tensor,
+    grad_ma_samples: Tensor,
+    grad_q_samples: Tensor,
+    grad_opacity_samples: Tensor,
+    grad_color_samples: Tensor,
+    tube_count: int,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    return _reduce_sample_bundle_scan_op(
+        ids,
+        grad_ma_samples,
+        grad_q_samples,
+        grad_opacity_samples,
+        grad_color_samples,
+        tube_count,
+        "reduce_sample_bundle_sorted_segments",
     )
 
 

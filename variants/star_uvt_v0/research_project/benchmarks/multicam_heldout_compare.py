@@ -52,20 +52,37 @@ from train_splat_baseline import (  # noqa: E402
 
 try:
     from research_project.trainer_harness.model import dense_differentiable_render_uvt_tubes
-    from research_project.trainer_harness.tile_metal_autograd import render_uvt_tubes_metal_tile_backward
+    from research_project.trainer_harness.tile_metal_autograd import (
+        BACKWARD_POLICY_NAMES,
+        render_uvt_tubes_metal_tile_backward,
+        resolve_backward_policy,
+    )
     from research_project.trainer_harness.world_tube import (
+        PinholeCameraMotion,
         PinholeCamera,
         WorldTubeBatch,
         project_world_tubes_from_pixel_jacobian,
         project_world_tubes_pinhole,
+        project_world_tubes_pinhole_motion,
+        project_world_tubes_pinhole_projective_motion,
     )
+    from research_project.trainer_harness.variable_camera_segments import project_piecewise_camera_time_segments
 except ImportError:  # pragma: no cover - direct script execution fallback.
     HARNESS = ROOT / "research_project" / "trainer_harness"
     if str(HARNESS) not in sys.path:
         sys.path.insert(0, str(HARNESS))
     from model import dense_differentiable_render_uvt_tubes
-    from tile_metal_autograd import render_uvt_tubes_metal_tile_backward
-    from world_tube import PinholeCamera, WorldTubeBatch, project_world_tubes_from_pixel_jacobian, project_world_tubes_pinhole
+    from tile_metal_autograd import BACKWARD_POLICY_NAMES, render_uvt_tubes_metal_tile_backward, resolve_backward_policy
+    from variable_camera_segments import project_piecewise_camera_time_segments
+    from world_tube import (
+        PinholeCamera,
+        PinholeCameraMotion,
+        WorldTubeBatch,
+        project_world_tubes_from_pixel_jacobian,
+        project_world_tubes_pinhole,
+        project_world_tubes_pinhole_motion,
+        project_world_tubes_pinhole_projective_motion,
+    )
 
 
 DEFAULT_BASELINE_CONFIG = (
@@ -81,6 +98,7 @@ TRAIN_SCHEDULE_CHOICES = (
     "reshuffled_cycle",
     "phase_rotated_cycle",
     "view_shuffled_cycle",
+    "epoch_view_shuffled_cycle",
 )
 
 
@@ -338,6 +356,215 @@ def select_view_w2c(w2c: Tensor, view: int) -> Tensor:
     return w2c[view, 0]
 
 
+def select_view_K_sequence(K: Tensor, *, view: int, frames: int, view_count: int) -> Tensor:
+    if K.ndim == 3:
+        return torch.stack([select_K_for_view_time(K, view=view, t=frame, view_count=view_count) for frame in range(frames)])
+    if K.ndim == 4:
+        return K[view, :frames].contiguous()
+    raise ValueError(f"Expected K with shape [V,3,3] or [V,T,3,3], got {tuple(K.shape)}")
+
+
+def select_view_w2c_sequence(w2c: Tensor, *, view: int, frames: int) -> Tensor:
+    if w2c.ndim != 4:
+        raise ValueError(f"Expected w2c with shape [V,T,4,4], got {tuple(w2c.shape)}")
+    return w2c[view, :frames].contiguous()
+
+
+def apply_synthetic_camera_motion(
+    K_seq: Tensor,
+    w2c_seq: Tensor,
+    *,
+    pan_x: float,
+    pan_y: float,
+    dolly_z: float,
+    zoom: float,
+    principal_x: float,
+    principal_y: float,
+) -> tuple[Tensor, Tensor]:
+    if not any((pan_x, pan_y, dolly_z, zoom, principal_x, principal_y)):
+        return K_seq, w2c_seq
+    frames = int(K_seq.shape[0])
+    phase = (
+        torch.zeros((1,), dtype=K_seq.dtype, device=K_seq.device)
+        if frames == 1
+        else torch.linspace(-0.5, 0.5, frames, dtype=K_seq.dtype, device=K_seq.device)
+    )
+    moved_K = K_seq.clone()
+    moved_w2c = w2c_seq.clone()
+    moved_w2c[:, 0, 3] = moved_w2c[:, 0, 3] + float(pan_x) * phase
+    moved_w2c[:, 1, 3] = moved_w2c[:, 1, 3] + float(pan_y) * phase
+    moved_w2c[:, 2, 3] = moved_w2c[:, 2, 3] + float(dolly_z) * phase
+    moved_K[:, 0, 0] = moved_K[:, 0, 0] * (1.0 + float(zoom) * phase)
+    moved_K[:, 1, 1] = moved_K[:, 1, 1] * (1.0 + float(zoom) * phase)
+    moved_K[:, 0, 2] = moved_K[:, 0, 2] + float(principal_x) * phase
+    moved_K[:, 1, 2] = moved_K[:, 1, 2] + float(principal_y) * phase
+    return moved_K, moved_w2c
+
+
+def camera_sequences_for_view(
+    K: Tensor,
+    w2c: Tensor,
+    *,
+    view: int,
+    frames: int,
+    view_count: int,
+    synthetic_pan_x: float,
+    synthetic_pan_y: float,
+    synthetic_dolly_z: float,
+    synthetic_zoom: float,
+    synthetic_principal_x: float,
+    synthetic_principal_y: float,
+) -> tuple[Tensor, Tensor]:
+    K_seq = select_view_K_sequence(K, view=view, frames=frames, view_count=view_count)
+    w2c_seq = select_view_w2c_sequence(w2c, view=view, frames=frames)
+    return apply_synthetic_camera_motion(
+        K_seq,
+        w2c_seq,
+        pan_x=synthetic_pan_x,
+        pan_y=synthetic_pan_y,
+        dolly_z=synthetic_dolly_z,
+        zoom=synthetic_zoom,
+        principal_x=synthetic_principal_x,
+        principal_y=synthetic_principal_y,
+    )
+
+
+def local_frame_time(frame: float, frames: int) -> float:
+    return float(frame) - 0.5 * float(frames - 1)
+
+
+def global_to_local_time(global_t: float, *, full_frames: int, config: UVTRenderConfig, frame_start: int) -> float:
+    global_minus_local_t = float(frame_start) - 0.5 * float(full_frames - 1) + 0.5 * float(config.frames - 1)
+    return float(global_t) - global_minus_local_t
+
+
+def project_world_tube_sequence_dynamic_first_order(
+    *,
+    model: WorldTubeModel,
+    K_seq: Tensor,
+    w2c_seq: Tensor,
+    config: UVTRenderConfig,
+    full_frames: int,
+    frame_start: int,
+    projective_gauge: bool = False,
+) -> ProjectedTubeSequence:
+    window_mid_frame = float(frame_start) + 0.5 * float(config.frames - 1)
+    mid_index = int(round(window_mid_frame))
+    mid_index = max(0, min(int(full_frames) - 1, mid_index))
+    prev_index = max(0, mid_index - 1)
+    next_index = min(int(full_frames) - 1, mid_index + 1)
+    if next_index == prev_index:
+        K_dot = torch.zeros_like(K_seq[mid_index])
+        w2c_dot = torch.zeros_like(w2c_seq[mid_index])
+    else:
+        dt = float(next_index - prev_index)
+        K_dot = (K_seq[next_index] - K_seq[prev_index]) / dt
+        w2c_dot = (w2c_seq[next_index] - w2c_seq[prev_index]) / dt
+    K_mid = K_seq[mid_index]
+    chart_global_t = local_frame_time(window_mid_frame, int(full_frames))
+    camera = PinholeCameraMotion(
+        fx=float(K_mid[0, 0].detach().cpu()),
+        fy=float(K_mid[1, 1].detach().cpu()),
+        cx=float(K_mid[0, 2].detach().cpu()),
+        cy=float(K_mid[1, 2].detach().cpu()),
+        fx_dot=float(K_dot[0, 0].detach().cpu()),
+        fy_dot=float(K_dot[1, 1].detach().cpu()),
+        cx_dot=float(K_dot[0, 2].detach().cpu()),
+        cy_dot=float(K_dot[1, 2].detach().cpu()),
+        world_to_camera=w2c_seq[mid_index].to(dtype=torch.float32),
+        world_to_camera_dot=w2c_dot.to(dtype=torch.float32),
+        chart_time=chart_global_t,
+    )
+    projector = project_world_tubes_pinhole_projective_motion if projective_gauge else project_world_tubes_pinhole_motion
+    ma, q_uvt, depth0, depth_beta, opacity, color = projector(model.batch(), camera, config)
+    local_t = global_to_local_time(chart_global_t, full_frames=int(full_frames), config=config, frame_start=frame_start)
+    ma = torch.cat((ma[:, :2], torch.full_like(ma[:, 2:3], local_t)), dim=-1).contiguous()
+    return ProjectedTubeSequence(ma=ma, q_uvt=q_uvt, depth0=depth0, depth_beta=depth_beta, opacity=opacity, color=color)
+
+
+def project_world_tube_sequence_segmented_camera(
+    *,
+    model: WorldTubeModel,
+    K_seq: Tensor,
+    w2c_seq: Tensor,
+    config: UVTRenderConfig,
+    full_frames: int,
+    frame_start: int,
+    frames_per_segment: int,
+) -> ProjectedTubeSequence:
+    segments = project_piecewise_camera_time_segments(
+        model.batch(),
+        K_seq,
+        w2c_seq,
+        config,
+        full_frames=full_frames,
+        frame_start=frame_start,
+        frames_per_segment=frames_per_segment,
+    )
+    return ProjectedTubeSequence(
+        ma=segments.ma,
+        q_uvt=segments.q_uvt,
+        depth0=segments.depth0,
+        depth_beta=segments.depth_beta,
+        opacity=segments.opacity,
+        color=segments.color,
+    )
+
+
+def project_world_tube_sequence_camera_mode(
+    *,
+    model: WorldTubeModel,
+    K_seq: Tensor,
+    w2c_seq: Tensor,
+    config: UVTRenderConfig,
+    full_frames: int,
+    frame_start: int,
+    camera_sequence_mode: str,
+    segment_frames: int,
+) -> ProjectedTubeSequence:
+    if camera_sequence_mode == "static_view":
+        return project_world_tube_sequence(
+            model,
+            K_seq[frame_start],
+            w2c_seq[frame_start],
+            config,
+            full_frames=full_frames,
+            frame_start=frame_start,
+        )
+    if camera_sequence_mode == "dynamic_first_order":
+        return project_world_tube_sequence_dynamic_first_order(
+            model=model,
+            K_seq=K_seq,
+            w2c_seq=w2c_seq,
+            config=config,
+            full_frames=full_frames,
+            frame_start=frame_start,
+        )
+    if camera_sequence_mode == "projective_first_order":
+        return project_world_tube_sequence_dynamic_first_order(
+            model=model,
+            K_seq=K_seq,
+            w2c_seq=w2c_seq,
+            config=config,
+            full_frames=full_frames,
+            frame_start=frame_start,
+            projective_gauge=True,
+        )
+    if camera_sequence_mode == "segmented":
+        return project_world_tube_sequence_segmented_camera(
+            model=model,
+            K_seq=K_seq,
+            w2c_seq=w2c_seq,
+            config=config,
+            full_frames=full_frames,
+            frame_start=frame_start,
+            frames_per_segment=segment_frames,
+        )
+    raise ValueError(
+        "camera_sequence_mode must be one of: static_view, dynamic_first_order, projective_first_order, segmented"
+    )
+
+
 def _inv_softplus(value: Tensor) -> Tensor:
     clamped = value.clamp_min(1.0e-8)
     return clamped + torch.log(-torch.expm1(-clamped))
@@ -474,6 +701,112 @@ def initialize_world_tubes_from_train_views(
     return torch.cat(points, dim=0).contiguous(), torch.cat(colors, dim=0).contiguous(), torch.cat(t0_values, dim=0).contiguous()
 
 
+def initialize_world_tubes_with_static_fraction(
+    bundle,
+    *,
+    tube_count: int,
+    init_depth: float,
+    seed: int,
+    init_views: str,
+    init_sampling: str,
+    init_frames: str,
+    init_frame_indices: list[int] | None,
+    init_lambda_t: float,
+    static_tube_fraction: float,
+    static_init_lambda_t: float,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, dict[str, Any]]:
+    if tube_count < 1:
+        raise ValueError("tube_count must be positive")
+    if not math.isfinite(static_tube_fraction) or static_tube_fraction < 0.0 or static_tube_fraction >= 1.0:
+        raise ValueError("static_tube_fraction must be finite and in [0, 1)")
+    if static_tube_fraction == 0.0 or tube_count == 1:
+        init_x0, init_color, init_t0 = initialize_world_tubes_from_train_views(
+            bundle,
+            tube_count=tube_count,
+            init_depth=init_depth,
+            seed=seed,
+            init_views=init_views,
+            init_sampling=init_sampling,
+            init_frames=init_frames,
+            init_frame_indices=init_frame_indices,
+        )
+        init_lambda_t_values = torch.full(
+            (tube_count,),
+            float(init_lambda_t),
+            dtype=torch.float32,
+            device=init_x0.device,
+        )
+        return (
+            init_x0,
+            init_color,
+            init_t0,
+            init_lambda_t_values,
+            {
+                "static_tube_fraction": 0.0,
+                "static_tube_count": 0,
+                "dynamic_tube_count": tube_count,
+                "static_init_lambda_t": float(static_init_lambda_t),
+                "dynamic_init_lambda_t": float(init_lambda_t),
+            },
+        )
+
+    static_tube_count = min(tube_count - 1, max(1, int(round(static_tube_fraction * tube_count))))
+    dynamic_tube_count = tube_count - static_tube_count
+    dynamic_x0, dynamic_color, dynamic_t0 = initialize_world_tubes_from_train_views(
+        bundle,
+        tube_count=dynamic_tube_count,
+        init_depth=init_depth,
+        seed=seed,
+        init_views=init_views,
+        init_sampling=init_sampling,
+        init_frames=init_frames,
+        init_frame_indices=init_frame_indices,
+    )
+    static_x0, static_color, static_t0 = initialize_world_tubes_from_train_views(
+        bundle,
+        tube_count=static_tube_count,
+        init_depth=init_depth,
+        seed=seed + 7919,
+        init_views=init_views,
+        init_sampling=init_sampling,
+        init_frames="first",
+        init_frame_indices=None,
+    )
+    init_x0 = torch.cat((dynamic_x0, static_x0), dim=0).contiguous()
+    init_color = torch.cat((dynamic_color, static_color), dim=0).contiguous()
+    init_t0 = torch.cat((dynamic_t0, static_t0), dim=0).contiguous()
+    init_lambda_t_values = torch.cat(
+        (
+            torch.full(
+                (dynamic_tube_count,),
+                float(init_lambda_t),
+                dtype=torch.float32,
+                device=init_x0.device,
+            ),
+            torch.full(
+                (static_tube_count,),
+                float(static_init_lambda_t),
+                dtype=torch.float32,
+                device=init_x0.device,
+            ),
+        ),
+        dim=0,
+    ).contiguous()
+    return (
+        init_x0,
+        init_color,
+        init_t0,
+        init_lambda_t_values,
+        {
+            "static_tube_fraction": float(static_tube_fraction),
+            "static_tube_count": static_tube_count,
+            "dynamic_tube_count": dynamic_tube_count,
+            "static_init_lambda_t": float(static_init_lambda_t),
+            "dynamic_init_lambda_t": float(init_lambda_t),
+        },
+    )
+
+
 class WorldTubeModel(nn.Module):
     def __init__(
         self,
@@ -483,13 +816,15 @@ class WorldTubeModel(nn.Module):
         init_t0: Tensor,
         frames: int,
         init_precision_xy: float,
-        init_lambda_t: float,
+        init_lambda_t: float | Tensor,
         init_opacity: float,
         min_precision_xy: float,
         min_lambda_t: float,
         velocity_reg_weight: float,
         depth_velocity_reg_weight: float,
         position_reg_weight: float,
+        static_tube_count: int = 0,
+        static_velocity_reg_weight: float = 0.0,
     ) -> None:
         super().__init__()
         tube_count = int(init_x0.shape[0])
@@ -500,10 +835,23 @@ class WorldTubeModel(nn.Module):
         self.velocity_reg_weight = float(velocity_reg_weight)
         self.depth_velocity_reg_weight = float(depth_velocity_reg_weight)
         self.position_reg_weight = float(position_reg_weight)
+        self.static_tube_count = int(static_tube_count)
+        self.static_velocity_reg_weight = float(static_velocity_reg_weight)
+        if self.static_tube_count < 0 or self.static_tube_count > tube_count:
+            raise ValueError("static_tube_count must be between 0 and tube_count")
+        if self.static_velocity_reg_weight < 0.0:
+            raise ValueError("static_velocity_reg_weight must be nonnegative")
         self.x0 = nn.Parameter(init_x0)
         self.velocity = nn.Parameter(torch.zeros_like(init_x0))
         precision = torch.full((tube_count, 2), float(init_precision_xy), dtype=torch.float32, device=init_x0.device)
-        lambda_t = torch.full((tube_count,), float(init_lambda_t), dtype=torch.float32, device=init_x0.device)
+        if isinstance(init_lambda_t, Tensor):
+            if tuple(init_lambda_t.shape) != (tube_count,):
+                raise ValueError(f"init_lambda_t tensor must have shape ({tube_count},)")
+            lambda_t = init_lambda_t.to(dtype=torch.float32, device=init_x0.device)
+        else:
+            lambda_t = torch.full((tube_count,), float(init_lambda_t), dtype=torch.float32, device=init_x0.device)
+        if bool((lambda_t <= self.min_lambda_t).any().item()):
+            raise ValueError("init_lambda_t values must be greater than min_lambda_t")
         opacity = torch.full((tube_count,), float(init_opacity), dtype=torch.float32, device=init_x0.device)
         self.raw_precision_xy = nn.Parameter(_inv_softplus(precision - self.min_precision_xy))
         self.raw_lambda_t = nn.Parameter(_inv_softplus(lambda_t - self.min_lambda_t))
@@ -530,6 +878,8 @@ class WorldTubeModel(nn.Module):
             reg = reg + self.depth_velocity_reg_weight * self.velocity[:, 2].square().mean()
         if self.position_reg_weight:
             reg = reg + self.position_reg_weight * self.x0.square().mean()
+        if self.static_velocity_reg_weight and self.static_tube_count:
+            reg = reg + self.static_velocity_reg_weight * self.velocity[-self.static_tube_count :].square().mean()
         return reg
 
 
@@ -594,7 +944,14 @@ def project_world_tube_sequence(
     return projected
 
 
-def render_projected_sequence(projected: ProjectedTubeSequence, config: UVTRenderConfig, *, backend: str) -> RenderedSequence:
+def render_projected_sequence(
+    projected: ProjectedTubeSequence,
+    config: UVTRenderConfig,
+    *,
+    backend: str,
+    reduction_mode: str = "index_add",
+    sample_emission_mode: str = "atomic_append",
+) -> RenderedSequence:
     if backend == "dense":
         rgb = dense_differentiable_render_uvt_tubes(
             projected.ma,
@@ -614,6 +971,8 @@ def render_projected_sequence(projected: ProjectedTubeSequence, config: UVTRende
             projected.opacity,
             projected.color,
             config,
+            reduction_mode=reduction_mode,
+            sample_emission_mode=sample_emission_mode,
         )
     else:
         raise ValueError("backend must be one of: dense, metal_tile")
@@ -814,6 +1173,23 @@ def view_shuffled_cycle_pair(left_values: list[int], right_values: list[int], *,
     return left_values[int(order[left_offset])], right_values[right_index]
 
 
+def epoch_view_shuffled_cycle_pair(
+    left_values: list[int],
+    right_values: list[int],
+    *,
+    step: int,
+    seed: int,
+) -> tuple[int, int]:
+    if not left_values or not right_values:
+        raise ValueError("epoch-view-shuffled cycle values must not be empty")
+    right_step, left_offset = divmod(step, len(left_values))
+    right_index = right_step % len(right_values)
+    epoch = right_step // len(right_values)
+    generator = torch.Generator(device="cpu").manual_seed(seed + epoch)
+    order = torch.randperm(len(left_values), generator=generator).tolist()
+    return left_values[int(order[left_offset])], right_values[right_index]
+
+
 def optimizer_train_view_indices(view_count: int, mode: str) -> list[int]:
     if mode == "all":
         return list(range(view_count))
@@ -910,6 +1286,14 @@ def train_world_tubes(
     seed: int,
     backend: str,
     camera_projection: str,
+    camera_sequence_mode: str,
+    segment_frames: int,
+    synthetic_pan_x: float,
+    synthetic_pan_y: float,
+    synthetic_dolly_z: float,
+    synthetic_zoom: float,
+    synthetic_principal_x: float,
+    synthetic_principal_y: float,
     loss_scope: str,
     window_frames: int,
     train_schedule: str,
@@ -925,9 +1309,46 @@ def train_world_tubes(
     crop_loss_size: int,
     checkpoint_every_steps: int,
     render_config: UVTRenderConfig,
+    reduction_mode: str = "index_add",
+    sample_emission_mode: str = "atomic_append",
+    static_tube_fraction: float = 0.0,
+    static_init_lambda_t: float = 0.02,
+    static_velocity_reg_weight: float = 0.0,
 ) -> tuple[WorldTubeModel, dict[str, Any], list[dict[str, Any]]]:
     if loss_scope not in {"sampled_frame", "view_sequence", "temporal_window"}:
         raise ValueError("loss_scope must be one of: sampled_frame, view_sequence, temporal_window")
+    if backend != "metal_tile" and (reduction_mode != "index_add" or sample_emission_mode != "atomic_append"):
+        raise ValueError("custom reduction/sample emission modes require backend=metal_tile")
+    if reduction_mode in (
+        "key_sort_scan_metal",
+        "key_sort_compensated_scan_metal",
+        "key_sort_segmented_metal",
+    ) and sample_emission_mode not in (
+        "with_keys",
+        "tile_pair",
+        "tile_pair_compensated",
+        "tile_pair_grouped",
+        "tile_pair_parallel",
+        "tile_pair_scanline",
+        "tile_pair_sharedsort",
+        "tile_pair_target_bounds",
+        "tile_pair_suffix",
+    ):
+        raise ValueError(
+            "keyed sort reduction requires sample_emission_mode=with_keys, tile_pair, tile_pair_compensated, tile_pair_grouped, tile_pair_parallel, tile_pair_scanline, tile_pair_sharedsort, tile_pair_target_bounds, or tile_pair_suffix"
+        )
+    if sample_emission_mode in (
+        "direct_atomic",
+        "direct_fixedpoint",
+        "direct_split_fixedpoint",
+        "direct_serial",
+        "tile_pair_atomic",
+        "tile_pair_fixedpoint",
+        "tile_pair_reduced",
+        "tile_pair_reduced_parallel",
+        "tile_pair_suffix_reduced",
+    ) and reduction_mode != "index_add":
+        raise ValueError(f"{sample_emission_mode} bypasses the reducer and requires reduction_mode=index_add")
     if train_schedule not in set(TRAIN_SCHEDULE_CHOICES):
         raise ValueError(f"train_schedule must be one of: {', '.join(TRAIN_SCHEDULE_CHOICES)}")
     if optimizer_train_views not in {"all", "first_only"}:
@@ -952,6 +1373,26 @@ def train_world_tubes(
         raise ValueError("crop_loss_weight must be nonnegative")
     if crop_loss_size < 1:
         raise ValueError("crop_loss_size must be positive")
+    if static_velocity_reg_weight < 0.0:
+        raise ValueError("static_velocity_reg_weight must be nonnegative")
+    if camera_sequence_mode not in {"static_view", "dynamic_first_order", "projective_first_order", "segmented"}:
+        raise ValueError(
+            "camera_sequence_mode must be one of: static_view, dynamic_first_order, projective_first_order, segmented"
+        )
+    if segment_frames < 1:
+        raise ValueError("segment_frames must be positive")
+    synthetic_camera_active = any(
+        (
+            synthetic_pan_x,
+            synthetic_pan_y,
+            synthetic_dolly_z,
+            synthetic_zoom,
+            synthetic_principal_x,
+            synthetic_principal_y,
+        )
+    )
+    if (camera_sequence_mode != "static_view" or synthetic_camera_active) and camera_projection != "legacy_pinhole":
+        raise ValueError("variable/synthetic camera STAR quality runs currently require camera_projection=legacy_pinhole")
     torch.manual_seed(seed)
     train_frames = bundle.train_frames
     device = train_frames.device
@@ -991,7 +1432,7 @@ def train_world_tubes(
         else []
     )
     active_train_frame_tensor = torch.tensor(active_train_frames, dtype=torch.long, device=device)
-    init_x0, init_color, init_t0 = initialize_world_tubes_from_train_views(
+    init_x0, init_color, init_t0, init_lambda_t_values, init_metadata = initialize_world_tubes_with_static_fraction(
         bundle,
         tube_count=tube_count,
         init_depth=init_depth,
@@ -1000,6 +1441,9 @@ def train_world_tubes(
         init_sampling=init_sampling,
         init_frames=init_frames,
         init_frame_indices=active_train_frames,
+        init_lambda_t=init_lambda_t,
+        static_tube_fraction=static_tube_fraction,
+        static_init_lambda_t=static_init_lambda_t,
     )
     model = WorldTubeModel(
         init_x0=init_x0,
@@ -1007,13 +1451,15 @@ def train_world_tubes(
         init_t0=init_t0,
         frames=frames,
         init_precision_xy=init_precision_xy,
-        init_lambda_t=init_lambda_t,
+        init_lambda_t=init_lambda_t_values,
         init_opacity=init_opacity,
         min_precision_xy=min_precision_xy,
         min_lambda_t=min_lambda_t,
         velocity_reg_weight=velocity_reg_weight,
         depth_velocity_reg_weight=depth_velocity_reg_weight,
         position_reg_weight=position_reg_weight,
+        static_tube_count=int(init_metadata["static_tube_count"]),
+        static_velocity_reg_weight=static_velocity_reg_weight,
     ).to(device)
     full_config = render_config
     if full_config.height != height or full_config.width != width or full_config.frames != frames:
@@ -1039,6 +1485,51 @@ def train_world_tubes(
     last_finite_step = 0
     stopped_reason: str | None = None
     stopped_step: int | None = None
+
+    def project_for_view(
+        *,
+        view: int,
+        render_cfg: UVTRenderConfig,
+        frame_start_value: int,
+        lens_model_value: str,
+        distortion_value: Tensor | None,
+    ) -> ProjectedTubeSequence:
+        full_frame_count = int(frames)
+        if camera_sequence_mode == "static_view" and not synthetic_camera_active:
+            return project_world_tube_sequence(
+                model,
+                select_view_K(bundle.train_K, view),
+                select_view_w2c(bundle.train_w2c, view),
+                render_cfg,
+                camera_projection=camera_projection,
+                lens_model=lens_model_value,
+                distortion=distortion_value,
+                full_frames=full_frame_count if int(render_cfg.frames) != full_frame_count else None,
+                frame_start=frame_start_value,
+            )
+        K_seq, w2c_seq = camera_sequences_for_view(
+            bundle.train_K,
+            bundle.train_w2c,
+            view=view,
+            frames=full_frame_count,
+            view_count=view_count,
+            synthetic_pan_x=synthetic_pan_x,
+            synthetic_pan_y=synthetic_pan_y,
+            synthetic_dolly_z=synthetic_dolly_z,
+            synthetic_zoom=synthetic_zoom,
+            synthetic_principal_x=synthetic_principal_x,
+            synthetic_principal_y=synthetic_principal_y,
+        )
+        return project_world_tube_sequence_camera_mode(
+            model=model,
+            K_seq=K_seq,
+            w2c_seq=w2c_seq,
+            config=render_cfg,
+            full_frames=full_frame_count,
+            frame_start=frame_start_value,
+            camera_sequence_mode=camera_sequence_mode,
+            segment_frames=segment_frames,
+        )
 
     def append_train_log(
         *,
@@ -1093,7 +1584,13 @@ def train_world_tubes(
             param_group["lr"] = current_lr
         frame_override: int | None = None
         window_start_override: int | None = None
-        if train_schedule in {"shuffled_cycle", "reshuffled_cycle", "phase_rotated_cycle", "view_shuffled_cycle"}:
+        if train_schedule in {
+            "shuffled_cycle",
+            "reshuffled_cycle",
+            "phase_rotated_cycle",
+            "view_shuffled_cycle",
+            "epoch_view_shuffled_cycle",
+        }:
             if loss_scope == "sampled_frame":
                 if train_schedule == "shuffled_cycle":
                     view, frame_override = shuffled_frame_pairs[int(step % len(shuffled_frame_pairs))]
@@ -1101,8 +1598,15 @@ def train_world_tubes(
                     view, frame_override = reshuffled_cycle_item(frame_pairs, step=step, seed=seed + 2003)
                 elif train_schedule == "phase_rotated_cycle":
                     view, frame_override = phase_rotated_cycle_item(frame_pairs, step=step, seed=seed + 2003)
-                else:
+                elif train_schedule == "view_shuffled_cycle":
                     view, frame_override = view_shuffled_cycle_pair(
+                        active_train_views,
+                        active_train_frames,
+                        step=step,
+                        seed=seed + 2003,
+                    )
+                else:
+                    view, frame_override = epoch_view_shuffled_cycle_pair(
                         active_train_views,
                         active_train_frames,
                         step=step,
@@ -1115,8 +1619,15 @@ def train_world_tubes(
                     view, window_start_override = reshuffled_cycle_item(window_pairs, step=step, seed=seed + 3001)
                 elif train_schedule == "phase_rotated_cycle":
                     view, window_start_override = phase_rotated_cycle_item(window_pairs, step=step, seed=seed + 3001)
-                else:
+                elif train_schedule == "view_shuffled_cycle":
                     view, window_start_override = view_shuffled_cycle_pair(
+                        active_train_views,
+                        active_window_starts,
+                        step=step,
+                        seed=seed + 3001,
+                    )
+                else:
+                    view, window_start_override = epoch_view_shuffled_cycle_pair(
                         active_train_views,
                         active_window_starts,
                         step=step,
@@ -1146,16 +1657,20 @@ def train_world_tubes(
                 if frame_override is not None
                 else select_train_frame(step, len(active_train_views), active_train_frames, device, train_schedule)
             )
-            projected = project_world_tube_sequence(
-                model,
-                select_view_K(bundle.train_K, view),
-                select_view_w2c(bundle.train_w2c, view),
-                full_config,
-                camera_projection=camera_projection,
-                lens_model=lens_model,
-                distortion=distortion,
+            projected = project_for_view(
+                view=view,
+                render_cfg=full_config,
+                frame_start_value=0,
+                lens_model_value=lens_model,
+                distortion_value=distortion,
             )
-            rendered = render_projected_sequence(projected, full_config, backend=backend)
+            rendered = render_projected_sequence(
+                projected,
+                full_config,
+                backend=backend,
+                reduction_mode=reduction_mode,
+                sample_emission_mode=sample_emission_mode,
+            )
             target = train_frames[view, frame].permute(1, 2, 0)
             recon_loss = robust_l1(rendered.rgb[frame] - target)
             multiscale_loss = (
@@ -1169,16 +1684,20 @@ def train_world_tubes(
                 else train_frames.new_tensor(0.0)
             )
         elif loss_scope == "view_sequence":
-            projected = project_world_tube_sequence(
-                model,
-                select_view_K(bundle.train_K, view),
-                select_view_w2c(bundle.train_w2c, view),
-                full_config,
-                camera_projection=camera_projection,
-                lens_model=lens_model,
-                distortion=distortion,
+            projected = project_for_view(
+                view=view,
+                render_cfg=full_config,
+                frame_start_value=0,
+                lens_model_value=lens_model,
+                distortion_value=distortion,
             )
-            rendered = render_projected_sequence(projected, full_config, backend=backend)
+            rendered = render_projected_sequence(
+                projected,
+                full_config,
+                backend=backend,
+                reduction_mode=reduction_mode,
+                sample_emission_mode=sample_emission_mode,
+            )
             target = train_frames[view].permute(0, 2, 3, 1).contiguous()
             rendered_active = rendered.rgb.index_select(0, active_train_frame_tensor)
             target_active = target.index_select(0, active_train_frame_tensor)
@@ -1208,18 +1727,20 @@ def train_world_tubes(
                     train_schedule,
                 )
             )
-            projected = project_world_tube_sequence(
-                model,
-                select_view_K(bundle.train_K, view),
-                select_view_w2c(bundle.train_w2c, view),
-                window_config,
-                camera_projection=camera_projection,
-                lens_model=lens_model,
-                distortion=distortion,
-                full_frames=frames,
-                frame_start=frame_start,
+            projected = project_for_view(
+                view=view,
+                render_cfg=window_config,
+                frame_start_value=frame_start,
+                lens_model_value=lens_model,
+                distortion_value=distortion,
             )
-            rendered = render_projected_sequence(projected, window_config, backend=backend)
+            rendered = render_projected_sequence(
+                projected,
+                window_config,
+                backend=backend,
+                reduction_mode=reduction_mode,
+                sample_emission_mode=sample_emission_mode,
+            )
             target = train_frames[view, frame_start : frame_start + window_frames].permute(0, 2, 3, 1).contiguous()
             recon_loss = robust_l1(rendered.rgb - target)
             multiscale_loss = (
@@ -1275,25 +1796,29 @@ def train_world_tubes(
                         step=step,
                         seed=seed + 4001,
                     )
-                else:
+                elif train_schedule in {"view_shuffled_cycle", "epoch_view_shuffled_cycle"}:
                     consistency_start = consistency_window_starts[
                         int((step // len(active_train_views)) % len(consistency_window_starts))
                     ]
+                else:
+                    raise ValueError(f"Unsupported train_schedule for consistency: {train_schedule}")
             else:
                 consistency_config = full_config
                 consistency_start = 0
-            sequence_projected = project_world_tube_sequence(
-                model,
-                select_view_K(bundle.train_K, view),
-                select_view_w2c(bundle.train_w2c, view),
-                consistency_config,
-                camera_projection=camera_projection,
-                lens_model=lens_model,
-                distortion=distortion,
-                full_frames=frames if consistency_config.frames != frames else None,
-                frame_start=consistency_start,
+            sequence_projected = project_for_view(
+                view=view,
+                render_cfg=consistency_config,
+                frame_start_value=consistency_start,
+                lens_model_value=lens_model,
+                distortion_value=distortion,
             )
-            sequence_rendered = render_projected_sequence(sequence_projected, consistency_config, backend=backend)
+            sequence_rendered = render_projected_sequence(
+                sequence_projected,
+                consistency_config,
+                backend=backend,
+                reduction_mode=reduction_mode,
+                sample_emission_mode=sample_emission_mode,
+            )
             if consistency_config.frames == frames:
                 sequence_target = train_frames[view].permute(0, 2, 3, 1).contiguous()
                 sequence_consistency_loss = robust_l1(
@@ -1350,6 +1875,9 @@ def train_world_tubes(
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         elapsed_after_step = time.perf_counter() - started_at
+        if checkpoint_every_steps <= 0:
+            last_finite_state = snapshot_world_tube_state(model)
+            last_finite_step = completed_step
         if should_log:
             append_train_log(
                 completed_step=completed_step,
@@ -1394,6 +1922,8 @@ def train_world_tubes(
             "validation_frame_indices": validation_frames,
             "validation_frame_stride": validation_frame_stride,
             "validation_frame_offset": validation_frame_offset,
+            **init_metadata,
+            "static_velocity_reg": static_velocity_reg_weight,
             "sequence_consistency_every_steps": sequence_consistency_every_steps,
             "sequence_consistency_frames": sequence_consistency_frames,
             "sequence_consistency_weight": sequence_consistency_weight,
@@ -1502,6 +2032,14 @@ def eval_world_tubes(
     *,
     backend: str,
     camera_projection: str,
+    camera_sequence_mode: str,
+    segment_frames: int,
+    synthetic_pan_x: float,
+    synthetic_pan_y: float,
+    synthetic_dolly_z: float,
+    synthetic_zoom: float,
+    synthetic_principal_x: float,
+    synthetic_principal_y: float,
     render_config: UVTRenderConfig,
     frame_metric_splits: dict[str, list[int]] | None = None,
 ) -> dict[str, Any]:
@@ -1509,6 +2047,67 @@ def eval_world_tubes(
     config = render_config
     if config.height != height or config.width != width or config.frames != frames:
         raise ValueError("render_config dimensions must match bundle train frames")
+    synthetic_camera_active = any(
+        (
+            synthetic_pan_x,
+            synthetic_pan_y,
+            synthetic_dolly_z,
+            synthetic_zoom,
+            synthetic_principal_x,
+            synthetic_principal_y,
+        )
+    )
+    if camera_sequence_mode not in {"static_view", "dynamic_first_order", "projective_first_order", "segmented"}:
+        raise ValueError(
+            "camera_sequence_mode must be one of: static_view, dynamic_first_order, projective_first_order, segmented"
+        )
+    if (camera_sequence_mode != "static_view" or synthetic_camera_active) and camera_projection != "legacy_pinhole":
+        raise ValueError("variable/synthetic camera STAR quality eval currently requires camera_projection=legacy_pinhole")
+
+    def render_eval_view(
+        *,
+        K_all: Tensor,
+        w2c_all: Tensor,
+        view: int,
+        view_count: int,
+        lens_model_value: str,
+        distortion_value: Tensor | None,
+    ) -> RenderedSequence:
+        if camera_sequence_mode == "static_view" and not synthetic_camera_active:
+            return render_world_tube_sequence(
+                model,
+                select_view_K(K_all, view),
+                select_view_w2c(w2c_all, view),
+                config,
+                backend=backend,
+                camera_projection=camera_projection,
+                lens_model=lens_model_value,
+                distortion=distortion_value,
+            )
+        K_seq, w2c_seq = camera_sequences_for_view(
+            K_all,
+            w2c_all,
+            view=view,
+            frames=frames,
+            view_count=view_count,
+            synthetic_pan_x=synthetic_pan_x,
+            synthetic_pan_y=synthetic_pan_y,
+            synthetic_dolly_z=synthetic_dolly_z,
+            synthetic_zoom=synthetic_zoom,
+            synthetic_principal_x=synthetic_principal_x,
+            synthetic_principal_y=synthetic_principal_y,
+        )
+        projected = project_world_tube_sequence_camera_mode(
+            model=model,
+            K_seq=K_seq,
+            w2c_seq=w2c_seq,
+            config=config,
+            full_frames=frames,
+            frame_start=0,
+            camera_sequence_mode=camera_sequence_mode,
+            segment_frames=segment_frames,
+        )
+        return render_projected_sequence(projected, config, backend=backend)
     train_rows = []
     train_metrics = []
     train_frame_split_metrics: dict[str, list[dict[str, float]]] = {
@@ -1526,15 +2125,13 @@ def eval_world_tubes(
         )
         rendered, render_elapsed = time_render_sequence(
             device,
-            lambda view=view, lens_model=lens_model, distortion=distortion: render_world_tube_sequence(
-                model,
-                select_view_K(bundle.train_K, view),
-                select_view_w2c(bundle.train_w2c, view),
-                config,
-                backend=backend,
-                camera_projection=camera_projection,
-                lens_model=lens_model,
-                distortion=distortion,
+            lambda view=view, lens_model=lens_model, distortion=distortion: render_eval_view(
+                K_all=bundle.train_K,
+                w2c_all=bundle.train_w2c,
+                view=view,
+                view_count=bundle.train_view_count,
+                lens_model_value=lens_model,
+                distortion_value=distortion,
             ),
         )
         train_render_times.append(render_elapsed)
@@ -1556,15 +2153,13 @@ def eval_world_tubes(
             )
             rendered, render_elapsed = time_render_sequence(
                 device,
-                lambda view=view, lens_model=lens_model, distortion=distortion: render_world_tube_sequence(
-                    model,
-                    select_view_K(bundle.heldout_K, view),
-                    select_view_w2c(bundle.heldout_w2c, view),
-                    config,
-                    backend=backend,
-                    camera_projection=camera_projection,
-                    lens_model=lens_model,
-                    distortion=distortion,
+                lambda view=view, lens_model=lens_model, distortion=distortion: render_eval_view(
+                    K_all=bundle.heldout_K,
+                    w2c_all=bundle.heldout_w2c,
+                    view=view,
+                    view_count=bundle.heldout_view_count,
+                    lens_model_value=lens_model,
+                    distortion_value=distortion,
                 ),
             )
             heldout_render_times.append(render_elapsed)
@@ -1595,6 +2190,14 @@ def eval_world_tube_checkpoints(
     *,
     backend: str,
     camera_projection: str,
+    camera_sequence_mode: str,
+    segment_frames: int,
+    synthetic_pan_x: float,
+    synthetic_pan_y: float,
+    synthetic_dolly_z: float,
+    synthetic_zoom: float,
+    synthetic_principal_x: float,
+    synthetic_principal_y: float,
     render_config: UVTRenderConfig,
     frame_metric_splits: dict[str, list[int]] | None = None,
 ) -> dict[str, Any] | None:
@@ -1609,6 +2212,14 @@ def eval_world_tube_checkpoints(
             bundle,
             backend=backend,
             camera_projection=camera_projection,
+            camera_sequence_mode=camera_sequence_mode,
+            segment_frames=segment_frames,
+            synthetic_pan_x=synthetic_pan_x,
+            synthetic_pan_y=synthetic_pan_y,
+            synthetic_dolly_z=synthetic_dolly_z,
+            synthetic_zoom=synthetic_zoom,
+            synthetic_principal_x=synthetic_principal_x,
+            synthetic_principal_y=synthetic_principal_y,
             render_config=render_config,
             frame_metric_splits=frame_metric_splits,
         )
@@ -2069,6 +2680,10 @@ def env_int(name: str, default: int) -> int:
     return default if raw is None or raw == "" else int(raw)
 
 
+def selected_env(keys: tuple[str, ...]) -> dict[str, str | None]:
+    return {key: os.environ.get(key) for key in keys}
+
+
 def apply_uvt_tile_env(config: UVTRenderConfig) -> None:
     os.environ["STAR_UVT_TILE_X"] = str(config.tile_x)
     os.environ["STAR_UVT_TILE_Y"] = str(config.tile_y)
@@ -2085,12 +2700,16 @@ def main() -> None:
     parser.add_argument("--max-steps", type=int, default=100000)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--seed", type=int, default=13)
+    parser.add_argument("--torch-deterministic", choices=("off", "warn", "error"), default="off")
     parser.add_argument("--uvt-tubes", type=int, default=128)
     parser.add_argument("--uvt-lr", type=float, default=0.03)
     parser.add_argument("--uvt-lr-decay-step", type=int, default=0)
     parser.add_argument("--uvt-lr-decay-factor", type=float, default=1.0)
     parser.add_argument("--uvt-init-precision-xy", type=float, default=30.0)
     parser.add_argument("--uvt-init-lambda-t", type=float, default=0.35)
+    parser.add_argument("--uvt-static-tube-fraction", type=float, default=0.0)
+    parser.add_argument("--uvt-static-init-lambda-t", type=float, default=0.02)
+    parser.add_argument("--uvt-static-velocity-reg", type=float, default=0.0)
     parser.add_argument("--uvt-init-opacity", type=float, default=0.35)
     parser.add_argument("--uvt-min-precision-xy", type=float, default=1.0e-5)
     parser.add_argument("--uvt-min-lambda-t", type=float, default=1.0e-5)
@@ -2107,7 +2726,60 @@ def main() -> None:
     parser.add_argument("--uvt-tile-t", type=int, default=env_int("STAR_UVT_TILE_T", 2))
     parser.add_argument("--uvt-tile-capacity", type=int, default=env_int("STAR_UVT_TILE_CAPACITY", 128))
     parser.add_argument("--uvt-render-backend", choices=("dense", "metal_tile"), default="dense")
+    parser.add_argument("--uvt-backward-policy", choices=("manual", *BACKWARD_POLICY_NAMES), default="manual")
+    parser.add_argument(
+        "--uvt-reduction-mode",
+        choices=(
+            "index_add",
+            "sorted_cpu",
+            "scan_metal",
+            "compensated_scan_metal",
+            "sort_scan_metal",
+            "sort_compensated_scan_metal",
+            "key_sort_scan_metal",
+            "key_sort_compensated_scan_metal",
+            "key_sort_segmented_metal",
+        ),
+        default="index_add",
+    )
+    parser.add_argument(
+        "--uvt-sample-emission-mode",
+        choices=(
+            "atomic_append",
+            "with_keys",
+            "tile_pair",
+            "tile_pair_compensated",
+            "tile_pair_grouped",
+            "tile_pair_parallel",
+            "tile_pair_scanline",
+            "tile_pair_sharedsort",
+            "tile_pair_target_bounds",
+            "tile_pair_suffix",
+            "direct_atomic",
+            "direct_fixedpoint",
+            "direct_split_fixedpoint",
+            "direct_serial",
+            "tile_pair_atomic",
+            "tile_pair_fixedpoint",
+            "tile_pair_reduced",
+            "tile_pair_reduced_parallel",
+            "tile_pair_suffix_reduced",
+        ),
+        default="atomic_append",
+    )
     parser.add_argument("--uvt-camera-projection", choices=("legacy_pinhole", "dataset_lens"), default="legacy_pinhole")
+    parser.add_argument(
+        "--uvt-camera-sequence-mode",
+        choices=("static_view", "dynamic_first_order", "projective_first_order", "segmented"),
+        default="static_view",
+    )
+    parser.add_argument("--uvt-segment-frames", type=int, default=4)
+    parser.add_argument("--uvt-synthetic-pan-x", type=float, default=0.0)
+    parser.add_argument("--uvt-synthetic-pan-y", type=float, default=0.0)
+    parser.add_argument("--uvt-synthetic-dolly-z", type=float, default=0.0)
+    parser.add_argument("--uvt-synthetic-zoom", type=float, default=0.0)
+    parser.add_argument("--uvt-synthetic-principal-x", type=float, default=0.0)
+    parser.add_argument("--uvt-synthetic-principal-y", type=float, default=0.0)
     parser.add_argument("--uvt-loss-scope", choices=("sampled_frame", "view_sequence", "temporal_window"), default="sampled_frame")
     parser.add_argument("--uvt-window-frames", type=int, default=4)
     parser.add_argument("--uvt-sequence-consistency-every-steps", type=int, default=0)
@@ -2156,13 +2828,57 @@ def main() -> None:
     parser.add_argument("--out-dir", type=Path, default=ROOT / "research_project" / "benchmarks" / "results" / "multicam_heldout_compare")
     args = parser.parse_args()
 
+    if args.torch_deterministic != "off":
+        torch.use_deterministic_algorithms(True, warn_only=args.torch_deterministic == "warn")
+
     device = resolve_device(args.device)
     config = load_config_file(resolve_dynaworld_path(args.baseline_config))
     data_cfg = config_data_for_run(config, target_size=args.target_size, max_frames=args.max_frames)
     camera_cfg = dict(config["camera"])
     bundle = load_multicam_video_bundle(data_cfg=data_cfg, camera_cfg=camera_cfg, target_size=args.target_size, device=device)
+    backward_policy = None
+    if args.uvt_backward_policy != "manual":
+        backward_policy = resolve_backward_policy(args.uvt_backward_policy)
+        args.uvt_reduction_mode = backward_policy.reduction_mode
+        args.uvt_sample_emission_mode = backward_policy.sample_emission_mode
+        if args.uvt_render_backend != "metal_tile":
+            raise ValueError("--uvt-backward-policy requires --uvt-render-backend metal_tile")
     if args.uvt_render_backend == "metal_tile" and device.type != "mps":
         raise ValueError("--uvt-render-backend=metal_tile requires device=mps")
+    if args.uvt_render_backend != "metal_tile" and (
+        args.uvt_reduction_mode != "index_add" or args.uvt_sample_emission_mode != "atomic_append"
+    ):
+        raise ValueError("custom UVT reduction/sample emission modes require --uvt-render-backend metal_tile")
+    if args.uvt_reduction_mode in (
+        "key_sort_scan_metal",
+        "key_sort_compensated_scan_metal",
+        "key_sort_segmented_metal",
+    ) and args.uvt_sample_emission_mode not in (
+        "with_keys",
+        "tile_pair",
+        "tile_pair_compensated",
+        "tile_pair_grouped",
+        "tile_pair_parallel",
+        "tile_pair_scanline",
+        "tile_pair_sharedsort",
+        "tile_pair_target_bounds",
+        "tile_pair_suffix",
+    ):
+        raise ValueError(
+            "keyed sort reduction requires --uvt-sample-emission-mode with_keys, tile_pair, tile_pair_compensated, tile_pair_grouped, tile_pair_parallel, tile_pair_scanline, tile_pair_sharedsort, tile_pair_target_bounds, or tile_pair_suffix"
+        )
+    if args.uvt_sample_emission_mode in (
+        "direct_atomic",
+        "direct_fixedpoint",
+        "direct_split_fixedpoint",
+        "direct_serial",
+        "tile_pair_atomic",
+        "tile_pair_fixedpoint",
+        "tile_pair_reduced",
+        "tile_pair_reduced_parallel",
+        "tile_pair_suffix_reduced",
+    ) and args.uvt_reduction_mode != "index_add":
+        raise ValueError(f"{args.uvt_sample_emission_mode} bypasses the reducer and requires --uvt-reduction-mode index_add")
     render_config = UVTRenderConfig(
         height=int(bundle.train_frames.shape[-2]),
         width=int(bundle.train_frames.shape[-1]),
@@ -2194,10 +2910,48 @@ def main() -> None:
         "train_seconds": args.train_seconds,
         "device": str(device),
         "seed": args.seed,
+        "argv": sys.argv,
+        "cwd": str(Path.cwd()),
+        "python": sys.version,
+        "torch": {
+            "version": torch.__version__,
+            "deterministic_mode": args.torch_deterministic,
+            "deterministic_algorithms_enabled": torch.are_deterministic_algorithms_enabled(),
+            "mps_available": torch.backends.mps.is_available(),
+            "cuda_available": torch.cuda.is_available(),
+        },
+        "env": selected_env(
+            (
+                "PYTHONHASHSEED",
+                "PYTORCH_ENABLE_MPS_FALLBACK",
+                "PYTORCH_MPS_HIGH_WATERMARK_RATIO",
+                "PYTORCH_MPS_ALLOCATOR_POLICY",
+                "STAR_UVT_TILE_X",
+                "STAR_UVT_TILE_Y",
+                "STAR_UVT_TILE_T",
+                "STAR_UVT_TILE_CAPACITY",
+                "STAR_UVT_FIXEDPOINT_SCALE",
+                "STAR_UVT_SPLIT_FIXEDPOINT_COARSE_SCALE",
+                "STAR_UVT_SPLIT_FIXEDPOINT_FINE_SCALE",
+            )
+        ),
         "train_cameras": bundle.train_camera_names,
         "heldout_cameras": bundle.heldout_camera_names,
         "pose_source": bundle.pose_source,
         "uvt_camera_projection": args.uvt_camera_projection,
+        "uvt_camera_sequence_mode": args.uvt_camera_sequence_mode,
+        "uvt_segment_frames": args.uvt_segment_frames,
+        "uvt_synthetic_camera_motion": {
+            "pan_x": args.uvt_synthetic_pan_x,
+            "pan_y": args.uvt_synthetic_pan_y,
+            "dolly_z": args.uvt_synthetic_dolly_z,
+            "zoom": args.uvt_synthetic_zoom,
+            "principal_x": args.uvt_synthetic_principal_x,
+            "principal_y": args.uvt_synthetic_principal_y,
+        },
+        "uvt_reduction_mode": args.uvt_reduction_mode,
+        "uvt_sample_emission_mode": args.uvt_sample_emission_mode,
+        "uvt_backward_policy": None if backward_policy is None else backward_policy.as_dict(),
         "splat_camera_projection": args.splat_camera_projection,
         "skip_splats": args.skip_splats,
         "train_lens_models": bundle.train_lens_models,
@@ -2225,6 +2979,9 @@ def main() -> None:
         init_frames=args.uvt_init_frames,
         init_precision_xy=args.uvt_init_precision_xy,
         init_lambda_t=args.uvt_init_lambda_t,
+        static_tube_fraction=args.uvt_static_tube_fraction,
+        static_init_lambda_t=args.uvt_static_init_lambda_t,
+        static_velocity_reg_weight=args.uvt_static_velocity_reg,
         init_opacity=args.uvt_init_opacity,
         min_precision_xy=args.uvt_min_precision_xy,
         min_lambda_t=args.uvt_min_lambda_t,
@@ -2239,6 +2996,14 @@ def main() -> None:
         seed=args.seed,
         backend=args.uvt_render_backend,
         camera_projection=args.uvt_camera_projection,
+        camera_sequence_mode=args.uvt_camera_sequence_mode,
+        segment_frames=args.uvt_segment_frames,
+        synthetic_pan_x=args.uvt_synthetic_pan_x,
+        synthetic_pan_y=args.uvt_synthetic_pan_y,
+        synthetic_dolly_z=args.uvt_synthetic_dolly_z,
+        synthetic_zoom=args.uvt_synthetic_zoom,
+        synthetic_principal_x=args.uvt_synthetic_principal_x,
+        synthetic_principal_y=args.uvt_synthetic_principal_y,
         loss_scope=args.uvt_loss_scope,
         window_frames=args.uvt_window_frames,
         train_schedule=args.uvt_train_schedule,
@@ -2254,12 +3019,22 @@ def main() -> None:
         crop_loss_size=args.uvt_crop_loss_size,
         checkpoint_every_steps=args.uvt_checkpoint_every_steps,
         render_config=render_config,
+        reduction_mode=args.uvt_reduction_mode,
+        sample_emission_mode=args.uvt_sample_emission_mode,
     )
     uvt_eval = eval_world_tubes(
         uvt_model,
         bundle,
         backend=args.uvt_render_backend,
         camera_projection=args.uvt_camera_projection,
+        camera_sequence_mode=args.uvt_camera_sequence_mode,
+        segment_frames=args.uvt_segment_frames,
+        synthetic_pan_x=args.uvt_synthetic_pan_x,
+        synthetic_pan_y=args.uvt_synthetic_pan_y,
+        synthetic_dolly_z=args.uvt_synthetic_dolly_z,
+        synthetic_zoom=args.uvt_synthetic_zoom,
+        synthetic_principal_x=args.uvt_synthetic_principal_x,
+        synthetic_principal_y=args.uvt_synthetic_principal_y,
         render_config=render_config,
         frame_metric_splits=uvt_frame_metric_splits,
     )
@@ -2269,6 +3044,14 @@ def main() -> None:
         bundle,
         backend=args.uvt_render_backend,
         camera_projection=args.uvt_camera_projection,
+        camera_sequence_mode=args.uvt_camera_sequence_mode,
+        segment_frames=args.uvt_segment_frames,
+        synthetic_pan_x=args.uvt_synthetic_pan_x,
+        synthetic_pan_y=args.uvt_synthetic_pan_y,
+        synthetic_dolly_z=args.uvt_synthetic_dolly_z,
+        synthetic_zoom=args.uvt_synthetic_zoom,
+        synthetic_principal_x=args.uvt_synthetic_principal_x,
+        synthetic_principal_y=args.uvt_synthetic_principal_y,
         render_config=render_config,
         frame_metric_splits=uvt_frame_metric_splits,
     )
@@ -2293,6 +3076,14 @@ def main() -> None:
             bundle,
             backend=args.uvt_render_backend,
             camera_projection=args.uvt_camera_projection,
+            camera_sequence_mode=args.uvt_camera_sequence_mode,
+            segment_frames=args.uvt_segment_frames,
+            synthetic_pan_x=args.uvt_synthetic_pan_x,
+            synthetic_pan_y=args.uvt_synthetic_pan_y,
+            synthetic_dolly_z=args.uvt_synthetic_dolly_z,
+            synthetic_zoom=args.uvt_synthetic_zoom,
+            synthetic_principal_x=args.uvt_synthetic_principal_x,
+            synthetic_principal_y=args.uvt_synthetic_principal_y,
             render_config=render_config,
             frame_metric_splits=uvt_frame_metric_splits,
         )
@@ -2322,7 +3113,11 @@ def main() -> None:
                 camera_projection=args.uvt_camera_projection,
                 render_config=render_config,
             )
-            if args.uvt_render_backend == "metal_tile"
+            if (
+                args.uvt_render_backend == "metal_tile"
+                and args.uvt_camera_sequence_mode == "static_view"
+                and not any(run_meta["uvt_synthetic_camera_motion"].values())
+            )
             else None,
         }
         uvt_model.load_state_dict(final_state)
@@ -2365,12 +3160,20 @@ def main() -> None:
         "star_uvt": {
             "tube_count": args.uvt_tubes,
             "render_backend": args.uvt_render_backend,
+            "reduction_mode": args.uvt_reduction_mode,
+            "sample_emission_mode": args.uvt_sample_emission_mode,
             "camera_projection": args.uvt_camera_projection,
+            "camera_sequence_mode": args.uvt_camera_sequence_mode,
+            "segment_frames": args.uvt_segment_frames,
+            "synthetic_camera_motion": run_meta["uvt_synthetic_camera_motion"],
             "lr": args.uvt_lr,
             "lr_decay_step": args.uvt_lr_decay_step,
             "lr_decay_factor": args.uvt_lr_decay_factor,
             "init_precision_xy": args.uvt_init_precision_xy,
             "init_lambda_t": args.uvt_init_lambda_t,
+            "static_tube_fraction": args.uvt_static_tube_fraction,
+            "static_init_lambda_t": args.uvt_static_init_lambda_t,
+            "static_velocity_reg": args.uvt_static_velocity_reg,
             "init_opacity": args.uvt_init_opacity,
             "min_precision_xy": args.uvt_min_precision_xy,
             "min_lambda_t": args.uvt_min_lambda_t,
@@ -2419,7 +3222,11 @@ def main() -> None:
                 camera_projection=args.uvt_camera_projection,
                 render_config=render_config,
             )
-            if args.uvt_render_backend == "metal_tile"
+            if (
+                args.uvt_render_backend == "metal_tile"
+                and args.uvt_camera_sequence_mode == "static_view"
+                and not any(run_meta["uvt_synthetic_camera_motion"].values())
+            )
             else None,
         },
         "star_uvt_selected": selected_report,

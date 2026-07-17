@@ -7,6 +7,8 @@ from torch import Tensor
 
 from torch_gsplat_bridge_star_uvt import UVTRenderConfig
 
+Scalar = float | Tensor
+
 
 @dataclass(frozen=True)
 class OrthoCamera2D:
@@ -19,11 +21,26 @@ class OrthoCamera2D:
 
 @dataclass(frozen=True)
 class PinholeCamera:
-    fx: float
-    fy: float
-    cx: float
-    cy: float
+    fx: Scalar
+    fy: Scalar
+    cx: Scalar
+    cy: Scalar
     world_to_camera: Tensor
+
+
+@dataclass(frozen=True)
+class PinholeCameraMotion:
+    fx: Scalar
+    fy: Scalar
+    cx: Scalar
+    cy: Scalar
+    fx_dot: Scalar
+    fy_dot: Scalar
+    cx_dot: Scalar
+    cy_dot: Scalar
+    world_to_camera: Tensor
+    world_to_camera_dot: Tensor
+    chart_time: float
 
 
 @dataclass(frozen=True)
@@ -60,6 +77,20 @@ def _check_batch(batch: WorldTubeBatch) -> None:
             raise ValueError(f"{name} must be float32")
         if tensor.device != batch.x0.device:
             raise ValueError(f"{name} must be on the same device as x0")
+
+
+def _scalar_tensor(value: Scalar, reference: Tensor, name: str) -> Tensor:
+    if torch.is_tensor(value):
+        if value.numel() != 1:
+            raise ValueError(f"{name} must be scalar, got shape {tuple(value.shape)}")
+        return value.to(device=reference.device, dtype=reference.dtype).reshape(())
+    return torch.tensor(float(value), dtype=reference.dtype, device=reference.device)
+
+
+def _scalar_is_zero(value: Scalar) -> bool:
+    if torch.is_tensor(value):
+        return bool((value.detach() == 0.0).cpu().item())
+    return float(value) == 0.0
 
 
 def project_world_tubes_ortho(
@@ -103,7 +134,7 @@ def project_world_tubes_ortho(
 
 
 def _check_pinhole_camera(camera: PinholeCamera, device: torch.device) -> None:
-    if camera.fx == 0.0 or camera.fy == 0.0:
+    if _scalar_is_zero(camera.fx) or _scalar_is_zero(camera.fy):
         raise ValueError("pinhole focal lengths must be non-zero")
     if camera.world_to_camera.shape != (4, 4):
         raise ValueError("world_to_camera must have shape [4,4]")
@@ -111,6 +142,23 @@ def _check_pinhole_camera(camera: PinholeCamera, device: torch.device) -> None:
         raise ValueError("world_to_camera must be float32")
     if camera.world_to_camera.device != device:
         raise ValueError("world_to_camera must be on the same device as the batch")
+
+
+def _check_pinhole_camera_motion(camera: PinholeCameraMotion, device: torch.device) -> None:
+    if _scalar_is_zero(camera.fx) or _scalar_is_zero(camera.fy):
+        raise ValueError("pinhole focal lengths must be non-zero")
+    if camera.world_to_camera.shape != (4, 4):
+        raise ValueError("world_to_camera must have shape [4,4]")
+    if camera.world_to_camera_dot.shape != (4, 4):
+        raise ValueError("world_to_camera_dot must have shape [4,4]")
+    if camera.world_to_camera.dtype != torch.float32:
+        raise ValueError("world_to_camera must be float32")
+    if camera.world_to_camera_dot.dtype != torch.float32:
+        raise ValueError("world_to_camera_dot must be float32")
+    if camera.world_to_camera.device != device:
+        raise ValueError("world_to_camera must be on the same device as the batch")
+    if camera.world_to_camera_dot.device != device:
+        raise ValueError("world_to_camera_dot must be on the same device as the batch")
 
 
 def project_world_tubes_pinhole(
@@ -128,6 +176,10 @@ def project_world_tubes_pinhole(
 
     rotation = camera.world_to_camera[:3, :3]
     translation = camera.world_to_camera[:3, 3]
+    fx = _scalar_tensor(camera.fx, batch.x0, "fx")
+    fy = _scalar_tensor(camera.fy, batch.x0, "fy")
+    cx = _scalar_tensor(camera.cx, batch.x0, "cx")
+    cy = _scalar_tensor(camera.cy, batch.x0, "cy")
     center_cam = batch.x0 @ rotation.T + translation
     velocity_cam = batch.velocity @ rotation.T
 
@@ -135,17 +187,17 @@ def project_world_tubes_pinhole(
     inv_z = 1.0 / z
     x_over_z = center_cam[:, 0] * inv_z
     y_over_z = center_cam[:, 1] * inv_z
-    center_u = float(camera.fx) * x_over_z + float(camera.cx)
-    center_v = float(camera.fy) * y_over_z + float(camera.cy)
+    center_u = fx * x_over_z + cx
+    center_v = fy * y_over_z + cy
 
-    velocity_u = float(camera.fx) * (velocity_cam[:, 0] * z - center_cam[:, 0] * velocity_cam[:, 2]) * inv_z.square()
-    velocity_v = float(camera.fy) * (velocity_cam[:, 1] * z - center_cam[:, 1] * velocity_cam[:, 2]) * inv_z.square()
+    velocity_u = fx * (velocity_cam[:, 0] * z - center_cam[:, 0] * velocity_cam[:, 2]) * inv_z.square()
+    velocity_v = fy * (velocity_cam[:, 1] * z - center_cam[:, 1] * velocity_cam[:, 2]) * inv_z.square()
 
     inv_z2 = inv_z.square()
-    du_dx = float(camera.fx) * inv_z
-    du_dz = -float(camera.fx) * center_cam[:, 0] * inv_z2
-    dv_dy = float(camera.fy) * inv_z
-    dv_dz = -float(camera.fy) * center_cam[:, 1] * inv_z2
+    du_dx = fx * inv_z
+    du_dz = -fx * center_cam[:, 0] * inv_z2
+    dv_dy = fy * inv_z
+    dv_dz = -fy * center_cam[:, 1] * inv_z2
 
     proj_u_x = du_dx * rotation[0, 0] + du_dz * rotation[2, 0]
     proj_u_y = du_dx * rotation[0, 1] + du_dz * rotation[2, 1]
@@ -180,6 +232,198 @@ def project_world_tubes_pinhole(
     depth0 = z
     depth_beta = torch.zeros((batch.x0.shape[0], 3), dtype=torch.float32, device=batch.x0.device)
     depth_beta[:, 2] = velocity_cam[:, 2]
+    return ma, q_uvt, depth0, depth_beta, batch.opacity, batch.color
+
+
+def project_world_tubes_pinhole_motion(
+    batch: WorldTubeBatch,
+    camera: PinholeCameraMotion,
+    _config: UVTRenderConfig,
+    *,
+    min_depth: float = 1.0e-4,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    """Project world tubes with a first-order moving pinhole camera chart."""
+
+    del _config
+    _check_batch(batch)
+    _check_pinhole_camera_motion(camera, batch.x0.device)
+
+    rotation = camera.world_to_camera[:3, :3]
+    translation = camera.world_to_camera[:3, 3]
+    rotation_dot = camera.world_to_camera_dot[:3, :3]
+    translation_dot = camera.world_to_camera_dot[:3, 3]
+    fx = _scalar_tensor(camera.fx, batch.x0, "fx")
+    fy = _scalar_tensor(camera.fy, batch.x0, "fy")
+    cx = _scalar_tensor(camera.cx, batch.x0, "cx")
+    cy = _scalar_tensor(camera.cy, batch.x0, "cy")
+    fx_dot = _scalar_tensor(camera.fx_dot, batch.x0, "fx_dot")
+    fy_dot = _scalar_tensor(camera.fy_dot, batch.x0, "fy_dot")
+    cx_dot = _scalar_tensor(camera.cx_dot, batch.x0, "cx_dot")
+    cy_dot = _scalar_tensor(camera.cy_dot, batch.x0, "cy_dot")
+
+    chart_time = float(camera.chart_time)
+    x_s = batch.x0 + batch.velocity * (chart_time - batch.t0).unsqueeze(-1)
+    center_cam = x_s @ rotation.T + translation
+    velocity_cam = batch.velocity @ rotation.T + x_s @ rotation_dot.T + translation_dot
+
+    z = center_cam[:, 2].clamp_min(min_depth)
+    inv_z = 1.0 / z
+    x_over_z = center_cam[:, 0] * inv_z
+    y_over_z = center_cam[:, 1] * inv_z
+    center_u = fx * x_over_z + cx
+    center_v = fy * y_over_z + cy
+
+    quotient_u_dot = (velocity_cam[:, 0] * z - center_cam[:, 0] * velocity_cam[:, 2]) * inv_z.square()
+    quotient_v_dot = (velocity_cam[:, 1] * z - center_cam[:, 1] * velocity_cam[:, 2]) * inv_z.square()
+    velocity_u = fx_dot * x_over_z + fx * quotient_u_dot + cx_dot
+    velocity_v = fy_dot * y_over_z + fy * quotient_v_dot + cy_dot
+
+    inv_z2 = inv_z.square()
+    du_dx = fx * inv_z
+    du_dz = -fx * center_cam[:, 0] * inv_z2
+    dv_dy = fy * inv_z
+    dv_dz = -fy * center_cam[:, 1] * inv_z2
+
+    proj_u_x = du_dx * rotation[0, 0] + du_dz * rotation[2, 0]
+    proj_u_y = du_dx * rotation[0, 1] + du_dz * rotation[2, 1]
+    proj_v_x = dv_dy * rotation[1, 0] + dv_dz * rotation[2, 0]
+    proj_v_y = dv_dy * rotation[1, 1] + dv_dz * rotation[2, 1]
+
+    world_var_x = 1.0 / batch.precision_xy[:, 0].clamp_min(1.0e-6)
+    world_var_y = 1.0 / batch.precision_xy[:, 1].clamp_min(1.0e-6)
+    cov_uu = proj_u_x.square() * world_var_x + proj_u_y.square() * world_var_y + 1.0e-6
+    cov_uv = proj_u_x * proj_v_x * world_var_x + proj_u_y * proj_v_y * world_var_y
+    cov_vv = proj_v_x.square() * world_var_x + proj_v_y.square() * world_var_y + 1.0e-6
+    inv_det = 1.0 / (cov_uu * cov_vv - cov_uv.square()).clamp_min(1.0e-12)
+
+    lambda_u = cov_vv * inv_det
+    lambda_uv = -cov_uv * inv_det
+    lambda_v = cov_uu * inv_det
+    q_uvt = torch.stack(
+        (
+            lambda_u,
+            lambda_uv,
+            -(lambda_u * velocity_u + lambda_uv * velocity_v),
+            lambda_v,
+            -(lambda_uv * velocity_u + lambda_v * velocity_v),
+            batch.lambda_t
+            + lambda_u * velocity_u.square()
+            + 2.0 * lambda_uv * velocity_u * velocity_v
+            + lambda_v * velocity_v.square(),
+        ),
+        dim=-1,
+    )
+    time_center = torch.full_like(batch.t0, chart_time)
+    ma = torch.stack((center_u, center_v, time_center), dim=-1)
+    depth0 = z
+    depth_beta = torch.zeros((batch.x0.shape[0], 3), dtype=torch.float32, device=batch.x0.device)
+    depth_beta[:, 2] = velocity_cam[:, 2]
+    return ma, q_uvt, depth0, depth_beta, batch.opacity, batch.color
+
+
+def project_world_tubes_pinhole_projective_motion(
+    batch: WorldTubeBatch,
+    camera: PinholeCameraMotion,
+    _config: UVTRenderConfig,
+    *,
+    min_depth: float = 1.0e-4,
+) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    """Project moving pinhole cameras through the homogeneous camera-time gauge.
+
+    This emits the same UVT contract as `project_world_tubes_pinhole_motion`,
+    but computes the screen velocity from `h(t) = K(t) [R(t)|T(t)] X(t)`.
+    """
+
+    del _config
+    _check_batch(batch)
+    _check_pinhole_camera_motion(camera, batch.x0.device)
+
+    world_to_camera = camera.world_to_camera
+    world_to_camera_dot = camera.world_to_camera_dot
+    fx = _scalar_tensor(camera.fx, batch.x0, "fx")
+    fy = _scalar_tensor(camera.fy, batch.x0, "fy")
+    cx = _scalar_tensor(camera.cx, batch.x0, "cx")
+    cy = _scalar_tensor(camera.cy, batch.x0, "cy")
+    fx_dot = _scalar_tensor(camera.fx_dot, batch.x0, "fx_dot")
+    fy_dot = _scalar_tensor(camera.fy_dot, batch.x0, "fy_dot")
+    cx_dot = _scalar_tensor(camera.cx_dot, batch.x0, "cx_dot")
+    cy_dot = _scalar_tensor(camera.cy_dot, batch.x0, "cy_dot")
+    zero = torch.zeros((), dtype=batch.x0.dtype, device=batch.x0.device)
+    one = torch.ones((), dtype=batch.x0.dtype, device=batch.x0.device)
+    K = torch.stack(
+        (
+            torch.stack((fx, zero, cx)),
+            torch.stack((zero, fy, cy)),
+            torch.stack((zero, zero, one)),
+        )
+    )
+    K_dot = torch.stack(
+        (
+            torch.stack((fx_dot, zero, cx_dot)),
+            torch.stack((zero, fy_dot, cy_dot)),
+            torch.stack((zero, zero, zero)),
+        )
+    )
+    P = K @ world_to_camera[:3, :]
+    P_dot = K_dot @ world_to_camera[:3, :] + K @ world_to_camera_dot[:3, :]
+
+    chart_time = float(camera.chart_time)
+    x_s = batch.x0 + batch.velocity * (chart_time - batch.t0).unsqueeze(-1)
+    ones = torch.ones((batch.x0.shape[0], 1), dtype=torch.float32, device=batch.x0.device)
+    zeros = torch.zeros_like(ones)
+    X = torch.cat((x_s, ones), dim=-1)
+    X_dot = torch.cat((batch.velocity, zeros), dim=-1)
+
+    h0 = X @ P.T
+    h1 = X @ P_dot.T + X_dot @ P.T
+    z = h0[:, 2].clamp_min(min_depth)
+    inv_z = 1.0 / z
+    center_u = h0[:, 0] * inv_z
+    center_v = h0[:, 1] * inv_z
+    velocity_u = (h1[:, 0] * z - h0[:, 0] * h1[:, 2]) * inv_z.square()
+    velocity_v = (h1[:, 1] * z - h0[:, 1] * h1[:, 2]) * inv_z.square()
+
+    inv_z2 = inv_z.square()
+    dehom = torch.zeros((batch.x0.shape[0], 2, 3), dtype=torch.float32, device=batch.x0.device)
+    dehom[:, 0, 0] = inv_z
+    dehom[:, 0, 2] = -h0[:, 0] * inv_z2
+    dehom[:, 1, 1] = inv_z
+    dehom[:, 1, 2] = -h0[:, 1] * inv_z2
+    pixel_jacobian_world = dehom @ P[:, :3]
+    proj_u_x = pixel_jacobian_world[:, 0, 0]
+    proj_u_y = pixel_jacobian_world[:, 0, 1]
+    proj_v_x = pixel_jacobian_world[:, 1, 0]
+    proj_v_y = pixel_jacobian_world[:, 1, 1]
+
+    world_var_x = 1.0 / batch.precision_xy[:, 0].clamp_min(1.0e-6)
+    world_var_y = 1.0 / batch.precision_xy[:, 1].clamp_min(1.0e-6)
+    cov_uu = proj_u_x.square() * world_var_x + proj_u_y.square() * world_var_y + 1.0e-6
+    cov_uv = proj_u_x * proj_v_x * world_var_x + proj_u_y * proj_v_y * world_var_y
+    cov_vv = proj_v_x.square() * world_var_x + proj_v_y.square() * world_var_y + 1.0e-6
+    inv_det = 1.0 / (cov_uu * cov_vv - cov_uv.square()).clamp_min(1.0e-12)
+
+    lambda_u = cov_vv * inv_det
+    lambda_uv = -cov_uv * inv_det
+    lambda_v = cov_uu * inv_det
+    q_uvt = torch.stack(
+        (
+            lambda_u,
+            lambda_uv,
+            -(lambda_u * velocity_u + lambda_uv * velocity_v),
+            lambda_v,
+            -(lambda_uv * velocity_u + lambda_v * velocity_v),
+            batch.lambda_t
+            + lambda_u * velocity_u.square()
+            + 2.0 * lambda_uv * velocity_u * velocity_v
+            + lambda_v * velocity_v.square(),
+        ),
+        dim=-1,
+    )
+    time_center = torch.full_like(batch.t0, chart_time)
+    ma = torch.stack((center_u, center_v, time_center), dim=-1)
+    depth0 = z
+    depth_beta = torch.zeros((batch.x0.shape[0], 3), dtype=torch.float32, device=batch.x0.device)
+    depth_beta[:, 2] = h1[:, 2]
     return ma, q_uvt, depth0, depth_beta, batch.opacity, batch.color
 
 
@@ -271,16 +515,11 @@ def pinhole_from_camera_spec(camera_spec: object, device: torch.device | str | N
     c2w = c2w.to(device=dev, dtype=torch.float32)
     world_to_camera = torch.linalg.inv(c2w)
 
-    def scalar(value: object) -> float:
-        if torch.is_tensor(value):
-            return float(value.detach().cpu())
-        return float(value)
-
     return PinholeCamera(
-        fx=scalar(getattr(camera_spec, "fx")),
-        fy=scalar(getattr(camera_spec, "fy")),
-        cx=scalar(getattr(camera_spec, "cx")),
-        cy=scalar(getattr(camera_spec, "cy")),
+        fx=getattr(camera_spec, "fx"),
+        fy=getattr(camera_spec, "fy"),
+        cx=getattr(camera_spec, "cx"),
+        cy=getattr(camera_spec, "cy"),
         world_to_camera=world_to_camera,
     )
 

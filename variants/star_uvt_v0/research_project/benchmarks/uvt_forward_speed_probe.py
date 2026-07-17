@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -33,6 +34,13 @@ def synchronize(device: torch.device) -> None:
         torch.cuda.synchronize(device)
 
 
+def apply_uvt_tile_env(config: UVTRenderConfig) -> None:
+    os.environ["STAR_UVT_TILE_X"] = str(config.tile_x)
+    os.environ["STAR_UVT_TILE_Y"] = str(config.tile_y)
+    os.environ["STAR_UVT_TILE_T"] = str(config.tile_t)
+    os.environ["STAR_UVT_TILE_CAPACITY"] = str(config.tile_capacity)
+
+
 def time_dense(model: ScreenTimeTubeModel, *, iterations: int, warmup_iterations: int) -> tuple[float, torch.Tensor]:
     ma, q_uvt, depth0, depth_beta, opacity, color = model.tensors()
     device = ma.device
@@ -53,7 +61,7 @@ def time_dense(model: ScreenTimeTubeModel, *, iterations: int, warmup_iterations
 def time_metal(
     model: ScreenTimeTubeModel,
     *,
-    reference: torch.Tensor,
+    reference: torch.Tensor | None,
     iterations: int,
     warmup_iterations: int,
 ) -> tuple[float, dict[str, Any]]:
@@ -63,7 +71,7 @@ def time_metal(
     for tensor in (ma, q_uvt, depth0, depth_beta, opacity, color):
         if tensor.device.type != "mps":
             raise ValueError("Metal timing requires model tensors on MPS")
-    reference_cpu = reference.detach().cpu()
+    reference_cpu = None if reference is None else reference.detach().cpu()
     with torch.no_grad():
         for _ in range(warmup_iterations):
             render_uvt_tubes(ma, q_uvt, depth0, depth_beta, opacity, color, model.config)
@@ -72,6 +80,7 @@ def time_metal(
         for _ in range(iterations):
             render_uvt_tubes(ma, q_uvt, depth0, depth_beta, opacity, color, model.config)
         torch.mps.synchronize()
+        elapsed_ms = (time.perf_counter() - started_at) * 1000.0 / float(iterations)
         result = render_uvt_tubes(
             ma,
             q_uvt,
@@ -85,7 +94,7 @@ def time_metal(
         )
     if result is None or not hasattr(result, "stats") or result.stats is None:
         raise AssertionError("Metal render did not return stats")
-    return (time.perf_counter() - started_at) * 1000.0 / float(iterations), result.stats.__dict__
+    return elapsed_ms, result.stats.__dict__
 
 
 def run_case(
@@ -98,12 +107,22 @@ def run_case(
     spatial_precision: float,
     temporal_precision: float,
     opacity: float,
+    tile_t: int,
+    tile_capacity: int,
+    skip_dense_reference: bool,
     iterations: int,
     warmup_iterations: int,
 ) -> dict[str, Any]:
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     target = load_video_target(video_path, target_size=target_size, max_frames=max_frames, device=device)
-    config = UVTRenderConfig(height=int(target.shape[1]), width=int(target.shape[2]), frames=int(target.shape[0]))
+    config = UVTRenderConfig(
+        height=int(target.shape[1]),
+        width=int(target.shape[2]),
+        frames=int(target.shape[0]),
+        tile_t=tile_t,
+        tile_capacity=tile_capacity,
+    )
+    apply_uvt_tile_env(config)
     model = ScreenTimeTubeModel.from_video_samples(
         target,
         config,
@@ -113,7 +132,10 @@ def run_case(
         temporal_precision=temporal_precision,
         opacity=opacity,
     )
-    dense_ms, dense_image = time_dense(model, iterations=iterations, warmup_iterations=warmup_iterations)
+    dense_ms = None
+    dense_image = None
+    if not skip_dense_reference:
+        dense_ms, dense_image = time_dense(model, iterations=iterations, warmup_iterations=warmup_iterations)
     metal_ms, metal_stats = time_metal(
         model,
         reference=dense_image,
@@ -128,6 +150,8 @@ def run_case(
         "spatial_precision": spatial_precision,
         "temporal_precision": temporal_precision,
         "opacity": opacity,
+        "tile_t": config.tile_t,
+        "tile_capacity": config.tile_capacity,
         "iterations": iterations,
         "warmup_iterations": warmup_iterations,
         "device": str(device),
@@ -147,6 +171,9 @@ def main() -> None:
     parser.add_argument("--spatial-precision", type=float, default=0.25)
     parser.add_argument("--temporal-precision", type=float, default=0.5)
     parser.add_argument("--opacity", type=float, default=0.7)
+    parser.add_argument("--uvt-tile-t", type=int, choices=(1, 2, 4), default=2)
+    parser.add_argument("--uvt-tile-capacity", type=int, choices=(32, 64, 128, 256), default=128)
+    parser.add_argument("--skip-dense-reference", action="store_true")
     parser.add_argument("--iterations", type=int, default=1)
     parser.add_argument("--warmup-iterations", type=int, default=1)
     parser.add_argument("--out-json", type=Path)
@@ -162,6 +189,9 @@ def main() -> None:
             spatial_precision=args.spatial_precision,
             temporal_precision=args.temporal_precision,
             opacity=args.opacity,
+            tile_t=args.uvt_tile_t,
+            tile_capacity=args.uvt_tile_capacity,
+            skip_dense_reference=args.skip_dense_reference,
             iterations=args.iterations,
             warmup_iterations=args.warmup_iterations,
         )

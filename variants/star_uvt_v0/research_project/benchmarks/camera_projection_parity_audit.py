@@ -28,6 +28,7 @@ from multicam_video_data import (  # noqa: E402
     deepview_camera_from_models,
     deepview_lens_from_model,
     deepview_model_for_camera,
+    neural_3d_camera_from_poses_bounds,
     select_multicam_record,
 )
 from renderers.projection import project_points_camera  # noqa: E402
@@ -110,15 +111,32 @@ def audit_camera(
     target_size: int,
     grid_size: int,
 ) -> dict[str, Any]:
-    K, _c2w = deepview_camera_from_models(
-        record,
-        camera_name,
-        H=target_size,
-        W=target_size,
-        device=torch.device("cpu"),
-    )
-    model = deepview_model_for_camera(record, camera_name)
-    lens_model, distortion = deepview_lens_from_model(model, device=torch.device("cpu"))
+    device = torch.device("cpu")
+    dataset = str(record.get("dataset", ""))
+    if dataset == "deepview_video":
+        K, _c2w = deepview_camera_from_models(
+            record,
+            camera_name,
+            H=target_size,
+            W=target_size,
+            device=device,
+        )
+        model = deepview_model_for_camera(record, camera_name)
+        lens_model, distortion = deepview_lens_from_model(model, device=device)
+    elif dataset == "neural_3d_video":
+        K, _c2w = neural_3d_camera_from_poses_bounds(
+            record,
+            camera_name,
+            H=target_size,
+            W=target_size,
+            device=device,
+        )
+        lens_model, distortion = "pinhole", None
+    else:
+        raise ValueError(
+            "Camera projection parity audit supports calibrated DeepView and Neural 3D Video records; "
+            f"got dataset={dataset!r}."
+        )
     points = grid_camera_points_from_pinhole_pixels(K, target_size=target_size, grid_size=grid_size)
     distorted_camera = camera_spec_from_K(K, lens_model=lens_model, distortion=distortion)
     pinhole_camera = camera_spec_from_K(K, lens_model="pinhole", distortion=None)

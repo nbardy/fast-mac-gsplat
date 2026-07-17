@@ -95,6 +95,18 @@ python3 research_project/benchmarks/multicam_heldout_compare.py \
   --device cpu --uvt-checkpoint-every-steps 1 \
   --uvt-select-checkpoint first_balanced_train_psnr_plateau --skip-splats \
   --out-dir research_project/benchmarks/results/multicam_heldout_compare_balanced_train_plateau_default_smoke_16_2f_1s
+PYTHONHASHSEED=0 PYTORCH_ENABLE_MPS_FALLBACK=0 python3 research_project/benchmarks/uvt_gradient_repeatability_probe.py \
+  --target-size 16 --max-frames 2 --device mps --seed 2 --repeats 3 \
+  --uvt-render-backend metal_tile --sample-emission-mode with_keys \
+  --autograd-reduction-mode key_sort_scan_metal \
+  --diagnostic-reduction-mode key_sort_scan_metal \
+  --uvt-camera-projection dataset_lens --uvt-init-views all_train \
+  --uvt-init-sampling grid --uvt-init-frames all --uvt-tubes 16 \
+  --uvt-lr 0.01 --uvt-loss-scope temporal_window --uvt-window-frames 1 \
+  --uvt-train-schedule view_shuffled_cycle --uvt-tile-load-reg 0.001 \
+  --uvt-tile-load-target 60 --uvt-depth-slope-reg 0.05 \
+  --uvt-tile-t 1 --uvt-tile-capacity 64 \
+  --out-json research_project/benchmarks/results/uvt_gradient_repeatability_probe_mps_smoke_16_2f_t16_keysortscan_autograd.json
 python3 research_project/benchmarks/camera_projection_parity_audit.py
 ```
 
@@ -112,7 +124,8 @@ python3 research_project/benchmarks/camera_projection_parity_audit.py
   contact sheet. The per-frame baseline defaults to the old random init, but
   `--per-frame-init-mode video_samples` enables a stronger pixel-sampled direct
   baseline with explicit `--per-frame-spatial-precision`, `--per-frame-opacity`,
-  and `--per-frame-sample-mode`.
+  and `--per-frame-sample-mode`. It also accepts `--uvt-reduction-mode` and
+  `--uvt-sample-emission-mode` for Metal-tile UVT overfit comparisons.
 - `multicam_heldout_compare.py` reuses the Dynaworld multicam validation loader
   and the current V-JEPA F32 baseline split, then trains STAR-UVT worldtubes
   and a free dynamic 3DGS splat baseline for the same wall-clock budget before
@@ -176,6 +189,293 @@ python3 research_project/benchmarks/camera_projection_parity_audit.py
   for STAR-UVT and fast-mac direct splats, with separate projection, render,
   loss, backward, and optimizer columns. This is timing evidence only, not a
   quality metric.
+- `multicam_heldout_compare.py --uvt-reduction-mode key_sort_scan_metal
+  --uvt-sample-emission-mode with_keys` runs the STAR train loop through the
+  deterministic keyed sample path. The tiny MPS smoke
+  `multicam_heldout_compare_keysortscan_smoke_16_2f_1s` proves the flags reach
+  the actual train loop.
+- `multicam_star_repeatability_probe.py --uvt-reduction-mode
+  key_sort_scan_metal --uvt-sample-emission-mode with_keys` repeats STAR
+  training in one process with the deterministic keyed sample path. The tiny
+  MPS smoke `multicam_star_repeatability_probe_keysortscan_smoke_16_2f_1step.json`
+  reports `final_state_max_abs: 0.0`. The real 512px seed-2 artifacts
+  `mcam512_s2_t320_view_shuffled_cycle_keysortscan_repeatability_20steps.json`,
+  `mcam512_s2_t320_view_shuffled_cycle_keysortscan_repeatability_100steps.json`,
+  and `mcam512_s2_t320_view_shuffled_cycle_keysortscan_repeatability_600steps.json`
+  also report final state max delta `0.0` and final train/heldout PSNR span
+  `0.0`.
+- `uvt_gradient_repeatability_probe.py` runs fixed-window sample generation,
+  reduction, and full-autograd repeats from one initial STAR state. Use
+  `--sample-emission-mode with_keys` plus `--autograd-reduction-mode
+  key_sort_scan_metal` to test whether deterministic sample keys control
+  MPS/custom-backward drift.
+- `uvt_backward_breakdown_probe.py` and `uvt_train_step_timing_probe.py` accept
+  the same `--uvt-reduction-mode` and `--uvt-sample-emission-mode` flags, so the
+  deterministic path can be timed against the default `index_add` path.
+  `--uvt-sample-emission-mode tile_pair` exercises the diagnostic tile-pair
+  backward emitter. Current artifacts show parity and compact rows
+  (`135565 -> 10556` rows at 32px/16f/224 tubes, max `grad_q` delta
+  `0.00030517578125`), but not the final speed win: 32px sample+reduce median is
+  `23.357353999017505` ms and train-step backward median is
+  `76.03254100104095` ms.
+  `tile_pair_compensated`, `key_sort_compensated_scan_metal`, and
+  `tile_pair_scanline` are diagnostic-only follow-ups. Their tiny MPS smokes
+  pass, but the 512px 100-step matched replays all track keyed state worse than
+  plain `tile_pair`, so do not spend 600-step runs on those variants without a
+  new row-structure or reducer change.
+  The live `tile_pair` path now prunes exactly zero accumulated rows before
+  reduction. The 32px timing artifact
+  `uvt_backward_breakdown_probe_32_16f_224t_tilet1_cap128_tilepair_zero_prune_compare.json`
+  reduces valid rows to `4802` and records sample+reduce median
+  `21.83349999540951` ms; the matching train-step timing artifact records
+  backward median `65.07550049718702` ms. The 512px seed-2 600-step replay and
+  repeatability artifacts are
+  `mcam512_s2_t320_view_shuffled_cycle_mode_compare_keyed_vs_tilepair_zero_prune_600steps.json`
+  and
+  `mcam512_s2_t320_view_shuffled_cycle_tilepair_zero_prune_repeatability_600steps.json`.
+  The fixed-tube scale probes separate the rasterizer claim from full training
+  quality. Forward artifacts
+  `uvt_forward_speed_probe_128_16f_7168_s0125_t20_tilet1_cap128_metalonly_scale.json`,
+  `uvt_forward_speed_probe_256_16f_7168_s0125_t20_tilet1_cap128_metalonly_scale.json`,
+  `uvt_forward_speed_probe_512_16f_7168_s0125_t20_tilet1_cap128_metalonly_scale.json`,
+  and
+  `uvt_forward_speed_probe_1024_16f_7168_s0125_t20_tilet1_cap128_metalonly_scale.json`
+  keep active UVT tile-tube pairs nearly flat at `451838`, `516990`, `531638`,
+  and `539762` while target pixels grow `64x`. Backward artifacts
+  `uvt_backward_breakdown_probe_256_16f_7168_s0125_t20_tilet1_cap128_tilepair_zero_prune_scale_rerun.json`,
+  `uvt_backward_breakdown_probe_512_16f_7168_s0125_t20_tilet1_cap128_tilepair_zero_prune_scale.json`,
+  and
+  `uvt_backward_breakdown_probe_1024_16f_7168_s0125_t20_tilet1_cap128_tilepair_zero_prune_scale.json`
+  keep compact rows roughly flat at `207324`, `211374`, and `213642` while
+  allocated slots grow `2097152 -> 8388608 -> 33554432`. This is fixed-tube
+  sparse/sublinear rasterizer evidence, not a claim that full STAR training is
+  already faster than the strongest V-JEPA baseline. The 512px direct-atomic
+  fixed-tube contrast
+  `uvt_backward_breakdown_probe_512_16f_7168_s0125_t20_tilet1_cap128_directatomic_scale.json`
+  emits `7168` direct per-tube gradients and reports sample+reduce median
+  `35.70937499171123` ms, versus the deterministic 512px zero-pruned tile-pair
+  row's `211374` emitted rows, `8388608` allocated slots, and
+  `129.20112499705283` ms. Direct atomic is therefore the local speed target,
+  but not the repeatable reporting path. The `direct_serial` diagnostic
+  transposes the tile-pair emitter into one deterministic thread per tube. Its
+  parity smoke `uvt_direct_serial_backward_parity_smoke_16_2f_16t.json` stays
+  within float-order tolerance, but the fixed 512px row
+  `uvt_backward_breakdown_probe_512_16f_7168_s0125_t20_tilet1_cap128_directserial_scale_1it.json`
+  takes `327.0019999908982` ms, so it is a rejected speed path. Baseline refresh artifacts
+  now split the bar: the manual pure-512 V-JEPA F32 run at
+  `outputs/multicam_relative_pose/full_relpose_features_F32_512_v6refined_goodset_train0006_0014_holdout0005_manual250_nomedia/manual_probe_summary.json`
+  reached heldout PSNR `13.5727` in `4382.390926374996` s, while the stronger
+  multires V-JEPA run `24absic1` reached heldout PSNR `13.9870`. The first
+  naive 1024px STAR-only quality probe
+  `mcam1024_s2_t320_view_shuffled_cycle_fixed600_besttrain_tilepair_zero_prune_staronly`
+  reaches heldout PSNR `13.766105651855469` in `209.39192004200595` s and is a
+  larger-resolution rejection, not the missing full-res win. The stricter
+  tile-load repeat
+  `mcam1024_s2_t320_view_shuffled_cycle_fixed600_besttrain_tilepair_zero_prune_staronly_tileload003`
+  reduces max pair ratio to `4.722782922009996` and loop time to
+  `192.36781579200033` s, but heldout PSNR drops to `13.61436939239502`.
+  The 512px seed-2 longer-training repeat
+  `mcam512_s2_t320_view_shuffled_cycle_fixed1000_besttrain_tilepair_zero_prune_staronly`
+  also rejects a simple step-budget fix: selected/final step `1000` reaches
+  heldout PSNR `13.866610527038574` in `336.69192270799977` s, while the
+  heldout-best checkpoint is only step `700` at `13.875921249389648`.
+  The new `epoch_view_shuffled_cycle` schedule is wired and smoke-tested, but
+  the first 512px seed-2 probe
+  `mcam512_s2_t320_epoch_view_shuffled_cycle_fixed600_besttrain_tilepair_zero_prune_staronly`
+  is negative: selected heldout PSNR `13.707905769348145`, heldout-best step
+  `400` at `13.862957954406738`, below the current view-shuffled seed-2
+  zero-pruned row. The plain `cycle` retry under the same zero-pruned path
+  `mcam512_s2_t320_cycle_fixed600_besttrain_tilepair_zero_prune_staronly` stays
+  finite but reaches only heldout PSNR `13.701606750488281`.
+  The static/dynamic initialization probe is also wired and rejected as an
+  initialization-only fix. `--uvt-static-tube-fraction 0.25` with
+  `--uvt-static-init-lambda-t 0.02` passed the tiny smoke
+  `multicam_heldout_compare_static_dynamic_init_smoke_16_2f_1s`, then the 512px
+  seed-2 artifact
+  `mcam512_s2_t320_view_shuffled_cycle_static025_lamt002_fixed600_besttrain_tilepair_zero_prune_staronly`
+  used `80` static and `240` dynamic tubes and selected step `600` at heldout
+  PSNR `13.644302368164062` in `136.58938849999686` s. The run is Metal-clean
+  with max pair ratio `3.2617686604907052`, max tile `93`, zero overflow, and
+  zero unstable tiles, but it is below both the current deterministic seed-2 row
+  and the `13.9870` multires V-JEPA row.
+  The static-only velocity regularization follow-up is also negative.
+  `--uvt-static-velocity-reg 0.1` passed
+  `multicam_heldout_compare_static_dynamic_velreg01_smoke_16_2f_1s`, then the
+  512px seed-2 artifact
+  `mcam512_s2_t320_view_shuffled_cycle_static025_lamt002_velreg01_fixed600_besttrain_tilepair_zero_prune_staronly`
+  selected step `600` at heldout PSNR `13.454254150390625`, with heldout-best
+  step `500` at `13.526884078979492`, loop `160.88216154198744` s, and
+  render-only `0.2113907500024652` s. It is Metal-clean but worse than the
+  init-only split.
+- `uvt_backward_breakdown_probe.py` and `uvt_train_step_timing_probe.py` also
+  accept `--uvt-sample-emission-mode direct_atomic`. This bypasses compact
+  sample rows and directly accumulates per-tube gradients with Metal atomics.
+  Current artifacts show parity within small float tolerance (`135565 -> 224`
+  rows at 32px/16f/224 tubes, max `grad_q` delta `0.0003662109375`) and the
+  first speed win: 32px train-step backward median `8.311833000334445` ms, and
+  256px/16f/7168-tube backward median `41.306667000753805` ms. The new 512px
+  fixed-tube breakdown records sample+reduce median `35.70937499171123` ms
+  against deterministic tile-pair's `129.20112499705283` ms. This is timing
+  evidence only until repeatability and quality gates clear.
+- `uvt_backward_breakdown_probe.py --uvt-sample-emission-mode
+  direct_fixedpoint` exercises deterministic integer-atomic accumulation for
+  direct per-tube gradients. It is fast and exact-repeatable, but rejected as a
+  training path. The 512px fixed-tube row with default scale (`1e6`, inferred
+  from the pre-metadata artifact command) takes `47.18237501219846` ms
+  sample+reduce median; the `scale1e4` retry takes `42.020083012175746` ms. The
+  20-step repeatability artifact has final state max delta `0.0`, but default
+  scale goes nonfinite at step `160` and scale `1e4` goes nonfinite at step
+  `350` in the 600-step retry. Quality is far below the deterministic tile-pair
+  rows, with selected heldout PSNR `7.480576515197754` at default scale and
+  `10.548453330993652` for the `scale1e4` 600-step retry.
+- `uvt_backward_breakdown_probe.py --uvt-sample-emission-mode
+  tile_pair_fixedpoint` tests the same deterministic fixed-point idea after
+  tile-slot accumulation. It is exact-repeatable and close to zero-pruned
+  tile-pair after reduction (`6.103515625e-05` max abs on the 512px parity
+  artifact), and fixed 512px timings are plausible (`64.06379198597278` ms
+  cap-128; `43.17741599516012` ms cap-256 warm rerun). The training gates are
+  still negative: default scale goes nonfinite at step `100`, and
+  `STAR_UVT_FIXEDPOINT_SCALE=10000` goes nonfinite at step `180`, selecting
+  only heldout PSNR `7.422435760498047`. Keep it with the rejected fixed-point
+  family unless a separate stability plan changes the optimizer behavior.
+- `uvt_backward_breakdown_probe.py --uvt-sample-emission-mode
+  tile_pair_atomic` tests zero-pruned tile-slot accumulation followed by direct
+  float atomics into tube gradients. The 512px parity artifact is close to the
+  zero-pruned reference (`9.1552734375e-05` max abs on `grad_q`, matching
+  unstable flags), but timing is not a win: `93.08808401692659` ms
+  sample+reduce median. The 20-step repeatability gate also remains
+  nondeterministic (`8.440017700195312e-05` final state max abs). Treat this as
+  evidence that fewer float atomics help drift slightly, not as the solved
+  deterministic rasterizer.
+- `uvt_backward_breakdown_probe.py --uvt-sample-emission-mode
+  direct_split_fixedpoint` tests a coarse-plus-residual integer accumulator for
+  the same direct per-tube shape. It compiles and is exact-repeatable:
+  `uvt_direct_split_fixedpoint_backward_parity_512_16f_7168t_tilet1_cap128.json`
+  has repeat max abs `0.0` and serial-parity max abs `0.000762939453125` on the
+  largest gradient tensor. The fixed 512px row takes `53.01575000339653` ms
+  sample+reduce median. The training gate is negative: the 200-step STAR-only
+  artifact goes nonfinite at step `120` and selects step `100` at heldout PSNR
+  `7.471946716308594`. Keep this with the rejected fixed-point family.
+- `uvt_backward_breakdown_probe.py --uvt-sample-emission-mode direct_serial`
+  exercises the deterministic one-thread-per-tube prototype. It compiles,
+  matches direct atomic on the tiny parity smoke within float-order tolerance,
+  and writes direct per-tube gradients without a reducer. It is slower at the
+  512px fixed-tube scale (`327.0019999908982` ms), so keep it as a diagnostic
+  rejection, not as the next reporting path.
+- `uvt_backward_breakdown_probe.py --uvt-sample-emission-mode
+  tile_pair_target_bounds` exercises the deterministic target-support skip. It
+  matches plain `tile_pair` exactly on the tiny reduced-gradient parity smoke,
+  but the 512px fixed-tube scale row is slightly slower (`132.46404100209475`
+  ms) than zero-pruned tile-pair (`129.20112499705283` ms). Keep it as a
+  diagnostic rejection, not as the next speed path.
+- `uvt_backward_breakdown_probe.py --uvt-sample-emission-mode
+  tile_pair_suffix` exercises the suffix-composite tile-pair variant. It keeps
+  deterministic tile-slot rows, matches plain tile-pair within float-order
+  tolerance on the tiny parity smoke, and improves the 512px fixed-tube
+  sample+reduce median to `112.1208749973448` ms. The 20-step repeatability
+  smoke is exact, but the full 512px seed-2 row reaches only heldout PSNR
+  `13.808026313781738`; a 750-step same-wall retry reaches
+  `13.85195541381836` in `128.04329337499803` s, still below the zero-pruned
+  seed-2 row. Treat suffix as a speed candidate, not a quality promotion.
+- `key_sort_segmented_metal` is an opt-in deterministic reducer diagnostic. It
+  sorts by the existing stable sample key, then uses the new Metal
+  `reduce_sample_bundle_sorted_segments` op so each tube sums only its sorted
+  segment. It is exact in the tiny suffix autograd smoke and matches
+  `key_sort_scan_metal` at the 512px step-0 suffix gradient gate. The 512px
+  suffix backward probe improves sample+reduce median to
+  `98.4361659939168` ms, but the matched 600-step suffix training row slows to
+  `171.39199266598735` s at the same heldout PSNR `13.808026313781738`. Keep it
+  as a diagnostic rejection, not the next training-speed path.
+- `uvt_backward_breakdown_probe.py --uvt-sample-emission-mode
+  tile_pair_suffix_reduced` exercises the direct-reduced suffix path. It emits
+  suffix tile-pair samples internally and reduces each tube in Metal tile-major
+  order, bypassing the explicit key sort/gather. Tiny and 512px parity checks
+  match suffix plus `key_sort_scan_metal` exactly (`0.0` max abs across all
+  gradient tensors). The 512px fixed backward row lands at
+  `99.05412500665989` ms sample+reduce median, but the matched 600-step train
+  row takes `118.60049016600533` s at heldout PSNR `13.808026313781738`, slower
+  than suffix scan and lower-quality/slower than zero-pruned tile-pair. Keep it
+  as an exact negative speed result.
+- `uvt_backward_breakdown_probe.py --uvt-sample-emission-mode
+  tile_pair_parallel` exercises the tile-local fixed-tree reducer attempt. It
+  keeps one compact row per `(tile, tube slot)` and uses one Metal threadgroup to
+  reduce the tile pixels for that row. The tiny parity artifact
+  `uvt_tile_pair_parallel_backward_parity_smoke_16_2f_16t_tilet1.json` is
+  exact-repeatable and matches plain `tile_pair` after reduction within max abs
+  `1.52587890625e-05`. The fixed 512px row
+  `uvt_backward_breakdown_probe_512_16f_7168_s0125_t20_tilet1_cap128_tilepair_parallel_scale.json`
+  lands at `141.02554200508166` ms sample+reduce median, slower than zero-pruned
+  tile-pair and suffix, so keep it as a rejected speed path.
+- `uvt_gradient_repeatability_probe.py` now accepts `tile_pair_target_bounds`
+  and `tile_pair_suffix`. The suffix gradient gates report keyed-vs-suffix max
+  model-gradient deltas of `6.05359673500061e-09` at step 0 and
+  `2.3096799850463867e-07` after 600 suffix-pretrain steps, so the suffix
+  quality miss is trajectory sensitivity rather than a gross local VJP error.
+- `multicam_heldout_compare.py` and `multicam_star_repeatability_probe.py` also
+  accept `--uvt-sample-emission-mode direct_atomic` for the real STAR training
+  loop. The tiny fixed-step MPS repeatability smoke
+  `multicam_star_repeatability_probe_directatomic_smoke_16_2f_2steps_fixedbudget.json`
+  reports two 2-step repeats with final state max delta `0.0`. The bounded
+  32px/16-frame/224-tube, 20-step artifact
+  `mcam32_s2_t224_directatomic_repeatability_20steps.json` has different state
+  digests and final state max delta `0.0001089535653591156`, while train and
+  heldout PSNR spans stay near zero. Direct atomic is therefore fast but not the
+  deterministic reporting path.
+- `video_fit_comparison.py --uvt-sample-emission-mode direct_atomic` now has a
+  256px/16-frame/7168-tube same-recipe overfit sanity row. At 50 steps it
+  matches the default-backward tile-load artifact at PSNR `21.97383165359497`
+  versus `21.97382688522339`, while UVT fit wall time drops from
+  `18746.74650000088` ms to `5612.386834000063` ms. At 200 steps it reaches
+  PSNR `23.977155685424805` versus `23.976197242736816`, while fit wall time
+  drops from `42516.04850000149` ms to `16431.616750000103` ms.
+- `multicam_heldout_compare.py --uvt-sample-emission-mode direct_atomic` now has
+  a smoke-scale paired row at 32px/16f/20 steps:
+  `mcam32_s2_t224_directatomic_paired20/comparison_report.json`. STAR
+  train/heldout PSNR is `8.433213710784912` / `8.312164306640625`, direct splats
+  are `8.406636238098145` / `8.236161231994629`, STAR train loop is
+  `1.6225384999997914` s versus splats `2.838062375005393` s, and STAR
+  render-only eval is `0.03705504100798862` s versus splats
+  `0.5165199170005508` s.
+- The 256px direct-atomic paired rows are
+  `mcam256_s0_t256_directatomic_fixed365_paired/comparison_report.json` and
+  `mcam256_s0_t256_directatomic_20s_paired/comparison_report.json`. At the same
+  365 STAR steps, direct atomic reaches heldout PSNR `13.968801498413086` in
+  `16.86269975000323` s versus the prior default seed-0 row at
+  `13.769630432128906` in `20.019632791983895` s. At the same 20-second budget,
+  direct atomic reaches heldout PSNR `13.885225296020508` in `367` STAR steps
+  versus direct splats at `8.864513397216797` in `812` steps.
+- The 20-second 256px direct-atomic paired row now has seeds 0/1/2. STAR
+  heldout PSNR is `13.885225296020508`, `13.736623764038086`, and
+  `13.848220825195312`; direct splats are `8.864513397216797`,
+  `9.101115226745605`, and `9.198732376098633`. All three STAR rows clear the
+  V-JEPA F32 heldout reference `13.6248`, but direct atomic is mixed versus the
+  prior default-backward STAR rows: seed 0 and seed 2 improve, seed 1 is about
+  `0.032` dB lower. Keep keyed reduction as the exact-repeat reporting path.
+- The 512px direct-atomic fixed-600 paired matrix is now
+  `mcam512_s{0,1,2}_t320_view_shuffled_cycle_fixed600_besttrain_directatomic_paired`.
+  STAR heldout PSNR is `13.669089317321777`, `13.904035568237305`, and
+  `13.819857597351074`; direct splats are `8.247410774230957`,
+  `8.256668090820312`, and `8.267980575561523`. STAR min/mean/max heldout is
+  `13.669089317321777` / `13.797660827636719` / `13.904035568237305`, with the
+  weakest seed `+0.04428931732177688` dB above the V-JEPA F32 reference. The
+  nearest prior paired default-backward matrix had STAR heldout
+  `13.730086326599121`, `13.756308555603027`, and `13.608675003051758`, so
+  direct atomic fixes the seed-2 miss and raises the matrix floor, but seed 0 is
+  lower than the strongest paired seed-0 rerun.
+- The 512px direct-atomic repeatability row
+  `mcam512_s2_t320_view_shuffled_cycle_directatomic_repeatability_600steps.json`
+  runs two same-process seed-2, fixed-600 repeats. Final state max/mean abs
+  delta is `1.431039810180664` / `0.11831939475876944`, final train PSNR span
+  is `0.1379227638244629`, and final heldout PSNR span is
+  `0.03300189971923828`. This rejects direct atomic as the exact-repeat
+  reporting path at 512px even though both repeats clear V-JEPA.
+- The shorter direct-atomic repeatability probes are
+  `mcam512_s2_t320_view_shuffled_cycle_directatomic_repeatability_20steps.json`
+  and `mcam512_s2_t320_view_shuffled_cycle_directatomic_repeatability_100steps.json`.
+  At 20 steps the final state max abs delta is `0.00010570883750915527` with
+  zero train/heldout PSNR span. At 100 steps the final state max abs delta is
+  `0.03318440169095993`, train PSNR span is `0.0000209808349609375`, and
+  heldout PSNR span is `0.000308990478515625`.
 - `camera_projection_parity_audit.py` measures the pixel shift between
   DeepView `opencv_fisheye` projection and the current legacy pinhole
   approximation on the goodset cameras.
@@ -2119,8 +2419,193 @@ Seed 2 best_train    step 600, heldout 13.793721199035645, render 0.135098458998
 ```
 
 Read: for `view_shuffled_cycle`, report `--uvt-select-checkpoint
-best_train_psnr` until a better selector is proven. The rule is still
-non-heldout, and it avoids the early gain-drop selection on seeds 1 and 2.
+best_train_psnr` as a candidate until a better selector is proven. The rule is
+still non-heldout, and it avoids the early gain-drop selection on seeds 1 and 2
+on the saved curves.
+
+Paired seed-0 best-train counterexample, 2026-05-12: rerunning seed 0 with
+paired direct splats enabled writes
+`research_project/benchmarks/results/mcam512_s0_t320_view_shuffled_cycle_fixed600_besttrain_paired_direct`.
+The selected STAR checkpoint uses `best_train_psnr`, `uses_heldout: false`, and
+step `600`, but reaches heldout PSNR only `13.597569465637207`, below the
+V-JEPA F32 reference `13.6248`. The heldout-best checkpoint in the same curve is
+step `400` at heldout PSNR `13.696317672729492`. Direct splats in the same
+directory use `fast_mac`, `dataset_lens`, and the same `600` max-step cap; they
+reach heldout PSNR `8.24771499633789` with render-only
+`1.2847208340026555s`. Read: the direct-splat gap is not the blocker, but
+`best_train_psnr` is not reliable enough to promote as the 512px selector.
+
+Paired seed-0 balanced-selector counterexample, 2026-05-12: the follow-up
+`mcam512_s0_t320_view_shuffled_cycle_fixed600_balanced_d03_gap165_paired_direct`
+uses `first_balanced_train_psnr_plateau` with train-plateau delta `0.3` and
+train-view gap max `1.65`. It selects step `400` without heldout, but selected
+heldout PSNR is only `13.495000839233398`; the heldout-best checkpoint in the
+same live curve is step `600` at `13.591666221618652`, also below the V-JEPA F32
+reference. Direct splats remain weak at heldout PSNR `8.247457504272461` and
+render-only `0.2415786669953377s`. Read: do not tune around this selector yet;
+first isolate why live paired seed-0 curves are not matching the saved positive
+curve.
+
+STAR-only seed-0 reruns, 2026-05-12: the first isolation run
+`mcam512_s0_t320_view_shuffled_cycle_fixed600_besttrain_staronly_rerun1` uses the
+same nominal recipe with `--skip-splats` and `best_train_psnr`. It selects step
+`600` at heldout PSNR `13.886017799377441`, render-only
+`0.10877087500557536s`, max pair ratio `3.002645829727257`, max tile count `97`,
+zero overflow, and zero unstable tiles. The second isolation run
+`mcam512_s0_t320_view_shuffled_cycle_fixed600_besttrain_staronly_rerun2` also
+selects step `600`, at heldout PSNR `13.815839767456055`, render-only
+`0.1103979579929728s`, max pair ratio `2.9570259825208334`, max tile count `94`,
+zero overflow, and zero unstable tiles. The runner trains and evaluates STAR
+before the direct-splat branch, so these positive STAR-only reruns mean the
+paired negatives are not simply caused by direct splats running first.
+
+Paired seed-0 best-train rerun, 2026-05-12:
+`mcam512_s0_t320_view_shuffled_cycle_fixed600_besttrain_paired_direct_rerun2`
+selects STAR step `600` at heldout PSNR `13.730086326599121`, render-only
+`0.11077054099587258s`, max pair ratio `2.9228518191265813`, max tile count `89`,
+zero overflow, and zero unstable tiles. Direct splats in the same directory are
+stable and weak at heldout PSNR `8.247519493103027`, render-only
+`0.30742666700825794s`. Across the four seed-0 `best_train_psnr` rows, selected
+STAR heldout spans `13.597569465637207` to `13.886017799377441`
+(`0.2884483337402344` dB); three of four clear V-JEPA, and the one miss is only
+`0.0272` dB below. This prompted the paired best-train matrix below.
+
+Paired best-train three-seed matrix, 2026-05-12: the current paired artifacts are
+`mcam512_s0_t320_view_shuffled_cycle_fixed600_besttrain_paired_direct_rerun2`,
+`mcam512_s1_t320_view_shuffled_cycle_fixed600_besttrain_paired_direct`, and
+`mcam512_s2_t320_view_shuffled_cycle_fixed600_besttrain_paired_direct`, with a
+seed-2 repeat at
+`mcam512_s2_t320_view_shuffled_cycle_fixed600_besttrain_paired_direct_rerun2`.
+All select STAR step `600` without heldout. STAR heldout PSNR is:
+
+```text
+seed 0      13.730086326599121
+seed 1      13.756308555603027
+seed 2      13.593206405639648
+seed 2 rep  13.608675003051758
+```
+
+The primary three-seed mean is `13.6932004292806`, min is
+`13.593206405639648`, and span is `0.1631021499633789`. Seed 2 misses the V-JEPA
+F32 reference twice, by `0.03159359436035203` dB and `0.016124996948242654` dB.
+Direct splats remain stable and far behind at heldout PSNRs
+`8.247519493103027`, `8.256725311279297`, `8.26798152923584`, and
+`8.267892837524414`. Read: STAR decisively beats direct splats, but this 512px
+recipe is not a robust V-JEPA replacement until seed 2 is fixed. Next run should
+be a current STAR-only seed-2 repeat, not a larger/full-resolution escalation.
+
+Seed-2 STAR-only check, 2026-05-12:
+`mcam512_s2_t320_view_shuffled_cycle_fixed600_besttrain_staronly_rerun1` repeats
+seed 2 with `--skip-splats` and `best_train_psnr`. It selects step `600` at
+train PSNR `15.40644359588623`, heldout PSNR `13.788966178894043`, render-only
+`0.16255258299497655s`, max pair ratio `2.979197693121063`, max tile count `85`,
+zero overflow, and zero unstable tiles. This clears V-JEPA by
+`0.1641661788940425` dB, while the two paired seed-2 rows miss by `0.0316` and
+`0.0161` dB. Because STAR trains before the direct-splat branch, this points to
+live MPS/run variance under a fragile recipe rather than direct-splat training
+causally degrading STAR. The next gate should control or audit determinism
+before full-resolution escalation.
+
+Env-captured seed-2 A/B, 2026-05-12:
+`multicam_heldout_compare.py` now writes argv/env/torch metadata and accepts
+`--torch-deterministic {off,warn,error}`. The CPU metadata smoke
+`multicam_heldout_compare_deterministic_metadata_smoke_16_2f_1s` passed. A real
+paired seed-2 MPS attempt with `--torch-deterministic warn`, `PYTHONHASHSEED=0`,
+and `PYTORCH_ENABLE_MPS_FALLBACK=0` was stopped after more than four minutes
+because it had produced only `run_meta.json`; do not treat
+`mcam512_s2_t320_view_shuffled_cycle_fixed600_besttrain_paired_direct_deterministic_warn_rerun3`
+as a benchmark row. The practical env-captured paired row
+`mcam512_s2_t320_view_shuffled_cycle_fixed600_besttrain_paired_direct_envcapture_rerun3`
+keeps deterministic algorithms off, still uses `PYTHONHASHSEED=0` and MPS
+fallback off, and selects STAR step `600` at heldout PSNR `13.54917049407959`.
+Direct splats in the same run are `8.267990112304688` heldout PSNR. The matching
+STAR-only env-captured row
+`mcam512_s2_t320_view_shuffled_cycle_fixed600_besttrain_staronly_envcapture_rerun2`
+selects step `600` at heldout PSNR `13.783736228942871`. Both STAR rows have zero
+overflow and zero unstable tiles. Read: paired seed 2 now misses V-JEPA three
+times, while STAR-only seed 2 clears twice; the next blocker is stable/repeatable
+training behavior, not direct-splat quality or full-resolution scale.
+
+Same-process STAR repeatability probe, 2026-05-12:
+`multicam_star_repeatability_probe.py` runs the same STAR training call multiple
+times in one process and records selected/final metrics, state digests, and
+state deltas. The CPU smoke
+`multicam_star_repeatability_probe_cpu_smoke_16_2f_2steps.json` is exactly
+repeatable: selected heldout span `0.0`, selected train span `0.0`, final state
+max delta `0.0`. The real MPS seed-2 artifact
+`mcam512_s2_t320_view_shuffled_cycle_fixed600_besttrain_repeatability_envcapture_2x.json`
+uses `PYTHONHASHSEED=0` and `PYTORCH_ENABLE_MPS_FALLBACK=0`; repeat 1 selects
+heldout PSNR `13.818974494934082`, repeat 2 selects `13.716343879699707`, giving
+selected heldout span `0.102630615234375` and selected train span
+`0.15871524810791016`. Final state max abs delta is `1.6650149822235107`, mean
+abs delta is `0.12425407596996853`, and state digests differ. Both repeats clear
+V-JEPA and have zero overflow/unstable tiles. Read: the STAR branch itself is
+not exact-repeatable on this MPS/custom-backward path, so promotion needs a
+repeatability fix or repeat-aware reporting before more full-resolution work.
+
+Fixed-step gradient repeatability probe, 2026-05-12:
+`uvt_gradient_repeatability_probe.py` splits the repeatability question into
+sample generation, fixed-bundle reduction, and full autograd gradient. The tiny
+MPS smoke `uvt_gradient_repeatability_probe_mps_smoke_16_2f_t16.json` produces
+three unique sample digests, three unique reduction digests, and three unique
+autograd gradient digests, even though loss span is `0.0`; max deltas are `12.0`
+for position-wise sample comparison, `1.1920928955078125e-07` for fixed-bundle
+reduction, and `1.7462298274040222e-10` for final parameter gradients. The real
+512px seed-2 artifact
+`mcam512_s2_t320_view_shuffled_cycle_gradient_repeatability_step0_envcapture.json`
+uses the current fixed first window (`view 0`, `frame_start 0`, loss
+`0.3558986485004425`). Its sample stream has `484697` rows and three unique
+digests; position-wise ids differ by up to `215`, and position-wise `grad_q`
+differs by up to `199.8830108642578` and `186.3970184326172`. Repeating MPS
+`index_add_` on one fixed sample bundle gives three unique reduction digests,
+with `grad_q` max delta `0.21875` and `0.3125`. Full autograd has three unique
+gradient digests and loss span `0.0`, but one-step parameter gradient max deltas
+are only `4.423782229423523e-09` and `3.958120942115784e-09`. Read: the immediate
+engineering target is a deterministic diagnostic reduction path or stable
+kernel-side sample ordering, because tiny per-step gradient drift is enough to
+be amplified by long Adam runs.
+
+Sorted reduction diagnostic, 2026-05-12:
+the tile-backward bridge now has opt-in `reduction_mode="sorted_cpu"` and the
+probe exposes `--autograd-reduction-mode sorted_cpu`. This is diagnostic-only;
+the default trainer still uses MPS `index_add_`. On the tiny smoke
+`uvt_gradient_repeatability_probe_mps_smoke_16_2f_t16_sortedcpu_autograd.json`,
+raw sample generation and default `index_add_` each produce three unique digests,
+but fixed `sorted_cpu`, canonical generated-sample `sorted_cpu`, and full
+autograd all produce one unique digest. The real 512px seed-2 fixed-window
+artifact
+`mcam512_s2_t320_view_shuffled_cycle_gradient_repeatability_step0_sortedcpu_autograd.json`
+matches that pattern: three unique sample digests, three unique default
+`index_add_` digests, one unique fixed `sorted_cpu` digest, one unique generated
+sample reduction digest, and one unique autograd gradient digest. The default
+MPS fixed-bundle `grad_q` max delta is `0.375`; all `sorted_cpu` reduction and
+autograd max deltas are `0.0`. Read: deterministic reduction controls the
+fixed-window gradient drift, but it is not the speed path. The later keyed
+sample-order path closes the device-side ordering fix and the 600-step seed-2
+repeatability gate; the remaining benchmark target is a true
+tile-pair/per-tube backward path rather than another per-sample reducer.
+
+On-device scan reducer diagnostic, 2026-05-12:
+`reduce_sample_bundle_scan` adds a custom Metal reducer that scans compact sample
+rows in fixed row order. It is intentionally O(tubes x samples), so it is a
+diagnostic, not the final fast reducer. The hand-built op smoke matches CPU
+accumulation exactly, and the tiny probe
+`uvt_gradient_repeatability_probe_mps_smoke_16_2f_t16_scanmetal_autograd.json`
+reports one unique fixed scan-reduction digest, one unique generated scan
+reduction digest, and one unique autograd digest. `sort_scan_metal` adds an MPS
+stable sort by tube id before the scan; its tiny smoke
+`uvt_gradient_repeatability_probe_mps_smoke_16_2f_t16_sortscanmetal_autograd.json`
+also stabilizes generated reduction and autograd. Both fail at the real 512px
+fixed-window gate:
+`mcam512_s2_t320_view_shuffled_cycle_gradient_repeatability_step0_scanmetal_autograd.json`
+and
+`mcam512_s2_t320_view_shuffled_cycle_gradient_repeatability_step0_sortscanmetal_autograd.json`
+both have one unique fixed-reduction digest but three unique generated-reduction
+digests and three unique autograd digests. The real-scale generated-reduction
+`grad_q` max deltas are `0.65625` for `scan_metal` and `0.1875` for
+`sort_scan_metal`. Read: the next fix needs kernel-side deterministic sample
+keys/order or a real tile-pair/per-tube VJP; MPS sort-by-id plus float32 scan is
+not enough.
 
 Train-camera balance selector diagnostic, 2026-05-11: checkpoint rows now
 include `train_view_eval_psnr`, `train_min_view_eval_psnr`, and
@@ -2421,6 +2906,167 @@ render `8.872333499311935 ms`. Conclusion: STAR keeps a large 256px
 single-video quality lead at equal steps and comparable train time, but it is
 not currently faster to render than the fast direct-splat baseline.
 
+Native 256px raw-forward tile-shape probe, 2026-05-12:
+`uvt_forward_speed_probe.py` now accepts `--uvt-tile-t`,
+`--uvt-tile-capacity`, and `--skip-dense-reference`. This matters because the
+raw forward rasterizer can be timed without the dense reference path or the
+autograd wrapper used during training. `video_fit_comparison.py` now also uses
+raw Metal forward for no-grad eval renders while keeping the autograd wrapper
+for training. The smoke artifacts are
+`uvt_forward_speed_probe_tile_config_smoke_16_2f_4t` and
+`uvt_forward_speed_probe_tile_config_skipdense_smoke_16_2f_4t`, plus
+`video_fit_forward_only_eval_smoke_16_2f_1step_tilet4`. The native
+256px/16-frame raw-forward artifacts are
+`uvt_forward_speed_probe_256_16f_3584_5376_7168_s0125_t20_tilet1_cap128_metalonly`,
+`uvt_forward_speed_probe_256_16f_7168_s0125_t20_tilet2_cap128_metalonly`, and
+`uvt_forward_speed_probe_256_16f_7168_s0125_t20_tilet4_cap128_metalonly`.
+
+The initialized raw-forward read is:
+
+- `tile_t=1`, 7168 tubes: pair ratio `1.8557977751533665`, loop render
+  `15.446270800021011 ms`, zero overflow, zero unstable tiles.
+- `tile_t=2`, 7168 tubes: pair ratio `1.0390981438073665`, loop render
+  `12.992085400037467 ms`, zero overflow, zero unstable tiles.
+- `tile_t=4`, 7168 tubes: pair ratio `0.6304844910456923`, loop render
+  `6.742891700014297 ms`, zero overflow, zero unstable tiles.
+
+So the raw forward UVT rasterizer does have the intended sublinear temporal-tile
+path. The current training path does not yet exploit it. A 50-step STAR-only
+trainer row with `tile_t=4`, cap `128` writes
+`video_fit_single_overfit_256_16f_50steps_7168uvt_lr012_s0125_t20_tilet4_cap128_uvtonly_forwardeval_renderbench10_metal_tile`
+and reaches PSNR `22.1671199798584` in `92.00375170799816 s`, median
+pure-forward eval render `9.386603996972553 ms`. The matching `tile_t=1`,
+cap-128 50-step row writes
+`video_fit_single_overfit_256_16f_50steps_7168uvt_lr012_s0125_t20_tilet1_cap128_uvtonly_forwardeval_renderbench10_metal_tile`
+and reaches PSNR `22.363874912261963` in `25.242409541999223 s`, median
+pure-forward eval render `9.427915996639058 ms`. Treat `tile_t=4` as a
+raw-forward lead and a trainer-path rejection until the backward/reduction
+wrapper is changed.
+
+Backward sample-volume and train-step phase probe, 2026-05-12:
+`uvt_backward_breakdown_probe.py` and `uvt_train_step_timing_probe.py` now
+isolate the screen-time UVT backward bottleneck. The smoke artifacts are
+`uvt_backward_breakdown_probe_smoke_16_2f_4t_tilet1` and
+`uvt_train_step_timing_probe_smoke_16_2f_4t_tilet1`. The native 256px artifacts
+are:
+
+- `uvt_backward_breakdown_probe_256_16f_7168_s0125_t20_tilet1_cap128`
+- `uvt_backward_breakdown_probe_256_16f_7168_s0125_t20_tilet2_cap128`
+- `uvt_backward_breakdown_probe_256_16f_7168_s0125_t20_tilet4_cap128`
+- `uvt_train_step_timing_probe_256_16f_7168_s0125_t20_tilet1_cap128_30steps`
+- `uvt_train_step_timing_probe_256_16f_7168_s0125_t20_tilet4_cap128_30steps`
+- `uvt_train_step_timing_probe_256_16f_7168_s0125_t20_tilet1_cap128_20steps_samplecount`
+- `uvt_train_step_timing_probe_256_16f_7168_s0125_t20_tilet4_cap128_20steps_samplecount`
+- `uvt_train_step_timing_probe_pair_count_smoke_16_2f_4t_tilet1`
+- `uvt_train_step_timing_probe_256_16f_7168_s0125_t20_tilet1_cap128_20steps_sample_paircount`
+- `uvt_train_step_timing_probe_256_16f_7168_s0125_t20_tilet1_cap128_20steps_sample_paircount_tileloadreg0003_target60`
+- `uvt_train_step_timing_probe_256_16f_7168_s0125_t20_tilet1_cap128_20steps_samplecount_tileloadreg0003_target60`
+- `uvt_train_step_timing_probe_256_16f_7168_s0125_t20_tilet1_cap128_20steps_samplecount_tileloadreg001_target60`
+- `video_fit_single_overfit_256_16f_50steps_7168uvt_lr012_s0125_t20_tilet1_cap128_tileloadreg0003_target60_uvtonly_renderbench10_metal_tile`
+- `video_fit_single_overfit_256_16f_50steps_7168uvt_lr012_s0125_t20_tilet1_cap128_tileloadreg001_target60_uvtonly_renderbench10_metal_tile`
+- `video_fit_single_overfit_256_16f_200steps_7168uvt_lr012_s0125_t20_tilet1_cap128_tileloadreg0003_target60_uvtonly_renderbench10_metal_tile`
+
+The backward breakdown is the key result: `tile_t=1`, `tile_t=2`, and
+`tile_t=4` all emit exactly `5,342,341` compact backward samples on the same
+initialized 256px/16-frame/7168-tube scene. Median
+`sample_backward + reduce_bundle` is `70.84595799824456 ms` for `tile_t=1`,
+`68.17483399936464 ms` for `tile_t=2`, and `70.60724899201887 ms` for
+`tile_t=4`. That means the current backward representation is not sublinear in
+the same way the raw forward rasterizer is.
+
+The 30-step train phase probe is also backward dominated. `tile_t=1` has median
+total step `403.4594580043631 ms`, median backward `391.97191700077383 ms`, and
+median forward `8.55806300023687 ms`. `tile_t=4` has median total step
+`370.16160399798537 ms`, median backward `358.5281044979638 ms`, and median
+forward `8.856062500854023 ms`. This shorter phase probe does not reproduce the
+50-step `tile_t=4` wall-clock slowdown, but it does explain why the raw-forward
+pair-ratio win does not move training: the hot path is backward sample
+generation and MPS reduction. The next renderer-speed mechanism should make
+backward compact in tile-pair space or avoid reducing millions of per-pixel
+sample rows.
+
+The sample-count train-step follow-up shows the initialized-scene breakdown is a
+lower-bound snapshot, not the whole story. With `--sample-count-every 5`, the
+20-step `tile_t=1` probe records compact sample counts `8,076,866`,
+`15,675,693`, `21,473,006`, and `23,232,213`; median total/backward/forward is
+`454.1237500052375 ms` / `414.0798125008587 ms` / `8.629541502159555 ms`.
+The matching `tile_t=4` probe records `8,076,861`, `15,672,124`,
+`21,070,664`, and `22,333,671`; median total/backward/forward is
+`427.08672899971134 ms` / `401.1907079984667 ms` /
+`8.870208497683052 ms`. The train-time blocker is therefore an evolving
+per-pixel backward sample volume, not just a constant post-forward reduction
+tax.
+
+Keyed reducer timing follow-up, 2026-05-12:
+
+- `uvt_backward_breakdown_probe_keysortscan_smoke_16_2f_16t_tilet1`
+- `uvt_train_step_timing_probe_keysortscan_smoke_16_2f_16t_tilet1`
+- `uvt_train_step_timing_probe_keysortscan_ratio_smoke_16_2f_16t_tilet1`
+- `uvt_backward_breakdown_probe_32_16f_224t_tilet1_cap128_indexadd_compare`
+- `uvt_backward_breakdown_probe_32_16f_224t_tilet1_cap128_keysortscan_compare`
+- `uvt_train_step_timing_probe_32_16f_224t_tilet1_cap128_indexadd_compare`
+- `uvt_train_step_timing_probe_32_16f_224t_tilet1_cap128_keysortscan_compare`
+
+At 32px/16f/224 tubes, default `index_add` median sample+reduce is
+`6.305208502453752` ms on `135565` compact samples. The keyed deterministic path
+has median sample+reduce `21.90893750230316` ms on the same sample rows, with
+the reduce phase `5.27x` slower. In the full train-step probe, median backward
+rises from `34.564916997624096` ms to `77.67279200197663` ms and median total
+step rises from `39.248250002856366` ms to `83.17829100269591` ms. Median
+compact samples are `188522` versus median UVT tile-tube pairs `11833`, about
+`15.93` sample rows per tile pair. This is the quantitative reason to skip
+per-pixel sample materialization in the next VJP path.
+
+The pair-count diagnostic quantifies the reduction target. In the unregularized
+`tile_t=1` 20-step probe, compact sample counts are `8,076,866`, `15,675,692`,
+`21,472,917`, and `23,230,427`, while raw-forward UVT tile/tube pairs are
+`625,933`, `1,003,127`, `1,283,666`, and `1,364,961`. That leaves
+sample-per-pair ratios of about `12.90x`, `15.63x`, `16.73x`, and `17.02x`.
+The `0.003` tile-load row cuts the last sampled point to `17,008,076` compact
+samples and `1,063,211` tile pairs, and reduces overflow from `955` tiles to
+`21`, but sample-per-pair is still about `16.00x`. These stats make the next
+rasterizer-speed target explicit: the raw forward path already has a compact
+tile-pair representation, while the current backward still expands that into
+many per-pixel sample rows. The diagnostic's own `pair_count_ms` is not a render
+timing claim because it includes CPU-side stats collection and should be read
+only as row-count instrumentation.
+
+Tile-load regularizer timing bracket, 2026-05-12:
+`uvt_train_step_timing_probe.py` now has opt-in `--tile-load-reg` and
+`--tile-load-target` arguments that reuse the projected support proxy as a
+train-step diagnostic. This is deliberately not enabled by default. Against the
+unregularized `tile_t=1` sample-count row at median total/backward/forward
+`454.1237500052375 ms` / `414.0798125008587 ms` / `8.629541502159555 ms` and
+final recon loss `0.011340439319610596`, target `60` with weight `0.003` gives
+`268.05322949803667 ms` / `258.73991700063925 ms` / `6.989416502619861 ms`.
+Its compact sample counts are `8,070,075`, `15,253,718`, `18,733,826`, and
+`17,007,962`, and final recon loss is `0.012283111922442913`. Weight `0.01`
+gives similar speed, `263.83527050347766 ms` / `253.93429149698932 ms` /
+`6.71229200088419 ms`, and lower final sample count `12,533,449`, but final
+recon loss worsens to `0.015173783525824547`. Use this as evidence that support
+growth is controllable, while keeping tile-pair compact backward as the cleaner
+long-term speed path.
+
+The regularizer transfers to actual 50-step overfit as a speed/quality knob,
+but not a free win. The unregularized `tile_t=1`, cap-128 baseline reaches PSNR
+`22.363874912261963`, train `25.242409541999223 s`, and median render
+`9.427915996639058 ms`. With target `60`, weight `0.003` reaches PSNR
+`21.97382688522339`, train `18.74674650000088 s`, median render
+`5.818312503834022 ms`, and final tile-load proxy `116.50669860839844`.
+Weight `0.01` reaches PSNR `21.31075143814087`, train
+`10.924605249994784 s`, median render `5.032062501413748 ms`, and final
+tile-load proxy `97.27362060546875`. Use `0.003` only when the speed budget
+matters more than the roughly `0.39` dB 50-step quality hit.
+
+At 200 steps, the weight `0.003` tradeoff remains. The regularized row reaches
+PSNR `23.976197242736816`, train `42.51604850000149 s`, median render
+`5.74274999962654 ms`, and final tile-load proxy `100.11560821533203`. The
+unregularized UVT-only 200-step row reaches PSNR `24.46974277496338`, train
+`70.66461358399829 s`, and median render `18.966646002809284 ms`; the paired
+direct-baseline row reaches STAR PSNR `24.47240114212036`, train
+`64.06204816699756 s`, and median render `16.813333500977024 ms`. This keeps
+the support regularizer in the "faster but lower quality" bucket.
+
 Equal-step tube-count retune, 2026-05-11: the 1792-tube row is not the fastest
 equal-step speed/quality point. With synchronized 20-repeat render timing, 896
 tubes at LR `0.16` reaches PSNR `22.211849689483643` in
@@ -2549,3 +3195,85 @@ to PSNR `23.460845947265625` in `109592.67349999936 ms`, render
 64-splats/frame 200-step baseline by `2.832942008972168` dB and is about
 `6.28x` faster to train, but it does not beat the older `tile_t=2` 400-step row
 and is superseded by the `tile_t=1`, cap-128 400-step recipe above.
+
+## 512px Multicam Rasterizer Gates
+
+2026-05-12: `tile_pair_grouped` is the best deterministic fixed-backward speed
+probe so far, but not a promoted trainer. The fixed 512px artifact
+`results/uvt_backward_breakdown_probe_512_16f_7168_s0125_t20_tilet1_cap128_tilepair_grouped_scale.json`
+reports sample+reduce median `90.38029100338463` ms with `211374` valid compact
+rows and unstable fraction `0.0`, faster than suffix (`112.1208749973448` ms)
+and zero-pruned tile-pair (`129.20112499705283` ms). The 100-step
+keyed-vs-grouped trajectory artifact
+`results/mcam512_s2_t320_view_shuffled_cycle_mode_compare_keyed_vs_tilepair_grouped_100steps.json`
+has only `-0.00007534027099609375` grouped-minus-keyed heldout PSNR delta and
+the grouped repeatability artifact is exact. The matched 600-step STAR-only row
+`results/mcam512_s2_t320_view_shuffled_cycle_fixed600_besttrain_tilepair_grouped_staronly/`
+is the blocker: heldout PSNR `13.74386978149414`, train loop
+`100.48031524999533` s. That is lower quality than zero-pruned tile-pair
+(`13.866263389587402`) and suffix (`13.808026313781738`), and slower than the
+suffix loop (`88.92246554100711` s). Keep using zero-pruned tile-pair as the
+active deterministic quality branch and `tile_pair_grouped` as the speed-shape
+candidate to fix, not as a default.
+
+The grouped gradient gates match the suffix diagnosis. The step-0 artifact
+`results/mcam512_s2_t320_view_shuffled_cycle_gradient_step0_withkeys_vs_tilepair_grouped.json`
+has loss delta `0.0` and max gradient delta `6.51925802230835e-09`; after an
+internal 600-step grouped pretrain, the artifact
+`results/mcam512_s2_t320_view_shuffled_cycle_gradient_step600_grouped_pretrain_withkeys_vs_tilepair_grouped.json`
+has loss delta `0.0`, max gradient delta `1.3746321201324463e-06`, and
+deterministic autograd digests. This rejects an obvious local VJP bug as the
+reason grouped misses zero-pruned quality.
+
+`tile_pair_sharedsort` was added as a narrower quality-preserving speed probe:
+one threadgroup sorts each tile once, then each slot accumulates pixels serially
+like zero-pruned tile-pair. The tiny parity artifact
+`results/uvt_tile_pair_sharedsort_backward_parity_smoke_16_2f_16t_tilet1.json`
+matches tile-pair ids/keys exactly and has reduced-gradient max abs
+`3.814697265625e-06`. Current-build fixed 512px probes show a small speed gain,
+not a new default: cap-128 sharedsort
+`results/uvt_backward_breakdown_probe_512_16f_7168_s0125_t20_tilet1_cap128_tilepair_sharedsort_scale.json`
+is `52.655457984656096` ms sample+reduce, while the current cap-128 tile-pair
+rerun
+`results/uvt_backward_breakdown_probe_512_16f_7168_s0125_t20_tilet1_cap128_tilepair_zero_prune_scale_current_rerun2it.json`
+is `56.643062496732455` ms. At cap 256, sharedsort is
+`64.27791700116359` ms versus current tile-pair
+`69.4723329943372` ms. The 100-step mode compare
+`results/mcam512_s2_t320_view_shuffled_cycle_mode_compare_keyed_vs_tilepair_sharedsort_100steps.json`
+stays close to keyed (`-0.00014972686767578125` heldout delta), but the
+600-step STAR-only row
+`results/mcam512_s2_t320_view_shuffled_cycle_fixed600_besttrain_tilepair_sharedsort_staronly/`
+lands at heldout PSNR `13.569375991821289` in `163.4644198330061` s. Treat it as
+evidence that shared sorting can preserve tile-pair semantics, but not as the
+fast solved UVT training rasterizer.
+
+The plain direct-reduced tile-pair path is the sharper reducer lesson.
+`tile_pair_reduced_backward` preserves zero-pruned tile-pair math while reducing
+inside Metal by deterministic per-tube tile-bound scans. The 512px parity
+artifact
+`results/uvt_tile_pair_reduced_backward_parity_512_16f_7168t_tilet1_cap128.json`
+matches `tile_pair + key_sort_scan_metal` exactly (`0.0` max abs) with `63051`
+valid reference rows, and the 20-step repeatability artifact
+`results/mcam512_s2_t320_view_shuffled_cycle_tilepair_reduced_repeatability_20steps.json`
+has final state max abs `0.0`. The fixed timing rows are strong: cap-128
+`results/uvt_backward_breakdown_probe_512_16f_7168_s0125_t20_tilet1_cap128_tilepair_reduced_scale.json`
+is `40.33462500956375` ms sample+reduce, and cap-256
+`results/uvt_backward_breakdown_probe_512_16f_7168_s0125_t20_tilet1_cap256_tilepair_reduced_scale.json`
+is `46.68695799773559` ms. But the matched 600-step cap-256 STAR-only row
+`results/mcam512_s2_t320_view_shuffled_cycle_fixed600_besttrain_tilepair_reduced_staronly/`
+takes `132.13478325000324` s while landing at the same zero-pruned train/heldout
+PSNR `15.34240198135376` / `13.866263389587402`. This makes it a high-value
+negative: exact quality and excellent isolated kernel timing are not enough if
+the replacement reducer is still a per-tube support scan.
+
+The same-step overfit summary
+`results/mcam512_same_step_overfit_summary_2026_05_12.json` adds the missing
+evaluated 200-step direct-splat row. At 200 steps, direct splats reach
+train/heldout PSNR `6.988864898681641` / `6.835783004760742` in
+`6.4328010419994825` s with render-only eval `0.6536745410121512` s. The matched
+zero-pruned STAR row reaches `12.694841861724854` / `12.390332221984863` in
+`37.24962037500518` s and renders in `0.13297945899830665` s. At 600 steps,
+direct splats remain far behind (`9.27243709564209` / `8.26813793182373`), while
+zero-pruned STAR reaches `15.34240198135376` / `13.866263389587402`. This makes
+the direct-splat overfit comparison a settled local baseline rather than the
+next blocker.

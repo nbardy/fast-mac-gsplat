@@ -5,3 +5,13 @@ __pycache__/
 *.py[cod]
 .venv/
 uv.lock
+
+# Benchmark payloads are reproducible local evidence. Keep benchmark code and
+# curated summaries in Git, but do not archive every image/video/sweep row.
+variants/*/research_project/benchmarks/results/
+
+# Superseded WorldFoam forks remain available in the local research checkout.
+# The fused-slab variant is the sole preserved implementation surface.
+variants/world_foam_lane2_v0/
+variants/world_foam_lane2_fused_csr_v0/
+variants/world_foam_lane2_fused_direct_v0/

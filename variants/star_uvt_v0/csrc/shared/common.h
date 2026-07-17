@@ -73,6 +73,172 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_ren
     const torch::Tensor& meta_i32,
     const torch::Tensor& meta_f32);
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_render_uvt_gated(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& active_start,
+    const torch::Tensor& active_stop,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+torch::Tensor metal_render_projective_trace_tiles(
+    const torch::Tensor& coeffs,
+    const torch::Tensor& times,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_primitive_ids,
+    const torch::Tensor& tile_active_start,
+    const torch::Tensor& tile_active_stop,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    double sigma_px);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> metal_direct_projective_trace_backward(
+    const torch::Tensor& coeffs,
+    const torch::Tensor& times,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_primitive_ids,
+    const torch::Tensor& tile_active_start,
+    const torch::Tensor& tile_active_stop,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    double sigma_px);
+
+torch::Tensor metal_render_projective_trace_cell_tiles(
+    const torch::Tensor& coeffs,
+    const torch::Tensor& times,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_trace_ids,
+    const torch::Tensor& tile_active_start,
+    const torch::Tensor& tile_active_stop,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    double sigma_px);
+
+torch::Tensor metal_render_projective_trace_cell_interval_tiles(
+    const torch::Tensor& coeffs,
+    const torch::Tensor& times,
+    const torch::Tensor& opacity,
+    const torch::Tensor& opacity_time_coeffs,
+    const torch::Tensor& spatial_precision_uv,
+    const torch::Tensor& depth_affine_uv,
+    const torch::Tensor& color,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_trace_ids,
+    const torch::Tensor& tile_active_start,
+    const torch::Tensor& tile_active_stop,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    double sigma_px);
+
+torch::Tensor metal_render_projective_trace_family_interval_tiles(
+    const torch::Tensor& family_coeffs,
+    const torch::Tensor& q_basis,
+    const torch::Tensor& times,
+    const torch::Tensor& opacity,
+    const torch::Tensor& opacity_time_coeffs,
+    const torch::Tensor& spatial_precision_uv,
+    const torch::Tensor& depth_affine_uv,
+    const torch::Tensor& color,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_trace_ids,
+    const torch::Tensor& tile_active_start,
+    const torch::Tensor& tile_active_stop,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    double sigma_px);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_direct_projective_trace_family_interval_backward(
+    const torch::Tensor& family_coeffs,
+    const torch::Tensor& q_basis,
+    const torch::Tensor& times,
+    const torch::Tensor& opacity,
+    const torch::Tensor& opacity_time_coeffs,
+    const torch::Tensor& spatial_precision_uv,
+    const torch::Tensor& depth_affine_uv,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_trace_ids,
+    const torch::Tensor& tile_active_start,
+    const torch::Tensor& tile_active_stop,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    double sigma_px);
+
+torch::Tensor metal_render_projective_trace_cell_interval_rows(
+    const torch::Tensor& coeffs,
+    const torch::Tensor& times,
+    const torch::Tensor& opacity,
+    const torch::Tensor& opacity_time_coeffs,
+    const torch::Tensor& spatial_precision_uv,
+    const torch::Tensor& depth_affine_uv,
+    const torch::Tensor& color,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_trace_ids,
+    const torch::Tensor& tile_active_start,
+    const torch::Tensor& tile_active_stop,
+    const torch::Tensor& row_weights,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    double sigma_px);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_direct_projective_trace_cell_interval_backward(
+    const torch::Tensor& coeffs,
+    const torch::Tensor& times,
+    const torch::Tensor& opacity,
+    const torch::Tensor& opacity_time_coeffs,
+    const torch::Tensor& spatial_precision_uv,
+    const torch::Tensor& depth_affine_uv,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_trace_ids,
+    const torch::Tensor& tile_active_start,
+    const torch::Tensor& tile_active_stop,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    double sigma_px);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_render_uvt_features(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& feature,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_render_uvt_features_with_bins(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& feature,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_bin_feature_tubes(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_simple_backward_samples(
     const torch::Tensor& ma,
     const torch::Tensor& q_uvt,
@@ -92,5 +258,442 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     const torch::Tensor& grad_image,
     const torch::Tensor& meta_i32,
     const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_stable_backward_samples_with_keys(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_tile_pair_backward_samples(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_tile_pair_backward_samples_compensated(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_tile_pair_target_bounds_backward_samples(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_tile_pair_suffix_backward_samples(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_tile_pair_parallel_backward_samples(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_tile_pair_grouped_backward_samples(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_tile_pair_sharedsort_backward_samples(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_tile_pair_scanline_backward_samples(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_direct_atomic_backward(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_direct_atomic_backward_gated(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& active_start,
+    const torch::Tensor& active_stop,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_direct_atomic_feature_backward(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& feature,
+    const torch::Tensor& grad_feature_image,
+    const torch::Tensor& grad_alpha_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_direct_atomic_feature_backward_with_bins(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& feature,
+    const torch::Tensor& grad_feature_image,
+    const torch::Tensor& grad_alpha_image,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_tube_ids,
+    const torch::Tensor& tile_depths,
+    const torch::Tensor& tile_unstable,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+metal_direct_atomic_feature_sparse_pixels_backward_with_bins(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& feature,
+    const torch::Tensor& pixel_ids,
+    const torch::Tensor& grad_feature_values,
+    const torch::Tensor& grad_alpha_values,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_tube_ids,
+    const torch::Tensor& tile_depths,
+    const torch::Tensor& tile_unstable,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+metal_direct_atomic_feature_sparse_hidden_sigmoid_mse_backward_with_bins(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& feature,
+    const torch::Tensor& pixel_ids,
+    const torch::Tensor& target_rgb_values,
+    const torch::Tensor& hidden_weight,
+    const torch::Tensor& hidden_bias,
+    const torch::Tensor& output_weight,
+    const torch::Tensor& output_bias,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_tube_ids,
+    const torch::Tensor& tile_depths,
+    const torch::Tensor& tile_unstable,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor>
+metal_sparse_hidden_sigmoid_target_area_forward_sums_with_bins(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& feature,
+    const torch::Tensor& pixel_ids,
+    const torch::Tensor& cell_ids,
+    const torch::Tensor& hidden_weight,
+    const torch::Tensor& hidden_bias,
+    const torch::Tensor& output_weight,
+    const torch::Tensor& output_bias,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_tube_ids,
+    const torch::Tensor& tile_depths,
+    const torch::Tensor& tile_unstable,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    int64_t cell_count);
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_direct_atomic_feature_sparse_hidden_target_area_backward_with_bins(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& feature,
+    const torch::Tensor& pixel_ids,
+    const torch::Tensor& cell_ids,
+    const torch::Tensor& cell_grad_rgb,
+    const torch::Tensor& hidden_weight,
+    const torch::Tensor& hidden_bias,
+    const torch::Tensor& output_weight,
+    const torch::Tensor& output_bias,
+    const torch::Tensor& tile_counts,
+    const torch::Tensor& tile_tube_ids,
+    const torch::Tensor& tile_depths,
+    const torch::Tensor& tile_unstable,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32,
+    int64_t mode_bits);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+metal_render_feature_sparse_pixels_with_bins(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& feature,
+    const torch::Tensor& pixel_ids,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+metal_direct_atomic_feature_linear_sigmoid_mse_backward(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& feature,
+    const torch::Tensor& target_rgb,
+    const torch::Tensor& color_weight,
+    const torch::Tensor& color_bias,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor> metal_linear_sigmoid_mse_handoff_prep(
+    const torch::Tensor& feature_image,
+    const torch::Tensor& alpha,
+    const torch::Tensor& target_rgb,
+    const torch::Tensor& color_weight,
+    const torch::Tensor& color_bias);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+metal_direct_atomic_feature_hidden_sigmoid_mse_backward(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& feature,
+    const torch::Tensor& target_rgb,
+    const torch::Tensor& hidden_weight,
+    const torch::Tensor& hidden_bias,
+    const torch::Tensor& output_weight,
+    const torch::Tensor& output_bias,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+metal_direct_atomic_feature_logit_handoff_backward(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& feature,
+    const torch::Tensor& grad_logits,
+    const torch::Tensor& grad_alpha_image,
+    const torch::Tensor& color_weight,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_direct_fixedpoint_backward(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_tile_pair_atomic_backward(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_tile_pair_fixedpoint_backward(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_direct_split_fixedpoint_backward(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_direct_serial_backward(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_reduce_sample_bundle_scan(
+    const torch::Tensor& ids,
+    const torch::Tensor& grad_ma_samples,
+    const torch::Tensor& grad_q_samples,
+    const torch::Tensor& grad_opacity_samples,
+    const torch::Tensor& grad_color_samples,
+    int64_t tube_count);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_reduce_sample_bundle_scan_compensated(
+    const torch::Tensor& ids,
+    const torch::Tensor& grad_ma_samples,
+    const torch::Tensor& grad_q_samples,
+    const torch::Tensor& grad_opacity_samples,
+    const torch::Tensor& grad_color_samples,
+    int64_t tube_count);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_reduce_sample_bundle_sorted_segments(
+    const torch::Tensor& ids,
+    const torch::Tensor& grad_ma_samples,
+    const torch::Tensor& grad_q_samples,
+    const torch::Tensor& grad_opacity_samples,
+    const torch::Tensor& grad_color_samples,
+    int64_t tube_count);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_tile_pair_reduced_backward(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_tile_pair_reduced_parallel_backward(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor> metal_tile_pair_suffix_reduced_backward(
+    const torch::Tensor& ma,
+    const torch::Tensor& q_uvt,
+    const torch::Tensor& depth0,
+    const torch::Tensor& depth_beta,
+    const torch::Tensor& opacity,
+    const torch::Tensor& color,
+    const torch::Tensor& grad_image,
+    const torch::Tensor& meta_i32,
+    const torch::Tensor& meta_f32);
+
+torch::Tensor metal_projective_trace_eval(
+    const torch::Tensor& coeffs,
+    const torch::Tensor& times,
+    double eps);
+
+torch::Tensor metal_projective_trace_family_eval(
+    const torch::Tensor& family_coeffs,
+    const torch::Tensor& q_basis,
+    const torch::Tensor& times,
+    double eps);
+
+std::tuple<torch::Tensor, torch::Tensor> metal_projective_trace_family_backward(
+    const torch::Tensor& family_coeffs,
+    const torch::Tensor& q_basis,
+    const torch::Tensor& times,
+    const torch::Tensor& grad_out,
+    double eps);
 
 }  // namespace star_uvt
