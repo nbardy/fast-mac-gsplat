@@ -2874,6 +2874,8 @@ def world_tube_metal_stats(
     bundle,
     *,
     camera_projection: str,
+    camera_sequence_mode: str,
+    segment_frames: int,
     render_config: UVTRenderConfig,
 ) -> dict[str, Any]:
     if bundle.train_frames.device.type != "mps":
@@ -2886,20 +2888,47 @@ def world_tube_metal_stats(
     def row(
         split: str,
         camera_name: str,
-        K: Tensor,
-        w2c: Tensor,
+        K_all: Tensor,
+        w2c_all: Tensor,
+        view: int,
+        view_count: int,
         lens_model: str,
         distortion: Tensor | None,
     ) -> dict[str, Any]:
-        projected = project_world_tube_sequence(
-            model,
-            K,
-            w2c,
-            config,
-            camera_projection=camera_projection,
-            lens_model=lens_model,
-            distortion=distortion,
-        )
+        if camera_sequence_mode == "static_view":
+            projected = project_world_tube_sequence(
+                model,
+                select_view_K(K_all, view),
+                select_view_w2c(w2c_all, view),
+                config,
+                camera_projection=camera_projection,
+                lens_model=lens_model,
+                distortion=distortion,
+            )
+        else:
+            K_seq, w2c_seq = camera_sequences_for_view(
+                K_all,
+                w2c_all,
+                view=view,
+                frames=frames,
+                view_count=view_count,
+                synthetic_pan_x=0.0,
+                synthetic_pan_y=0.0,
+                synthetic_dolly_z=0.0,
+                synthetic_zoom=0.0,
+                synthetic_principal_x=0.0,
+                synthetic_principal_y=0.0,
+            )
+            projected = project_world_tube_sequence_camera_mode(
+                model=model,
+                K_seq=K_seq,
+                w2c_seq=w2c_seq,
+                config=config,
+                full_frames=frames,
+                frame_start=0,
+                camera_sequence_mode=camera_sequence_mode,
+                segment_frames=segment_frames,
+            )
         result = render_uvt_tubes(
             projected.ma,
             projected.q_uvt,
@@ -2918,8 +2947,10 @@ def world_tube_metal_stats(
         row(
             "train",
             name,
-            select_view_K(bundle.train_K, view),
-            select_view_w2c(bundle.train_w2c, view),
+            bundle.train_K,
+            bundle.train_w2c,
+            view,
+            bundle.train_view_count,
             *select_lens(
                 bundle.train_lens_models,
                 bundle.train_distortions,
@@ -2934,8 +2965,10 @@ def world_tube_metal_stats(
             row(
                 "heldout",
                 name,
-                select_view_K(bundle.heldout_K, view),
-                select_view_w2c(bundle.heldout_w2c, view),
+                bundle.heldout_K,
+                bundle.heldout_w2c,
+                view,
+                bundle.heldout_view_count,
                 *select_lens(
                     bundle.heldout_lens_models,
                     bundle.heldout_distortions,
@@ -3059,6 +3092,12 @@ def apply_uvt_tile_env(config: UVTRenderConfig) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--baseline-config", type=Path, default=DEFAULT_BASELINE_CONFIG)
+    parser.add_argument(
+        "--camera-rig-init",
+        choices=("dnerf", "deepview", "aist", "neural_3d_video", "vivo", "camxtime", "orthogonal_origin"),
+        default=None,
+        help="Override the baseline config camera rig for a paper dataset adapter.",
+    )
     parser.add_argument("--target-size", type=int, default=64)
     parser.add_argument("--max-frames", type=int, default=4)
     parser.add_argument("--train-seconds", type=float, default=10.0)
@@ -3223,6 +3262,8 @@ def main() -> None:
         paper_protocol,
     )
     camera_cfg = dict(config["camera"])
+    if args.camera_rig_init is not None:
+        camera_cfg["rig_init"] = args.camera_rig_init
     bundle = load_multicam_video_bundle(
         data_cfg=data_cfg,
         camera_cfg=camera_cfg,
@@ -3507,11 +3548,12 @@ def main() -> None:
                 uvt_model,
                 bundle,
                 camera_projection=args.uvt_camera_projection,
+                camera_sequence_mode=args.uvt_camera_sequence_mode,
+                segment_frames=args.uvt_segment_frames,
                 render_config=render_config,
             )
             if (
                 args.uvt_render_backend == "metal_tile"
-                and args.uvt_camera_sequence_mode == "static_view"
                 and not any(run_meta["uvt_synthetic_camera_motion"].values())
             )
             else None,
@@ -3617,11 +3659,12 @@ def main() -> None:
                 uvt_model,
                 bundle,
                 camera_projection=args.uvt_camera_projection,
+                camera_sequence_mode=args.uvt_camera_sequence_mode,
+                segment_frames=args.uvt_segment_frames,
                 render_config=render_config,
             )
             if (
                 args.uvt_render_backend == "metal_tile"
-                and args.uvt_camera_sequence_mode == "static_view"
                 and not any(run_meta["uvt_synthetic_camera_motion"].values())
             )
             else None,
