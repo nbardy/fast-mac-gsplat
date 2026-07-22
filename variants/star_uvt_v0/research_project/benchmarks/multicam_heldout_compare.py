@@ -173,6 +173,68 @@ def render_time_metrics(train_times: list[float], heldout_times: list[float]) ->
     }
 
 
+@dataclass
+class VideoMetricAccumulator:
+    absolute_error_sum: float = 0.0
+    squared_error_sum: float = 0.0
+    element_count: int = 0
+    ssim_sum: float = 0.0
+    frame_count: int = 0
+
+    def update(self, rendered: Tensor, target: Tensor) -> None:
+        if rendered.shape != target.shape or rendered.ndim != 4:
+            raise ValueError(
+                f"streamed video metrics require matching [T,H,W,C], got {tuple(rendered.shape)} and {tuple(target.shape)}"
+            )
+        diff = rendered.float() - target.float()
+        self.absolute_error_sum += float(diff.abs().sum().detach().cpu())
+        self.squared_error_sum += float(diff.square().sum().detach().cpu())
+        self.element_count += int(diff.numel())
+        chunk_frames = int(rendered.shape[0])
+        self.ssim_sum += video_metrics(rendered, target)["eval_ssim"] * chunk_frames
+        self.frame_count += chunk_frames
+
+    def metrics(self) -> dict[str, float]:
+        if self.element_count < 1 or self.frame_count < 1:
+            raise ValueError("streamed video metrics require at least one frame")
+        l1 = self.absolute_error_sum / float(self.element_count)
+        mse = self.squared_error_sum / float(self.element_count)
+        return {
+            "eval_l1": l1,
+            "eval_mse": mse,
+            "eval_psnr": -10.0 * math.log10(max(mse, 1.0e-12)),
+            "eval_ssim": self.ssim_sum / float(self.frame_count),
+        }
+
+
+def media_frame_positions(frame_count: int, max_frames: int) -> set[int]:
+    count = min(int(frame_count), int(max_frames))
+    if count < 1:
+        return set()
+    return set(torch.linspace(0, frame_count - 1, steps=count).round().to(torch.long).tolist())
+
+
+def append_chunk_media(
+    *,
+    start: int,
+    stop: int,
+    selected: set[int],
+    target: Tensor,
+    rendered: Tensor,
+    alpha: Tensor,
+    targets_out: list[Tensor],
+    rendered_out: list[Tensor],
+    alpha_out: list[Tensor],
+) -> None:
+    local_positions = [position - start for position in sorted(selected) if start <= position < stop]
+    if not local_positions:
+        return
+    local = torch.tensor(local_positions, dtype=torch.long, device=rendered.device)
+    targets_out.append(target.index_select(0, local).detach().cpu())
+    rendered_out.append(rendered.index_select(0, local).detach().cpu())
+    alpha_out.append(alpha.index_select(0, local).detach().cpu())
+
+
 def subset_video_metrics(rendered: Tensor, target: Tensor, frame_indices: list[int]) -> dict[str, float]:
     if not frame_indices:
         raise ValueError("frame_indices must not be empty")
@@ -630,6 +692,7 @@ def initialize_world_tubes_from_view(
     centered_t0: float = 0.0,
 ) -> tuple[Tensor, Tensor, Tensor]:
     _, _, height, width = frames.shape
+    device = K.device
     ys_cpu, xs_cpu = sample_init_pixels(
         tube_count=tube_count,
         height=height,
@@ -637,16 +700,18 @@ def initialize_world_tubes_from_view(
         seed=seed,
         sampling=sampling,
     )
-    ys = ys_cpu.to(frames.device)
-    xs = xs_cpu.to(frames.device)
-    colors = frames[frame, :, ys, xs].permute(1, 0).contiguous()
-    z = torch.full((tube_count,), float(init_depth), dtype=torch.float32, device=frames.device)
+    frame_ys = ys_cpu.to(frames.device)
+    frame_xs = xs_cpu.to(frames.device)
+    colors = frames[frame, :, frame_ys, frame_xs].permute(1, 0).contiguous().to(device)
+    ys = ys_cpu.to(device)
+    xs = xs_cpu.to(device)
+    z = torch.full((tube_count,), float(init_depth), dtype=torch.float32, device=device)
     x_cam = (xs.float() + 0.5 - K[0, 2]) * z / K[0, 0]
     y_cam = (ys.float() + 0.5 - K[1, 2]) * z / K[1, 1]
     cam_points = torch.stack((x_cam, y_cam, z, torch.ones_like(z)), dim=-1)
     c2w = torch.linalg.inv(w2c)
     world_points = (cam_points @ c2w.T)[:, :3]
-    t0 = torch.full((tube_count,), float(centered_t0), dtype=torch.float32, device=frames.device)
+    t0 = torch.full((tube_count,), float(centered_t0), dtype=torch.float32, device=device)
     return world_points.contiguous(), colors.clamp(1.0e-5, 1.0 - 1.0e-5), t0
 
 
@@ -1422,7 +1487,7 @@ def train_world_tubes(
         raise ValueError("variable/synthetic camera STAR quality runs currently require camera_projection=legacy_pinhole")
     torch.manual_seed(seed)
     train_frames = bundle.train_frames
-    device = train_frames.device
+    device = bundle.train_K.device
     view_count, frames, _, height, width = train_frames.shape
     source_image_size = normalize_image_size((height, width))
     paper_values = paper_protocol or {}
@@ -1538,13 +1603,12 @@ def train_world_tubes(
     paper_phase_timer = PaperPhaseTimer(device)
     paper_memory_sampler = DeviceMemorySampler(device)
     paper_memory_sampler.start()
-    paper_stage_cache: dict[str, tuple[Tensor, Tensor, UVTRenderConfig]] = {}
+    paper_stage_cache: dict[str, tuple[Tensor, UVTRenderConfig]] = {}
 
-    def paper_stage_payload(stage) -> tuple[Tensor, Tensor, UVTRenderConfig]:
+    def paper_stage_payload(stage) -> tuple[Tensor, UVTRenderConfig]:
         cached = paper_stage_cache.get(stage.label)
         if cached is not None:
             return cached
-        stage_frames = resize_video_frames(train_frames, stage.image_size)
         stage_K = scale_intrinsics(bundle.train_K, source=source_image_size, target=stage.image_size)
         stage_config = UVTRenderConfig(
             height=stage.image_size.height,
@@ -1559,7 +1623,7 @@ def train_world_tubes(
             background=full_config.background,
             max_alpha=full_config.max_alpha,
         )
-        cached = (stage_frames, stage_K, stage_config)
+        cached = (stage_K, stage_config)
         paper_stage_cache[stage.label] = cached
         return cached
     started_at = time.perf_counter()
@@ -1741,12 +1805,11 @@ def train_world_tubes(
             view,
             camera_projection=camera_projection,
         )
-        step_train_frames = train_frames
         step_K = bundle.train_K
         step_full_config = full_config
         step_train_render_config = full_config
         if paper_batch is not None:
-            step_train_frames, step_K, step_full_config = paper_stage_payload(paper_stage)
+            step_K, step_full_config = paper_stage_payload(paper_stage)
         optimizer.zero_grad(set_to_none=True)
         paper_forward_started_at = paper_phase_timer.start("forward")
         if loss_scope == "paper_batch":
@@ -1792,19 +1855,23 @@ def train_world_tubes(
                     sample_emission_mode=sample_emission_mode,
                 )
                 predictions.append(rendered.rgb[0])
-                targets.append(step_train_frames[sample.view_index, sample.frame_index].permute(1, 2, 0))
+                targets.append(train_frames[sample.view_index, sample.frame_index])
             rendered_active = torch.stack(predictions)
-            target_active = torch.stack(targets)
+            target_active = (
+                resize_video_frames(torch.stack(targets), paper_stage.image_size)
+                .to(device=device, dtype=torch.float32)
+                .permute(0, 2, 3, 1)
+            )
             recon_loss = robust_l1(rendered_active - target_active)
             multiscale_loss = (
                 downsampled_robust_l1(rendered_active, target_active, multiscale_loss_factor)
                 if multiscale_loss_weight > 0.0
-                else train_frames.new_tensor(0.0)
+                else model.x0.new_tensor(0.0)
             )
             crop_loss = (
                 crop_robust_l1(rendered_active, target_active, crop_loss_size, step)
                 if crop_loss_weight > 0.0
-                else train_frames.new_tensor(0.0)
+                else model.x0.new_tensor(0.0)
             )
             step_target_frames = len(paper_batch.samples)
             step_rasterized_frames = len(paper_batch.samples)
@@ -1834,12 +1901,12 @@ def train_world_tubes(
             multiscale_loss = (
                 downsampled_robust_l1(rendered.rgb[frame], target, multiscale_loss_factor)
                 if multiscale_loss_weight > 0.0
-                else train_frames.new_tensor(0.0)
+                else model.x0.new_tensor(0.0)
             )
             crop_loss = (
                 crop_robust_l1(rendered.rgb[frame], target, crop_loss_size, step)
                 if crop_loss_weight > 0.0
-                else train_frames.new_tensor(0.0)
+                else model.x0.new_tensor(0.0)
             )
             projected_sequences = [projected]
             step_target_frames = 1
@@ -1869,12 +1936,12 @@ def train_world_tubes(
             multiscale_loss = (
                 downsampled_robust_l1(rendered_active, target_active, multiscale_loss_factor)
                 if multiscale_loss_weight > 0.0
-                else train_frames.new_tensor(0.0)
+                else model.x0.new_tensor(0.0)
             )
             crop_loss = (
                 crop_robust_l1(rendered_active, target_active, crop_loss_size, step)
                 if crop_loss_weight > 0.0
-                else train_frames.new_tensor(0.0)
+                else model.x0.new_tensor(0.0)
             )
             projected_sequences = [projected]
             step_target_frames = len(active_train_frames)
@@ -1910,17 +1977,17 @@ def train_world_tubes(
             multiscale_loss = (
                 downsampled_robust_l1(rendered.rgb, target, multiscale_loss_factor)
                 if multiscale_loss_weight > 0.0
-                else train_frames.new_tensor(0.0)
+                else model.x0.new_tensor(0.0)
             )
             crop_loss = (
                 crop_robust_l1(rendered.rgb, target, crop_loss_size, step)
                 if crop_loss_weight > 0.0
-                else train_frames.new_tensor(0.0)
+                else model.x0.new_tensor(0.0)
             )
             projected_sequences = [projected]
             step_target_frames = window_frames
             step_rasterized_frames = window_frames
-        sequence_consistency_loss = train_frames.new_tensor(0.0)
+        sequence_consistency_loss = model.x0.new_tensor(0.0)
         consistency_due = (
             sequence_consistency_weight > 0.0
             and sequence_consistency_every_steps > 0
@@ -1988,15 +2055,30 @@ def train_world_tubes(
                 sample_emission_mode=sample_emission_mode,
             )
             if consistency_config.frames == frames:
-                sequence_target = step_train_frames[view].permute(0, 2, 3, 1).contiguous()
+                sequence_target = (
+                    resize_video_frames(
+                        train_frames[view].index_select(0, active_train_frame_tensor.to(train_frames.device)),
+                        paper_stage.image_size,
+                    )
+                    .to(device=device, dtype=torch.float32)
+                    .permute(0, 2, 3, 1)
+                )
                 sequence_consistency_loss = robust_l1(
                     sequence_rendered.rgb.index_select(0, active_train_frame_tensor)
-                    - sequence_target.index_select(0, active_train_frame_tensor)
+                    - sequence_target
                 )
             else:
-                sequence_target = step_train_frames[
-                    view, consistency_start : consistency_start + consistency_window_frames
-                ].permute(0, 2, 3, 1).contiguous()
+                sequence_target = (
+                    resize_video_frames(
+                        train_frames[
+                            view,
+                            consistency_start : consistency_start + consistency_window_frames,
+                        ],
+                        paper_stage.image_size,
+                    )
+                    .to(device=device, dtype=torch.float32)
+                    .permute(0, 2, 3, 1)
+                )
                 sequence_consistency_loss = robust_l1(sequence_rendered.rgb - sequence_target)
         train_render_config = (
             window_config
@@ -2183,6 +2265,7 @@ def train_free_splats(
 ) -> tuple[FreeDynamic3DGS, SplatRenderConfig, dict[str, Any]]:
     torch.manual_seed(seed)
     train_video = bundle.train_frames
+    device = bundle.train_K.device
     view_count, frames, _, height, width = train_video.shape
     source_image_size = normalize_image_size((height, width))
     paper_values = paper_protocol or {}
@@ -2199,7 +2282,7 @@ def train_free_splats(
     if paper_stages[-1].primitive_count != splat_count:
         raise ValueError("the final paper stage primitive_count must match splat_count")
     init_xyz, init_rgb = initialize_material_points_from_first_frame(
-        video=train_video[0].permute(0, 2, 3, 1).contiguous(),
+        video=train_video[0, :1].permute(0, 2, 3, 1).contiguous().to(device),
         K=bundle.train_K[0],
         num_elements=splat_count,
         init_depth=init_depth,
@@ -2216,7 +2299,7 @@ def train_free_splats(
         init_quat_noise=0.0,
         log_scale_min=-12.0,
         log_scale_max=4.0,
-    ).to(train_video.device)
+    ).to(device)
     render_cfg = SplatRenderConfig(
         height=height,
         width=width,
@@ -2242,16 +2325,15 @@ def train_free_splats(
         else None
     )
     paper_costs = PaperCostTracker()
-    paper_phase_timer = PaperPhaseTimer(train_video.device)
-    paper_memory_sampler = DeviceMemorySampler(train_video.device)
+    paper_phase_timer = PaperPhaseTimer(device)
+    paper_memory_sampler = DeviceMemorySampler(device)
     paper_memory_sampler.start()
-    paper_stage_cache: dict[str, tuple[Tensor, Tensor, SplatRenderConfig]] = {}
+    paper_stage_cache: dict[str, tuple[Tensor, SplatRenderConfig]] = {}
 
-    def splat_stage_payload(stage) -> tuple[Tensor, Tensor, SplatRenderConfig]:
+    def splat_stage_payload(stage) -> tuple[Tensor, SplatRenderConfig]:
         cached = paper_stage_cache.get(stage.label)
         if cached is not None:
             return cached
-        stage_frames = resize_video_frames(train_video, stage.image_size)
         stage_K = scale_intrinsics(bundle.train_K, source=source_image_size, target=stage.image_size)
         stage_render_cfg = SplatRenderConfig(
             height=stage.image_size.height,
@@ -2263,7 +2345,7 @@ def train_free_splats(
             near_plane=1.0e-3,
             camera_projection="camera_model" if camera_projection == "dataset_lens" else "legacy_pinhole",
         )
-        cached = (stage_frames, stage_K, stage_render_cfg)
+        cached = (stage_K, stage_render_cfg)
         paper_stage_cache[stage.label] = cached
         return cached
 
@@ -2282,14 +2364,15 @@ def train_free_splats(
         if paper_batch is None:
             sample_pairs = [
                 (
-                    int(torch.randint(0, view_count, (1,), device=train_video.device).item()),
-                    int(torch.randint(0, frames, (1,), device=train_video.device).item()),
+                    int(torch.randint(0, view_count, (1,), device=device).item()),
+                    int(torch.randint(0, frames, (1,), device=device).item()),
                 )
             ]
             stage_video, stage_K, stage_render_cfg = train_video, bundle.train_K, render_cfg
         else:
             sample_pairs = [(sample.view_index, sample.frame_index) for sample in paper_batch.samples]
-            stage_video, stage_K, stage_render_cfg = splat_stage_payload(paper_stage)
+            stage_video = train_video
+            stage_K, stage_render_cfg = splat_stage_payload(paper_stage)
         optimizer.zero_grad(set_to_none=True)
         paper_forward_started_at = paper_phase_timer.start("forward")
         images = []
@@ -2321,8 +2404,13 @@ def train_free_splats(
                     camera_projection=stage_render_cfg.camera_projection,
                 ).permute(1, 2, 0)
             )
-            target_rows.append(stage_video[view, frame].permute(1, 2, 0))
-        loss = robust_l1(torch.stack(images) - torch.stack(target_rows))
+            target_rows.append(stage_video[view, frame])
+        target_batch = (
+            resize_video_frames(torch.stack(target_rows), paper_stage.image_size)
+            .to(device=device, dtype=torch.float32)
+            .permute(0, 2, 3, 1)
+        )
+        loss = robust_l1(torch.stack(images) - target_batch)
         loss = loss + 1.0e-4 * model.scale_loss() + 1.0e-3 * model.temporal_smoothness_loss()
         paper_phase_timer.stop("forward", paper_forward_started_at)
         paper_backward_started_at = paper_phase_timer.start("backward")
@@ -2404,6 +2492,8 @@ def eval_world_tubes(
     synthetic_principal_y: float,
     render_config: UVTRenderConfig,
     frame_metric_splits: dict[str, list[int]] | None = None,
+    chunk_frames: int = 4,
+    media_max_frames: int = 32,
 ) -> dict[str, Any]:
     _, frames, _, height, width = bundle.train_frames.shape
     config = render_config
@@ -2425,8 +2515,12 @@ def eval_world_tubes(
         )
     if (camera_sequence_mode != "static_view" or synthetic_camera_active) and camera_projection != "legacy_pinhole":
         raise ValueError("variable/synthetic camera STAR quality eval currently requires camera_projection=legacy_pinhole")
+    if chunk_frames < 1:
+        raise ValueError("eval chunk_frames must be positive")
+    if media_max_frames < 1:
+        raise ValueError("eval media_max_frames must be positive")
 
-    def render_eval_view(
+    def render_eval_chunk(
         *,
         K_all: Tensor,
         w2c_all: Tensor,
@@ -2434,17 +2528,34 @@ def eval_world_tubes(
         view_count: int,
         lens_model_value: str,
         distortion_value: Tensor | None,
+        frame_start: int,
+        frame_stop: int,
     ) -> RenderedSequence:
+        chunk_config = UVTRenderConfig(
+            height=config.height,
+            width=config.width,
+            frames=frame_stop - frame_start,
+            tile_x=config.tile_x,
+            tile_y=config.tile_y,
+            tile_t=config.tile_t,
+            tile_capacity=config.tile_capacity,
+            alpha_threshold=config.alpha_threshold,
+            transmittance_threshold=config.transmittance_threshold,
+            background=config.background,
+            max_alpha=config.max_alpha,
+        )
         if camera_sequence_mode == "static_view" and not synthetic_camera_active:
             return render_world_tube_sequence(
                 model,
                 select_view_K(K_all, view),
                 select_view_w2c(w2c_all, view),
-                config,
+                chunk_config,
                 backend=backend,
                 camera_projection=camera_projection,
                 lens_model=lens_model_value,
                 distortion=distortion_value,
+                full_frames=frames,
+                frame_start=frame_start,
             )
         K_seq, w2c_seq = camera_sequences_for_view(
             K_all,
@@ -2463,73 +2574,135 @@ def eval_world_tubes(
             model=model,
             K_seq=K_seq,
             w2c_seq=w2c_seq,
-            config=config,
+            config=chunk_config,
             full_frames=frames,
-            frame_start=0,
+            frame_start=frame_start,
             camera_sequence_mode=camera_sequence_mode,
             segment_frames=segment_frames,
         )
-        return render_projected_sequence(projected, config, backend=backend)
-    train_rows = []
-    train_metrics = []
-    train_frame_split_metrics: dict[str, list[dict[str, float]]] = {
-        name: [] for name, indices in (frame_metric_splits or {}).items() if indices
-    }
-    train_render_times = []
-    device = bundle.train_frames.device
+        return render_projected_sequence(projected, chunk_config, backend=backend)
+
+    device = next(model.parameters()).device
     render_started = time.perf_counter()
-    for view in range(bundle.train_view_count):
-        lens_model, distortion = select_lens(
-            bundle.train_lens_models,
-            bundle.train_distortions,
-            view,
-            camera_projection=camera_projection,
-        )
-        rendered, render_elapsed = time_render_sequence(
-            device,
-            lambda view=view, lens_model=lens_model, distortion=distortion: render_eval_view(
-                K_all=bundle.train_K,
-                w2c_all=bundle.train_w2c,
-                view=view,
-                view_count=bundle.train_view_count,
-                lens_model_value=lens_model,
-                distortion_value=distortion,
-            ),
-        )
-        train_render_times.append(render_elapsed)
-        target = bundle.train_frames[view].permute(0, 2, 3, 1).contiguous()
-        train_rows.append((target, rendered))
-        train_metrics.append(video_metrics(rendered.rgb, target))
-        for name, metrics_rows in train_frame_split_metrics.items():
-            metrics_rows.append(subset_video_metrics(rendered.rgb, target, frame_metric_splits[name]))
-    heldout_rows = []
-    heldout_metrics = []
-    heldout_render_times = []
-    if bundle.heldout_frames is not None and bundle.heldout_K is not None and bundle.heldout_w2c is not None:
-        for view in range(bundle.heldout_view_count):
+
+    def eval_split(
+        *,
+        split: str,
+        frames_tensor: Tensor,
+        K_all: Tensor,
+        w2c_all: Tensor,
+        lens_models: list[str] | None,
+        distortions: Tensor | None,
+        split_metrics: dict[str, list[int]] | None = None,
+    ) -> tuple[list, list, list, dict[str, list[dict[str, float]]]]:
+        rows = []
+        metrics_rows = []
+        render_times = []
+        selected = media_frame_positions(frames, media_max_frames)
+        split_rows: dict[str, list[dict[str, float]]] = {
+            name: [] for name, indices in (split_metrics or {}).items() if indices
+        }
+        for view in range(int(frames_tensor.shape[0])):
             lens_model, distortion = select_lens(
-                bundle.heldout_lens_models,
-                bundle.heldout_distortions,
+                lens_models,
+                distortions,
                 view,
                 camera_projection=camera_projection,
             )
-            rendered, render_elapsed = time_render_sequence(
-                device,
-                lambda view=view, lens_model=lens_model, distortion=distortion: render_eval_view(
-                    K_all=bundle.heldout_K,
-                    w2c_all=bundle.heldout_w2c,
-                    view=view,
-                    view_count=bundle.heldout_view_count,
-                    lens_model_value=lens_model,
-                    distortion_value=distortion,
-                ),
+            accumulator = VideoMetricAccumulator()
+            frame_accumulators = {name: VideoMetricAccumulator() for name in split_rows}
+            lpips_sum = 0.0
+            lpips_count = 0
+            view_render_elapsed = 0.0
+            media_targets: list[Tensor] = []
+            media_renders: list[Tensor] = []
+            media_alphas: list[Tensor] = []
+            for start in range(0, frames, chunk_frames):
+                stop = min(start + chunk_frames, frames)
+                rendered, render_elapsed = time_render_sequence(
+                    device,
+                    lambda start=start, stop=stop: render_eval_chunk(
+                        K_all=K_all,
+                        w2c_all=w2c_all,
+                        view=view,
+                        view_count=int(frames_tensor.shape[0]),
+                        lens_model_value=lens_model,
+                        distortion_value=distortion,
+                        frame_start=start,
+                        frame_stop=stop,
+                    ),
+                )
+                view_render_elapsed += render_elapsed
+                target = frames_tensor[view, start:stop].permute(0, 2, 3, 1).contiguous().cpu()
+                rendered = RenderedSequence(
+                    rgb=rendered.rgb.detach().cpu(),
+                    alpha=rendered.alpha.detach().cpu(),
+                )
+                accumulator.update(rendered.rgb, target)
+                for name in frame_accumulators:
+                    indices = split_metrics[name]
+                    local_positions = [index - start for index in indices if start <= index < stop]
+                    if local_positions:
+                        local = torch.tensor(local_positions, dtype=torch.long)
+                        frame_accumulators[name].update(
+                            rendered.rgb.index_select(0, local),
+                            target.index_select(0, local),
+                        )
+                if split == "heldout":
+                    count = stop - start
+                    lpips_sum += video_lpips(rendered.rgb, target) * count
+                    lpips_count += count
+                append_chunk_media(
+                    start=start,
+                    stop=stop,
+                    selected=selected,
+                    target=target,
+                    rendered=rendered.rgb,
+                    alpha=rendered.alpha,
+                    targets_out=media_targets,
+                    rendered_out=media_renders,
+                    alpha_out=media_alphas,
+                )
+                del rendered, target
+            row_metrics = accumulator.metrics()
+            if split == "heldout":
+                row_metrics["eval_lpips"] = lpips_sum / float(lpips_count)
+            metrics_rows.append(row_metrics)
+            render_times.append(view_render_elapsed)
+            for name, frame_accumulator in frame_accumulators.items():
+                split_rows[name].append(frame_accumulator.metrics())
+            rows.append(
+                (
+                    torch.cat(media_targets, dim=0),
+                    RenderedSequence(
+                        rgb=torch.cat(media_renders, dim=0),
+                        alpha=torch.cat(media_alphas, dim=0),
+                    ),
+                )
             )
-            heldout_render_times.append(render_elapsed)
-            target = bundle.heldout_frames[view].permute(0, 2, 3, 1).contiguous()
-            heldout_rows.append((target, rendered))
-            heldout_row = video_metrics(rendered.rgb, target)
-            heldout_row["eval_lpips"] = video_lpips(rendered.rgb, target)
-            heldout_metrics.append(heldout_row)
+        return rows, metrics_rows, render_times, split_rows
+
+    train_rows, train_metrics, train_render_times, train_frame_split_metrics = eval_split(
+        split="train",
+        frames_tensor=bundle.train_frames,
+        K_all=bundle.train_K,
+        w2c_all=bundle.train_w2c,
+        lens_models=bundle.train_lens_models,
+        distortions=bundle.train_distortions,
+        split_metrics=frame_metric_splits,
+    )
+    heldout_rows: list = []
+    heldout_metrics: list = []
+    heldout_render_times: list = []
+    if bundle.heldout_frames is not None and bundle.heldout_K is not None and bundle.heldout_w2c is not None:
+        heldout_rows, heldout_metrics, heldout_render_times, _ = eval_split(
+            split="heldout",
+            frames_tensor=bundle.heldout_frames,
+            K_all=bundle.heldout_K,
+            w2c_all=bundle.heldout_w2c,
+            lens_models=bundle.heldout_lens_models,
+            distortions=bundle.heldout_distortions,
+        )
     metrics = aggregate_view_metrics(train_metrics)
     for name, metrics_rows in train_frame_split_metrics.items():
         metrics.update(prefix_metrics(f"train_{name}_frame", aggregate_view_metrics(metrics_rows)))
@@ -2879,7 +3052,7 @@ def world_tube_metal_stats(
     segment_frames: int,
     render_config: UVTRenderConfig,
 ) -> dict[str, Any]:
-    if bundle.train_frames.device.type != "mps":
+    if next(model.parameters()).device.type != "mps":
         return {"skipped": "Metal stats require MPS tensors."}
     _, frames, _, height, width = bundle.train_frames.shape
     config = render_config
@@ -2996,59 +3169,90 @@ def eval_free_splats(
     bundle,
     *,
     camera_projection: str,
+    chunk_frames: int = 4,
+    media_max_frames: int = 32,
 ) -> dict[str, Any]:
-    train_cameras = tuple(
-        tuple(
-            splat_camera_for_view_time(
-                bundle,
-                split="train",
-                view=view,
-                frame=frame,
-                camera_projection=camera_projection,
-            )
-            for frame in range(bundle.frame_count)
-        )
-        for view in range(bundle.train_view_count)
-    )
+    if chunk_frames < 1:
+        raise ValueError("eval chunk_frames must be positive")
+    if media_max_frames < 1:
+        raise ValueError("eval media_max_frames must be positive")
     render_started = time.perf_counter()
-    train_rows = []
-    train_metrics = []
-    train_render_times = []
-    device = bundle.train_frames.device
-    for view, cameras in enumerate(train_cameras):
-        rendered, render_elapsed = time_render_sequence(
-            device,
-            lambda cameras=cameras: render_splat_sequence(model, list(cameras), render_cfg),
-        )
-        train_render_times.append(render_elapsed)
-        target = bundle.train_frames[view].permute(0, 2, 3, 1).contiguous()
-        train_rows.append((target, RenderedSequence(rgb=rendered["rgb"], alpha=rendered["alpha"])))
-        train_metrics.append(video_metrics(rendered["rgb"], target))
-    heldout_rows = []
-    heldout_metrics = []
-    heldout_render_times = []
-    if bundle.heldout_frames is not None and bundle.heldout_K is not None and bundle.heldout_w2c is not None:
-        for view in range(bundle.heldout_view_count):
-            cameras = [
-                splat_camera_for_view_time(
-                    bundle,
-                    split="heldout",
-                    view=view,
-                    frame=frame,
-                    camera_projection=camera_projection,
+    device = next(model.parameters()).device
+
+    def eval_split(split: str, frames_tensor: Tensor) -> tuple[list, list, list]:
+        rows = []
+        metrics_rows = []
+        render_times = []
+        selected = media_frame_positions(bundle.frame_count, media_max_frames)
+        for view in range(int(frames_tensor.shape[0])):
+            accumulator = VideoMetricAccumulator()
+            lpips_sum = 0.0
+            lpips_count = 0
+            view_render_elapsed = 0.0
+            media_targets: list[Tensor] = []
+            media_renders: list[Tensor] = []
+            media_alphas: list[Tensor] = []
+            for start in range(0, bundle.frame_count, chunk_frames):
+                stop = min(start + chunk_frames, bundle.frame_count)
+                cameras = [
+                    splat_camera_for_view_time(
+                        bundle,
+                        split=split,
+                        view=view,
+                        frame=frame,
+                        camera_projection=camera_projection,
+                    )
+                    for frame in range(start, stop)
+                ]
+                rendered, render_elapsed = time_render_sequence(
+                    device,
+                    lambda cameras=cameras: render_splat_sequence(model, cameras, render_cfg),
                 )
-                for frame in range(bundle.frame_count)
-            ]
-            rendered, render_elapsed = time_render_sequence(
-                device,
-                lambda cameras=cameras: render_splat_sequence(model, cameras, render_cfg),
+                view_render_elapsed += render_elapsed
+                target = frames_tensor[view, start:stop].permute(0, 2, 3, 1).contiguous().cpu()
+                rendered = {
+                    "rgb": rendered["rgb"].detach().cpu(),
+                    "alpha": rendered["alpha"].detach().cpu(),
+                }
+                accumulator.update(rendered["rgb"], target)
+                if split == "heldout":
+                    count = stop - start
+                    lpips_sum += video_lpips(rendered["rgb"], target) * count
+                    lpips_count += count
+                append_chunk_media(
+                    start=start,
+                    stop=stop,
+                    selected=selected,
+                    target=target,
+                    rendered=rendered["rgb"],
+                    alpha=rendered["alpha"],
+                    targets_out=media_targets,
+                    rendered_out=media_renders,
+                    alpha_out=media_alphas,
+                )
+                del rendered, target
+            row_metrics = accumulator.metrics()
+            if split == "heldout":
+                row_metrics["eval_lpips"] = lpips_sum / float(lpips_count)
+            metrics_rows.append(row_metrics)
+            render_times.append(view_render_elapsed)
+            rows.append(
+                (
+                    torch.cat(media_targets, dim=0),
+                    RenderedSequence(
+                        rgb=torch.cat(media_renders, dim=0),
+                        alpha=torch.cat(media_alphas, dim=0),
+                    ),
+                )
             )
-            heldout_render_times.append(render_elapsed)
-            target = bundle.heldout_frames[view].permute(0, 2, 3, 1).contiguous()
-            heldout_rows.append((target, RenderedSequence(rgb=rendered["rgb"], alpha=rendered["alpha"])))
-            heldout_row = video_metrics(rendered["rgb"], target)
-            heldout_row["eval_lpips"] = video_lpips(rendered["rgb"], target)
-            heldout_metrics.append(heldout_row)
+        return rows, metrics_rows, render_times
+
+    train_rows, train_metrics, train_render_times = eval_split("train", bundle.train_frames)
+    heldout_rows: list = []
+    heldout_metrics: list = []
+    heldout_render_times: list = []
+    if bundle.heldout_frames is not None and bundle.heldout_K is not None and bundle.heldout_w2c is not None:
+        heldout_rows, heldout_metrics, heldout_render_times = eval_split("heldout", bundle.heldout_frames)
     metrics = aggregate_view_metrics(train_metrics)
     if heldout_metrics:
         metrics.update(prefix_metrics("heldout", aggregate_view_metrics(heldout_metrics)))
@@ -3063,6 +3267,8 @@ def run_dynamic_splats_lane(
     bundle,
     paper_protocol: dict[str, Any] | None,
     out_dir: Path,
+    eval_chunk_frames: int,
+    eval_media_max_frames: int,
 ) -> dict[str, Any]:
     splat_model, splat_render_cfg, splat_train = train_free_splats(
         bundle=bundle,
@@ -3082,6 +3288,8 @@ def run_dynamic_splats_lane(
         splat_render_cfg,
         bundle,
         camera_projection=args.splat_camera_projection,
+        chunk_frames=eval_chunk_frames,
+        media_max_frames=eval_media_max_frames,
     )
     save_first_row_media(
         out_dir,
@@ -3285,6 +3493,8 @@ def main() -> None:
     parser.add_argument("--splat-renderer", choices=("dense", "fast_mac"), default="dense")
     parser.add_argument("--splat-camera-projection", choices=("legacy_pinhole", "dataset_lens"), default="legacy_pinhole")
     parser.add_argument("--paper-protocol", type=Path, default=None)
+    parser.add_argument("--eval-chunk-frames", type=int, default=4)
+    parser.add_argument("--eval-media-max-frames", type=int, default=32)
     parser.add_argument(
         "--allow-paper-local-mps-execution",
         action="store_true",
@@ -3344,6 +3554,7 @@ def main() -> None:
         camera_cfg=camera_cfg,
         target_size=(load_image_size.height, load_image_size.width),
         device=device,
+        frame_device=torch.device("cpu") if paper_protocol is not None else device,
     )
     backward_policy = None
     if args.uvt_backward_policy != "manual":
@@ -3466,6 +3677,8 @@ def main() -> None:
         "splat_camera_projection": args.splat_camera_projection,
         "skip_splats": args.skip_splats,
         "only_lane": args.only_lane,
+        "eval_chunk_frames": args.eval_chunk_frames,
+        "eval_media_max_frames": args.eval_media_max_frames,
         "train_lens_models": bundle.train_lens_models,
         "heldout_lens_models": bundle.heldout_lens_models,
         "reference_vjepa_f32_256_16f_alpha1_128": {
@@ -3487,6 +3700,8 @@ def main() -> None:
                 bundle=bundle,
                 paper_protocol=paper_protocol,
                 out_dir=out_dir,
+                eval_chunk_frames=args.eval_chunk_frames,
+                eval_media_max_frames=args.eval_media_max_frames,
             ),
         }
         write_json(out_dir / "comparison_report.json", report)
@@ -3566,6 +3781,8 @@ def main() -> None:
         synthetic_principal_y=args.uvt_synthetic_principal_y,
         render_config=render_config,
         frame_metric_splits=uvt_frame_metric_splits,
+        chunk_frames=args.eval_chunk_frames,
+        media_max_frames=args.eval_media_max_frames,
     )
     uvt_checkpoint_curve = eval_world_tube_checkpoints(
         uvt_model,
@@ -3615,6 +3832,8 @@ def main() -> None:
             synthetic_principal_y=args.uvt_synthetic_principal_y,
             render_config=render_config,
             frame_metric_splits=uvt_frame_metric_splits,
+            chunk_frames=args.eval_chunk_frames,
+            media_max_frames=args.eval_media_max_frames,
         )
         save_first_row_media(
             out_dir,
@@ -3684,6 +3903,8 @@ def main() -> None:
             bundle=bundle,
             paper_protocol=paper_protocol,
             out_dir=out_dir,
+            eval_chunk_frames=args.eval_chunk_frames,
+            eval_media_max_frames=args.eval_media_max_frames,
         )
 
     report = {
