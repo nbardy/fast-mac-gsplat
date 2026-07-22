@@ -3057,6 +3057,54 @@ def eval_free_splats(
     return {"metrics": metrics, "train_rows": train_rows, "heldout_rows": heldout_rows}
 
 
+def run_dynamic_splats_lane(
+    *,
+    args: argparse.Namespace,
+    bundle,
+    paper_protocol: dict[str, Any] | None,
+    out_dir: Path,
+) -> dict[str, Any]:
+    splat_model, splat_render_cfg, splat_train = train_free_splats(
+        bundle=bundle,
+        splat_count=args.splat_count,
+        train_seconds=args.train_seconds,
+        max_steps=args.max_steps,
+        lr=args.splat_lr,
+        init_depth=args.init_depth,
+        init_scale=0.035,
+        seed=args.seed,
+        renderer=args.splat_renderer,
+        camera_projection=args.splat_camera_projection,
+        paper_protocol=paper_protocol,
+    )
+    splat_eval = eval_free_splats(
+        splat_model,
+        splat_render_cfg,
+        bundle,
+        camera_projection=args.splat_camera_projection,
+    )
+    save_first_row_media(
+        out_dir,
+        "free_dynamic_splats_train_view0",
+        splat_eval["train_rows"],
+        fps=float(bundle.metadata.get("fps", 4.0)),
+    )
+    save_first_row_media(
+        out_dir,
+        "free_dynamic_splats_heldout_view0",
+        splat_eval["heldout_rows"],
+        fps=float(bundle.metadata.get("fps", 4.0)),
+    )
+    return {
+        "splat_count": args.splat_count,
+        "renderer": args.splat_renderer,
+        "camera_projection": args.splat_camera_projection,
+        "render_camera_projection": splat_render_cfg.camera_projection,
+        **splat_train,
+        "metrics": splat_eval["metrics"],
+    }
+
+
 def aggregate_view_metrics(rows: list[dict[str, float]]) -> dict[str, float]:
     if not rows:
         return {}
@@ -3237,6 +3285,17 @@ def main() -> None:
     parser.add_argument("--splat-renderer", choices=("dense", "fast_mac"), default="dense")
     parser.add_argument("--splat-camera-projection", choices=("legacy_pinhole", "dataset_lens"), default="legacy_pinhole")
     parser.add_argument("--paper-protocol", type=Path, default=None)
+    parser.add_argument(
+        "--allow-paper-local-mps-execution",
+        action="store_true",
+        help="Required for paper-protocol MPS execution; the unified runner owns the safety preflight.",
+    )
+    parser.add_argument(
+        "--only-lane",
+        choices=("combined", "world_tubes", "dynamic_3dgs"),
+        default="combined",
+        help="Run one representation in this process so allocator state is released at process exit.",
+    )
     parser.add_argument("--skip-splats", action="store_true")
     parser.add_argument("--init-depth", type=float, default=2.0)
     parser.add_argument("--uvt-init-views", choices=("first", "all_train"), default="first")
@@ -3245,12 +3304,20 @@ def main() -> None:
     parser.add_argument("--out-dir", type=Path, default=ROOT / "research_project" / "benchmarks" / "results" / "multicam_heldout_compare")
     args = parser.parse_args()
 
+    if args.only_lane == "world_tubes":
+        args.skip_splats = True
+
     if args.torch_deterministic != "off":
         torch.use_deterministic_algorithms(True, warn_only=args.torch_deterministic == "warn")
 
     device = resolve_device(args.device)
     config = load_config_file(resolve_dynaworld_path(args.baseline_config))
     paper_protocol = None if args.paper_protocol is None else load_config_file(resolve_dynaworld_path(args.paper_protocol))
+    if paper_protocol is not None and device.type == "mps" and not args.allow_paper_local_mps_execution:
+        raise RuntimeError(
+            "Paper-protocol MPS execution is fail-closed after the 2026-07-22 memory-pressure incident. "
+            "Launch through the unified runner after explicit user approval."
+        )
     if paper_protocol is not None and not bool(paper_protocol.get("enabled", False)):
         raise ValueError("--paper-protocol requires enabled=true")
     if paper_protocol is not None and args.uvt_loss_scope != "paper_batch":
@@ -3398,6 +3465,7 @@ def main() -> None:
         "uvt_backward_policy": None if backward_policy is None else backward_policy.as_dict(),
         "splat_camera_projection": args.splat_camera_projection,
         "skip_splats": args.skip_splats,
+        "only_lane": args.only_lane,
         "train_lens_models": bundle.train_lens_models,
         "heldout_lens_models": bundle.heldout_lens_models,
         "reference_vjepa_f32_256_16f_alpha1_128": {
@@ -3409,6 +3477,22 @@ def main() -> None:
     }
     write_json(out_dir / "run_meta.json", {**run_meta, "config_data": serialize_config_value(data_cfg)})
 
+    if args.only_lane == "dynamic_3dgs":
+        report = {
+            "meta": run_meta,
+            "star_uvt": None,
+            "star_uvt_selected": None,
+            "free_dynamic_splats": run_dynamic_splats_lane(
+                args=args,
+                bundle=bundle,
+                paper_protocol=paper_protocol,
+                out_dir=out_dir,
+            ),
+        }
+        write_json(out_dir / "comparison_report.json", report)
+        print(json.dumps(report, indent=2, sort_keys=True))
+        print(f"Wrote dynamic-3DGS-only multicam comparison to {out_dir}")
+        return
     uvt_model, uvt_train, uvt_checkpoints = train_world_tubes(
         bundle=bundle,
         tube_count=args.uvt_tubes,
@@ -3595,35 +3679,12 @@ def main() -> None:
 
     splat_report: dict[str, Any] | None = None
     if not args.skip_splats:
-        splat_model, splat_render_cfg, splat_train = train_free_splats(
+        splat_report = run_dynamic_splats_lane(
+            args=args,
             bundle=bundle,
-            splat_count=args.splat_count,
-            train_seconds=args.train_seconds,
-            max_steps=args.max_steps,
-            lr=args.splat_lr,
-            init_depth=args.init_depth,
-            init_scale=0.035,
-            seed=args.seed,
-            renderer=args.splat_renderer,
-            camera_projection=args.splat_camera_projection,
             paper_protocol=paper_protocol,
+            out_dir=out_dir,
         )
-        splat_eval = eval_free_splats(
-            splat_model,
-            splat_render_cfg,
-            bundle,
-            camera_projection=args.splat_camera_projection,
-        )
-        save_first_row_media(out_dir, "free_dynamic_splats_train_view0", splat_eval["train_rows"], fps=float(bundle.metadata.get("fps", 4.0)))
-        save_first_row_media(out_dir, "free_dynamic_splats_heldout_view0", splat_eval["heldout_rows"], fps=float(bundle.metadata.get("fps", 4.0)))
-        splat_report = {
-            "splat_count": args.splat_count,
-            "renderer": args.splat_renderer,
-            "camera_projection": args.splat_camera_projection,
-            "render_camera_projection": splat_render_cfg.camera_projection,
-            **splat_train,
-            "metrics": splat_eval["metrics"],
-        }
 
     report = {
         "meta": run_meta,
