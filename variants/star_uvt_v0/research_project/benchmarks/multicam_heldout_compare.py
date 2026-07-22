@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import math
 import os
@@ -2941,7 +2942,14 @@ def world_tube_metal_stats(
         )
         if result.stats is None:
             raise AssertionError("Metal render did not return stats")
-        return {"split": split, "camera": camera_name, "stats": result.stats.__dict__}
+        return {
+            "split": split,
+            "camera": camera_name,
+            "stats": {
+                **result.stats.__dict__,
+                "projected_trace_count": int(projected.ma.shape[0]),
+            },
+        }
 
     rows = [
         row(
@@ -3561,6 +3569,29 @@ def main() -> None:
         uvt_model.load_state_dict(final_state)
     save_first_row_media(out_dir, "star_uvt_train_view0", uvt_eval["train_rows"], fps=float(bundle.metadata.get("fps", 4.0)))
     save_first_row_media(out_dir, "star_uvt_heldout_view0", uvt_eval["heldout_rows"], fps=float(bundle.metadata.get("fps", 4.0)))
+    uvt_metrics = uvt_eval["metrics"]
+    uvt_metal_stats = (
+        world_tube_metal_stats(
+            uvt_model,
+            bundle,
+            camera_projection=args.uvt_camera_projection,
+            camera_sequence_mode=args.uvt_camera_sequence_mode,
+            segment_frames=args.uvt_segment_frames,
+            render_config=render_config,
+        )
+        if (
+            args.uvt_render_backend == "metal_tile"
+            and not any(run_meta["uvt_synthetic_camera_motion"].values())
+        )
+        else None
+    )
+    # Full 300-frame evaluation rows retain hundreds of MB of rendered RGB and
+    # autograd-adjacent Metal allocations. Only the scalar metrics and saved
+    # media are needed after this point; release them before dynamic 3DGS eval.
+    del uvt_eval
+    gc.collect()
+    if device.type == "mps":
+        torch.mps.empty_cache()
 
     splat_report: dict[str, Any] | None = None
     if not args.skip_splats:
@@ -3653,21 +3684,9 @@ def main() -> None:
             "validation_frame_stride": args.uvt_validation_frame_stride,
             "validation_frame_offset": args.uvt_validation_frame_offset,
             **uvt_train,
-            "metrics": uvt_eval["metrics"],
+            "metrics": uvt_metrics,
             "checkpoint_curve": uvt_checkpoint_curve,
-            "metal_stats": world_tube_metal_stats(
-                uvt_model,
-                bundle,
-                camera_projection=args.uvt_camera_projection,
-                camera_sequence_mode=args.uvt_camera_sequence_mode,
-                segment_frames=args.uvt_segment_frames,
-                render_config=render_config,
-            )
-            if (
-                args.uvt_render_backend == "metal_tile"
-                and not any(run_meta["uvt_synthetic_camera_motion"].values())
-            )
-            else None,
+            "metal_stats": uvt_metal_stats,
         },
         "star_uvt_selected": selected_report,
         "free_dynamic_splats": splat_report,
