@@ -37,10 +37,13 @@ from torch_gsplat_bridge_star_uvt import UVTRenderConfig, render_uvt_tubes  # no
 from camera import CameraSpec  # noqa: E402
 from config_utils import load_config_file, serialize_config_value  # noqa: E402
 from common import prefix_metrics, robust_l1, save_preview_strip, save_side_by_side_mp4, video_metrics, write_json  # noqa: E402
+from device_memory import DeviceMemorySampler  # noqa: E402
 from multicam_video_data import load_multicam_video_bundle  # noqa: E402
 from paper_training_protocol import (  # noqa: E402
     PaperCostTracker,
+    PaperPhaseTimer,
     SpacetimeEpochSampler,
+    apply_paper_dataset_contract,
     normalize_image_size,
     normalize_paper_stages,
     paper_stage_for_step,
@@ -48,6 +51,7 @@ from paper_training_protocol import (  # noqa: E402
     scale_intrinsics,
 )
 from paper_training_types import MetalKernelSpec  # noqa: E402
+from perceptual_metrics import video_lpips  # noqa: E402
 from renderers.projection import project_points_camera  # noqa: E402
 from train_splat_baseline import (  # noqa: E402
     FreeDynamic3DGS,
@@ -1433,6 +1437,8 @@ def train_world_tubes(
     )
     if paper_stages[-1].image_size != source_image_size:
         raise ValueError("the final paper stage image size must match the loaded multicam image size")
+    if paper_stages[-1].primitive_count != tube_count:
+        raise ValueError("the final paper stage primitive_count must match tube_count")
     if sequence_consistency_frames > frames:
         raise ValueError(f"sequence_consistency_frames={sequence_consistency_frames} exceeds frame count {frames}")
     active_train_views = optimizer_train_view_indices(view_count, optimizer_train_views)
@@ -1528,6 +1534,9 @@ def train_world_tubes(
         else None
     )
     paper_costs = PaperCostTracker()
+    paper_phase_timer = PaperPhaseTimer(device)
+    paper_memory_sampler = DeviceMemorySampler(device)
+    paper_memory_sampler.start()
     paper_stage_cache: dict[str, tuple[Tensor, Tensor, UVTRenderConfig]] = {}
 
     def paper_stage_payload(stage) -> tuple[Tensor, Tensor, UVTRenderConfig]:
@@ -1734,29 +1743,41 @@ def train_world_tubes(
         step_train_frames = train_frames
         step_K = bundle.train_K
         step_full_config = full_config
+        step_train_render_config = full_config
         if paper_batch is not None:
             step_train_frames, step_K, step_full_config = paper_stage_payload(paper_stage)
         optimizer.zero_grad(set_to_none=True)
+        paper_forward_started_at = paper_phase_timer.start("forward")
         if loss_scope == "paper_batch":
             if paper_batch is None:
                 raise RuntimeError("paper_batch loss requires an active paper sampler")
             predictions = []
             targets = []
             projected_sequences = []
-            samples_by_view: dict[int, list[int]] = {}
+            selected_frame_config = UVTRenderConfig(
+                height=step_full_config.height,
+                width=step_full_config.width,
+                frames=1,
+                tile_x=step_full_config.tile_x,
+                tile_y=step_full_config.tile_y,
+                tile_t=step_full_config.tile_t,
+                tile_capacity=step_full_config.tile_capacity,
+                alpha_threshold=step_full_config.alpha_threshold,
+                transmittance_threshold=step_full_config.transmittance_threshold,
+                background=step_full_config.background,
+                max_alpha=step_full_config.max_alpha,
+            )
             for sample in paper_batch.samples:
-                samples_by_view.setdefault(sample.view_index, []).append(sample.frame_index)
-            for batch_view, batch_frames in samples_by_view.items():
                 batch_lens, batch_distortion = select_lens(
                     bundle.train_lens_models,
                     bundle.train_distortions,
-                    batch_view,
+                    sample.view_index,
                     camera_projection=camera_projection,
                 )
                 projected = project_for_view(
-                    view=batch_view,
-                    render_cfg=step_full_config,
-                    frame_start_value=0,
+                    view=sample.view_index,
+                    render_cfg=selected_frame_config,
+                    frame_start_value=sample.frame_index,
                     lens_model_value=batch_lens,
                     distortion_value=batch_distortion,
                     K_value=step_K,
@@ -1764,21 +1785,15 @@ def train_world_tubes(
                 projected_sequences.append(projected)
                 rendered = render_projected_sequence(
                     projected,
-                    step_full_config,
+                    selected_frame_config,
                     backend=backend,
                     reduction_mode=reduction_mode,
                     sample_emission_mode=sample_emission_mode,
                 )
-                indices = torch.tensor(batch_frames, dtype=torch.long, device=device)
-                predictions.append(rendered.rgb.index_select(0, indices))
-                targets.append(
-                    step_train_frames[batch_view]
-                    .permute(0, 2, 3, 1)
-                    .contiguous()
-                    .index_select(0, indices)
-                )
-            rendered_active = torch.cat(predictions, dim=0)
-            target_active = torch.cat(targets, dim=0)
+                predictions.append(rendered.rgb[0])
+                targets.append(step_train_frames[sample.view_index, sample.frame_index].permute(1, 2, 0))
+            rendered_active = torch.stack(predictions)
+            target_active = torch.stack(targets)
             recon_loss = robust_l1(rendered_active - target_active)
             multiscale_loss = (
                 downsampled_robust_l1(rendered_active, target_active, multiscale_loss_factor)
@@ -1791,7 +1806,8 @@ def train_world_tubes(
                 else train_frames.new_tensor(0.0)
             )
             step_target_frames = len(paper_batch.samples)
-            step_rasterized_frames = len(samples_by_view) * frames
+            step_rasterized_frames = len(paper_batch.samples)
+            step_train_render_config = selected_frame_config
         elif loss_scope == "sampled_frame":
             frame = (
                 frame_override
@@ -1984,7 +2000,7 @@ def train_world_tubes(
         train_render_config = (
             window_config
             if loss_scope == "temporal_window"
-            else (step_full_config if loss_scope == "paper_batch" else full_config)
+            else (step_train_render_config if loss_scope == "paper_batch" else full_config)
         )
         model_reg = model.regularization()
         projected_reg_rows = [
@@ -2008,6 +2024,7 @@ def train_world_tubes(
         multiscale_term = float(multiscale_loss_weight) * multiscale_loss
         crop_term = float(crop_loss_weight) * crop_loss
         loss = recon_loss + crop_term + multiscale_term + consistency_term + model_reg + projected_reg
+        paper_phase_timer.stop("forward", paper_forward_started_at)
         completed_step = step + 1
         should_log = step == 0 or completed_step % 10 == 0
         if should_log and not bool(torch.isfinite(loss.detach()).all().item()):
@@ -2034,9 +2051,13 @@ def train_world_tubes(
             model.load_state_dict(last_finite_state)
             step = last_finite_step
             break
+        paper_backward_started_at = paper_phase_timer.start("backward")
         loss.backward()
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        paper_phase_timer.stop("backward", paper_backward_started_at)
+        paper_optimizer_started_at = paper_phase_timer.start("optimizer")
         optimizer.step()
+        paper_phase_timer.stop("optimizer", paper_optimizer_started_at)
         paper_costs.record(
             stage=paper_stage,
             target_frames=step_target_frames,
@@ -2088,6 +2109,7 @@ def train_world_tubes(
             last_finite_step = completed_step
         step += 1
     train_elapsed = time.perf_counter() - started_at
+    paper_memory_sampler.stop()
     model.set_active_tube_count(tube_count)
     if checkpoint_every_steps > 0 and (not checkpoints or checkpoints[-1]["step"] != step):
         checkpoints.append({"step": step, "elapsed_s": train_elapsed, "state": snapshot_world_tube_state(model)})
@@ -2118,8 +2140,8 @@ def train_world_tubes(
                 "kernel": MetalKernelSpec(
                     representation="world_tubes",
                     family="star_uvt",
-                    forward=backend,
-                    backward=sample_emission_mode,
+                    forward=f"{backend}_selected_time" if paper_enabled else backend,
+                    backward=f"{sample_emission_mode}+{reduction_mode}",
                     deterministic=sample_emission_mode != "direct_atomic",
                     implementation="third_party/fast-mac-gsplat/variants/star_uvt_v0",
                 ).as_dict(),
@@ -2130,7 +2152,13 @@ def train_world_tubes(
                     "local_time_radius": int(paper_values.get("local_time_radius", 0)),
                 },
                 "stages": [stage.as_dict() for stage in paper_stages],
-                "cost": paper_costs.snapshot(model=model, optimizer=optimizer, elapsed_s=train_elapsed).as_dict(),
+                "cost": paper_costs.snapshot(
+                    model=model,
+                    optimizer=optimizer,
+                    elapsed_s=train_elapsed,
+                    memory=paper_memory_sampler.stats(),
+                ).as_dict(),
+                "timing": paper_phase_timer.snapshot(train_wall_s=train_elapsed),
             },
             "logs": logs,
         },
@@ -2167,6 +2195,8 @@ def train_free_splats(
     )
     if paper_stages[-1].image_size != source_image_size:
         raise ValueError("the final paper stage image size must match the loaded multicam image size")
+    if paper_stages[-1].primitive_count != splat_count:
+        raise ValueError("the final paper stage primitive_count must match splat_count")
     init_xyz, init_rgb = initialize_material_points_from_first_frame(
         video=train_video[0].permute(0, 2, 3, 1).contiguous(),
         K=bundle.train_K[0],
@@ -2211,6 +2241,9 @@ def train_free_splats(
         else None
     )
     paper_costs = PaperCostTracker()
+    paper_phase_timer = PaperPhaseTimer(train_video.device)
+    paper_memory_sampler = DeviceMemorySampler(train_video.device)
+    paper_memory_sampler.start()
     paper_stage_cache: dict[str, tuple[Tensor, Tensor, SplatRenderConfig]] = {}
 
     def splat_stage_payload(stage) -> tuple[Tensor, Tensor, SplatRenderConfig]:
@@ -2257,6 +2290,7 @@ def train_free_splats(
             sample_pairs = [(sample.view_index, sample.frame_index) for sample in paper_batch.samples]
             stage_video, stage_K, stage_render_cfg = splat_stage_payload(paper_stage)
         optimizer.zero_grad(set_to_none=True)
+        paper_forward_started_at = paper_phase_timer.start("forward")
         images = []
         target_rows = []
         for view, frame in sample_pairs:
@@ -2289,9 +2323,14 @@ def train_free_splats(
             target_rows.append(stage_video[view, frame].permute(1, 2, 0))
         loss = robust_l1(torch.stack(images) - torch.stack(target_rows))
         loss = loss + 1.0e-4 * model.scale_loss() + 1.0e-3 * model.temporal_smoothness_loss()
+        paper_phase_timer.stop("forward", paper_forward_started_at)
+        paper_backward_started_at = paper_phase_timer.start("backward")
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        paper_phase_timer.stop("backward", paper_backward_started_at)
+        paper_optimizer_started_at = paper_phase_timer.start("optimizer")
         optimizer.step()
+        paper_phase_timer.stop("optimizer", paper_optimizer_started_at)
         paper_costs.record(
             stage=paper_stage,
             target_frames=len(sample_pairs),
@@ -2313,6 +2352,7 @@ def train_free_splats(
             )
         step += 1
     train_elapsed = time.perf_counter() - started_at
+    paper_memory_sampler.stop()
     model.set_active_splat_count(splat_count)
     return model, render_cfg, {
         "steps": step,
@@ -2334,7 +2374,13 @@ def train_free_splats(
                 "local_time_radius": int(paper_values.get("local_time_radius", 0)),
             },
             "stages": [stage.as_dict() for stage in paper_stages],
-            "cost": paper_costs.snapshot(model=model, optimizer=optimizer, elapsed_s=train_elapsed).as_dict(),
+            "cost": paper_costs.snapshot(
+                model=model,
+                optimizer=optimizer,
+                elapsed_s=train_elapsed,
+                memory=paper_memory_sampler.stats(),
+            ).as_dict(),
+            "timing": paper_phase_timer.snapshot(train_wall_s=train_elapsed),
         },
         "logs": logs,
     }
@@ -2480,7 +2526,9 @@ def eval_world_tubes(
             heldout_render_times.append(render_elapsed)
             target = bundle.heldout_frames[view].permute(0, 2, 3, 1).contiguous()
             heldout_rows.append((target, rendered))
-            heldout_metrics.append(video_metrics(rendered.rgb, target))
+            heldout_row = video_metrics(rendered.rgb, target)
+            heldout_row["eval_lpips"] = video_lpips(rendered.rgb, target)
+            heldout_metrics.append(heldout_row)
     metrics = aggregate_view_metrics(train_metrics)
     for name, metrics_rows in train_frame_split_metrics.items():
         metrics.update(prefix_metrics(f"train_{name}_frame", aggregate_view_metrics(metrics_rows)))
@@ -2957,7 +3005,9 @@ def eval_free_splats(
             heldout_render_times.append(render_elapsed)
             target = bundle.heldout_frames[view].permute(0, 2, 3, 1).contiguous()
             heldout_rows.append((target, RenderedSequence(rgb=rendered["rgb"], alpha=rendered["alpha"])))
-            heldout_metrics.append(video_metrics(rendered["rgb"], target))
+            heldout_row = video_metrics(rendered["rgb"], target)
+            heldout_row["eval_lpips"] = video_lpips(rendered["rgb"], target)
+            heldout_metrics.append(heldout_row)
     metrics = aggregate_view_metrics(train_metrics)
     if heldout_metrics:
         metrics.update(prefix_metrics("heldout", aggregate_view_metrics(heldout_metrics)))
@@ -3168,7 +3218,10 @@ def main() -> None:
             default_frames_per_step=int(paper_protocol.get("frames_per_step", 1)),
         )
         load_image_size = protocol_stages[-1].image_size
-    data_cfg = config_data_for_run(config, target_size=args.target_size, max_frames=args.max_frames)
+    data_cfg = apply_paper_dataset_contract(
+        config_data_for_run(config, target_size=args.target_size, max_frames=args.max_frames),
+        paper_protocol,
+    )
     camera_cfg = dict(config["camera"])
     bundle = load_multicam_video_bundle(
         data_cfg=data_cfg,
@@ -3245,8 +3298,10 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     run_meta = {
         "baseline_config": str(resolve_dynaworld_path(args.baseline_config)),
-        "target_size": load_image_size.as_list(),
+        "target_size": args.target_size if paper_protocol is None else load_image_size.as_list(),
+        "image_size": load_image_size.as_list(),
         "max_frames": args.max_frames,
+        "frame_count": int(bundle.frame_count),
         "train_seconds": args.train_seconds,
         "device": str(device),
         "seed": args.seed,
