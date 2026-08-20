@@ -6,15 +6,35 @@
 #include <torch/mps.h>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 namespace world_foam_lane2_fused_slab {
 namespace {
 
 using at::native::mps::DynamicMetalShaderLibrary;
 using at::native::mps::MetalKernelFunction;
+
+constexpr const char* kKineticNodeForwardOperator =
+    "kinetic_precompiled_length_p0_lie_node_forward_into_launch_only_v1";
+constexpr const char* kKineticNodeForwardMetalFunction =
+    "wf2_kinetic_precompiled_length_p0_lie_node_forward_tensor";
+constexpr const char* kKineticSampleAccumulateOperator =
+    "kinetic_ragged_p0_lie_sample_accumulate_loss_only_launch_only";
+constexpr const char* kKineticSampleAccumulateMetalFunction =
+    "wf2_kinetic_ragged_p0_lie_sample_mse_vjp_accumulate_only_tensor";
+constexpr const char* kKineticMaterialVjpOperator =
+    "kinetic_precompiled_length_p0_lie_material_node_vjp_accumulate_launch_only";
+constexpr const char* kKineticMaterialVjpMetalFunction =
+    "wf2_kinetic_precompiled_length_p0_lie_material_node_vjp_tensor";
 
 std::string load_shader_source() {
   NSString* metalPath = [[NSString stringWithUTF8String:__FILE__] stringByDeletingLastPathComponent];
@@ -56,6 +76,29 @@ struct MetalKernels {
   std::shared_ptr<MetalKernelFunction> fused_slab_affine_num32_den16_vjp_finalize_reduce;
   std::shared_ptr<MetalKernelFunction> clear_site_rgba_grad;
   std::shared_ptr<MetalKernelFunction> clear_endpoint_loss_site_rgba_grad;
+  std::shared_ptr<MetalKernelFunction> clear_endpoint_loss_site_rgba_boundary_grad;
+  std::shared_ptr<MetalKernelFunction> clear_endpoint_loss_site_rgba_mobius_boundary_grad;
+  std::shared_ptr<MetalKernelFunction> clear_fixed_word_p0_compiled_lie_grad;
+  std::shared_ptr<MetalKernelFunction> sparse_mobius_incidence_lower;
+  std::shared_ptr<MetalKernelFunction> sparse_mobius_incidence_boundary_vjp;
+  std::shared_ptr<MetalKernelFunction> sparse_power_boundary_from_sites_launch_only;
+  std::shared_ptr<MetalKernelFunction> sparse_power_boundary_site_vjp_launch_only;
+  std::shared_ptr<MetalKernelFunction> fixed_word_p0_lie_node_forward;
+  std::shared_ptr<MetalKernelFunction> kinetic_precompiled_length_p0_lie_node_forward;
+  std::shared_ptr<MetalKernelFunction> fixed_word_p0_lie_sample_mse_vjp;
+  std::shared_ptr<MetalKernelFunction> fixed_word_p0_lie_sample_mse_vjp_accumulate_only;
+  std::shared_ptr<MetalKernelFunction> kinetic_ragged_p0_lie_sample_mse_vjp;
+  std::shared_ptr<MetalKernelFunction> kinetic_ragged_p0_lie_sample_mse_vjp_accumulate_only;
+  std::shared_ptr<MetalKernelFunction> fixed_word_p0_lie_node_vjp;
+  std::shared_ptr<MetalKernelFunction> fixed_word_p0_lie_material_node_vjp;
+  std::shared_ptr<MetalKernelFunction> kinetic_precompiled_length_p0_lie_node_vjp;
+  std::shared_ptr<MetalKernelFunction> kinetic_precompiled_length_p0_lie_material_node_vjp;
+  std::shared_ptr<MetalKernelFunction> kinetic_fused_direct_full_vjp_validate_v1;
+  std::shared_ptr<MetalKernelFunction> kinetic_fused_direct_full_vjp_v1;
+  std::shared_ptr<MetalKernelFunction> kinetic_fused_direct_full_vjp_finalize_v1;
+  std::shared_ptr<MetalKernelFunction> kinetic_fused_union_full_vjp_validate_v2;
+  std::shared_ptr<MetalKernelFunction> kinetic_fused_union_full_vjp_v2;
+  std::shared_ptr<MetalKernelFunction> kinetic_fused_union_full_vjp_finalize_v2;
   std::shared_ptr<MetalKernelFunction> clear_affine_loss_site_rgba_grad;
   std::shared_ptr<MetalKernelFunction> fused_slab_affine_num32_den16_vjp_direct_atomic;
   std::shared_ptr<MetalKernelFunction> fused_slab_affine_num32_den16_vjp_direct_atomic_grad_only;
@@ -101,6 +144,8 @@ struct MetalKernels {
   std::shared_ptr<MetalKernelFunction> endpoint_record_delta_replace_coeff16_packed_framegroup16_rowdesc32_mse_vjp_direct_atomic_rgb_only;
   std::shared_ptr<MetalKernelFunction> endpoint_record_delta_replace_coeff16_packed_framegroup16_recompute_mse_vjp_direct_atomic_rgb_only;
   std::shared_ptr<MetalKernelFunction> endpoint_record_delta_replace_factorized_packed_framegroup16_recompute_mse_vjp_direct_atomic_rgb_only;
+  std::shared_ptr<MetalKernelFunction> endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_mse_vjp_direct_atomic_rgb_boundary;
+  std::shared_ptr<MetalKernelFunction> endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_p0_mse_vjp_sparse_mobius_rgb;
   std::shared_ptr<MetalKernelFunction> endpoint_record_delta_replace_factorized_frameselect_recompute_mse_vjp_direct_atomic_rgb_only;
   std::shared_ptr<MetalKernelFunction> endpoint_record_delta_replace_factorized_framebitmask_recompute_mse_vjp_direct_atomic_rgb_only;
   std::shared_ptr<MetalKernelFunction> endpoint_record_delta_replace_coeff16_packed_framegroup16_smallrun16_mse_vjp_direct_atomic_rgb_only;
@@ -166,6 +211,52 @@ MetalKernels& kernels() {
     out.clear_site_rgba_grad = lib->getKernelFunction("wf2_clear_site_rgba_grad_tensor");
     out.clear_endpoint_loss_site_rgba_grad =
         lib->getKernelFunction("wf2_clear_endpoint_loss_site_rgba_grad_tensor");
+    out.clear_endpoint_loss_site_rgba_boundary_grad =
+        lib->getKernelFunction("wf2_clear_endpoint_loss_site_rgba_boundary_grad_tensor");
+    out.clear_endpoint_loss_site_rgba_mobius_boundary_grad =
+        lib->getKernelFunction("wf2_clear_endpoint_loss_site_rgba_mobius_boundary_grad_tensor");
+    out.clear_fixed_word_p0_compiled_lie_grad =
+        lib->getKernelFunction("wf2_clear_fixed_word_p0_compiled_lie_grad_tensor");
+    out.sparse_mobius_incidence_lower =
+        lib->getKernelFunction("wf2_sparse_mobius_incidence_lower_tensor");
+    out.sparse_mobius_incidence_boundary_vjp =
+        lib->getKernelFunction("wf2_sparse_mobius_incidence_boundary_vjp_tensor");
+    out.sparse_power_boundary_from_sites_launch_only =
+        lib->getKernelFunction("wf2_sparse_power_boundary_from_sites_launch_only_tensor");
+    out.sparse_power_boundary_site_vjp_launch_only =
+        lib->getKernelFunction("wf2_sparse_power_boundary_site_vjp_launch_only_tensor");
+    out.fixed_word_p0_lie_node_forward =
+        lib->getKernelFunction("wf2_fixed_word_p0_lie_node_forward_tensor");
+    out.kinetic_precompiled_length_p0_lie_node_forward =
+        lib->getKernelFunction(kKineticNodeForwardMetalFunction);
+    out.fixed_word_p0_lie_sample_mse_vjp =
+        lib->getKernelFunction("wf2_fixed_word_p0_lie_sample_mse_vjp_tensor");
+    out.fixed_word_p0_lie_sample_mse_vjp_accumulate_only =
+        lib->getKernelFunction("wf2_fixed_word_p0_lie_sample_mse_vjp_accumulate_only_tensor");
+    out.kinetic_ragged_p0_lie_sample_mse_vjp =
+        lib->getKernelFunction("wf2_kinetic_ragged_p0_lie_sample_mse_vjp_tensor");
+    out.kinetic_ragged_p0_lie_sample_mse_vjp_accumulate_only =
+        lib->getKernelFunction(kKineticSampleAccumulateMetalFunction);
+    out.fixed_word_p0_lie_node_vjp =
+        lib->getKernelFunction("wf2_fixed_word_p0_lie_node_vjp_tensor");
+    out.fixed_word_p0_lie_material_node_vjp =
+        lib->getKernelFunction("wf2_fixed_word_p0_lie_material_node_vjp_tensor");
+    out.kinetic_precompiled_length_p0_lie_node_vjp =
+        lib->getKernelFunction("wf2_kinetic_precompiled_length_p0_lie_node_vjp_tensor");
+    out.kinetic_precompiled_length_p0_lie_material_node_vjp =
+        lib->getKernelFunction(kKineticMaterialVjpMetalFunction);
+    out.kinetic_fused_direct_full_vjp_validate_v1 =
+        lib->getKernelFunction("wf2_kinetic_fused_direct_full_vjp_validate_v1_tensor");
+    out.kinetic_fused_direct_full_vjp_v1 =
+        lib->getKernelFunction("wf2_kinetic_fused_direct_full_vjp_v1_tensor");
+    out.kinetic_fused_direct_full_vjp_finalize_v1 =
+        lib->getKernelFunction("wf2_kinetic_fused_direct_full_vjp_finalize_v1_tensor");
+    out.kinetic_fused_union_full_vjp_validate_v2 =
+        lib->getKernelFunction("wf2_kinetic_fused_union_full_vjp_validate_v2_tensor");
+    out.kinetic_fused_union_full_vjp_v2 =
+        lib->getKernelFunction("wf2_kinetic_fused_union_full_vjp_v2_tensor");
+    out.kinetic_fused_union_full_vjp_finalize_v2 =
+        lib->getKernelFunction("wf2_kinetic_fused_union_full_vjp_finalize_v2_tensor");
     out.clear_affine_loss_site_rgba_grad =
         lib->getKernelFunction("wf2_clear_affine_loss_site_rgba_grad_tensor");
     out.fused_slab_affine_num32_den16_vjp_direct_atomic =
@@ -268,6 +359,12 @@ MetalKernels& kernels() {
     out.endpoint_record_delta_replace_factorized_packed_framegroup16_recompute_mse_vjp_direct_atomic_rgb_only =
         lib->getKernelFunction(
             "wf2_endpoint_record_delta_replace_factorized_packed_framegroup16_recompute_mse_vjp_direct_atomic_rgb_only_tensor");
+    out.endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_mse_vjp_direct_atomic_rgb_boundary =
+        lib->getKernelFunction(
+            "wf2_endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_mse_vjp_direct_atomic_rgb_boundary_tensor");
+    out.endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_p0_mse_vjp_sparse_mobius_rgb =
+        lib->getKernelFunction(
+            "wf2_endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_p0_mse_vjp_sparse_mobius_rgb_tensor");
     out.endpoint_record_delta_replace_factorized_frameselect_recompute_mse_vjp_direct_atomic_rgb_only =
         lib->getKernelFunction(
             "wf2_endpoint_record_delta_replace_factorized_frameselect_recompute_mse_vjp_direct_atomic_rgb_only_tensor");
@@ -437,6 +534,148 @@ void check_segment_tape_offsets_i16_cpu(
       "segment_offsets_i16[-1] must match segment count");
 }
 
+void check_track_boundary_incidence_csr_cpu(
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const int64_t track_count,
+    const int64_t boundary_count,
+    const int64_t incidence_count) {
+  auto offsets_cpu = track_incidence_offsets_i32.cpu();
+  auto boundary_ids_cpu = incidence_boundary_i32.cpu();
+  const int32_t* offsets = offsets_cpu.data_ptr<int32_t>();
+  const int32_t* boundary_ids = boundary_ids_cpu.data_ptr<int32_t>();
+  TORCH_CHECK(offsets[0] == 0, "track_incidence_offsets_i32[0] must be 0");
+  for (int64_t track_id = 0; track_id < track_count; ++track_id) {
+    const int32_t begin = offsets[track_id];
+    const int32_t end = offsets[track_id + 1];
+    TORCH_CHECK(begin >= 0 && end >= begin, "track incidence CSR offsets must be monotonic nonnegative");
+    TORCH_CHECK(end <= incidence_count, "track incidence CSR offset exceeds incidence count");
+    TORCH_CHECK(end - begin <= 4093, "packed row-local incidence codes support at most 4093 incidences per track");
+    int32_t previous_boundary = -1;
+    for (int32_t incidence_id = begin; incidence_id < end; ++incidence_id) {
+      const int32_t boundary_id = boundary_ids[incidence_id];
+      TORCH_CHECK(
+          boundary_id >= 0 && boundary_id < boundary_count,
+          "incidence_boundary_i32 values must be in [0, boundary_count)");
+      TORCH_CHECK(
+          boundary_id > previous_boundary,
+          "each incidence CSR row must contain strictly increasing unique boundary ids");
+      previous_boundary = boundary_id;
+    }
+  }
+  TORCH_CHECK(offsets[track_count] == incidence_count, "track incidence CSR final offset mismatch");
+}
+
+void check_fixed_word_incidence_csr_cpu(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const int64_t track_count,
+    const int64_t site_count,
+    const int64_t word_count) {
+  auto word_offsets_cpu = word_offsets_i32.cpu();
+  auto word_owner_cpu = word_owner_i32.cpu();
+  auto word_left_cpu = word_left_incidence_i32.cpu();
+  auto word_right_cpu = word_right_incidence_i32.cpu();
+  auto incidence_offsets_cpu = track_incidence_offsets_i32.cpu();
+  const int32_t* word_offsets = word_offsets_cpu.data_ptr<int32_t>();
+  const int32_t* word_owner = word_owner_cpu.data_ptr<int32_t>();
+  const int32_t* word_left = word_left_cpu.data_ptr<int32_t>();
+  const int32_t* word_right = word_right_cpu.data_ptr<int32_t>();
+  const int32_t* incidence_offsets = incidence_offsets_cpu.data_ptr<int32_t>();
+  TORCH_CHECK(word_offsets[0] == 0, "word_offsets_i32[0] must be 0");
+  for (int64_t track_id = 0; track_id < track_count; ++track_id) {
+    const int32_t begin = word_offsets[track_id];
+    const int32_t end = word_offsets[track_id + 1];
+    TORCH_CHECK(
+        begin >= 0 && end > begin && end <= word_count,
+        "each fixed-word CSR track row must be nonempty, monotonic, and in bounds");
+    TORCH_CHECK(word_left[begin] == -1, "each fixed-word CSR row must start at the near cut (-1)");
+    TORCH_CHECK(word_right[end - 1] == -2, "each fixed-word CSR row must end at the far cut (-2)");
+    const int32_t incidence_row_size = incidence_offsets[track_id + 1] - incidence_offsets[track_id];
+    int32_t previous_right = -1;
+    for (int32_t cursor = begin; cursor < end; ++cursor) {
+      const int32_t owner = word_owner[cursor];
+      const int32_t left = word_left[cursor];
+      const int32_t right = word_right[cursor];
+      TORCH_CHECK(owner >= 0 && owner < site_count, "fixed-word owner id is outside site range");
+      TORCH_CHECK(
+          cursor == begin ? left == -1 : left == previous_right,
+          "fixed-word cuts must form one adjacent stable ordered word");
+      TORCH_CHECK(
+          left == -1 || (left >= 0 && left < incidence_row_size),
+          "fixed-word left cut must be near or a row-local incidence id");
+      TORCH_CHECK(
+          right == -2 || (right >= 0 && right < incidence_row_size),
+          "fixed-word right cut must be far or a row-local incidence id");
+      TORCH_CHECK(left != right, "fixed-word segments must have distinct endpoint cuts");
+      TORCH_CHECK(
+          cursor + 1 == end ? right == -2 : right >= 0,
+          "only the final fixed-word segment may use the far cut");
+      previous_right = right;
+    }
+  }
+  TORCH_CHECK(word_offsets[track_count] == word_count, "fixed-word CSR final offset mismatch");
+}
+
+void check_packed_endpoint_incidence_delta_records_cpu(
+    const torch::Tensor& base_offsets_i16,
+    const torch::Tensor& base_record_incidence_i32,
+    const torch::Tensor& track_change_offsets_i16,
+    const torch::Tensor& change_offsets_i16,
+    const torch::Tensor& change_record_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const int64_t track_count,
+    const int64_t site_count) {
+  auto base_offsets_cpu = base_offsets_i16.cpu();
+  auto base_records_cpu = base_record_incidence_i32.cpu();
+  auto track_change_offsets_cpu = track_change_offsets_i16.cpu();
+  auto change_offsets_cpu = change_offsets_i16.cpu();
+  auto change_records_cpu = change_record_incidence_i32.cpu();
+  auto incidence_offsets_cpu = track_incidence_offsets_i32.cpu();
+  const int16_t* base_offsets = base_offsets_cpu.data_ptr<int16_t>();
+  const int32_t* base_records = base_records_cpu.data_ptr<int32_t>();
+  const int16_t* track_change_offsets = track_change_offsets_cpu.data_ptr<int16_t>();
+  const int16_t* change_offsets = change_offsets_cpu.data_ptr<int16_t>();
+  const int32_t* change_records = change_records_cpu.data_ptr<int32_t>();
+  const int32_t* incidence_offsets = incidence_offsets_cpu.data_ptr<int32_t>();
+
+  auto check_row = [&](const int32_t* records, const int32_t begin, const int32_t end, const int32_t row_size) {
+    for (int32_t record_id = begin; record_id < end; ++record_id) {
+      const uint32_t packed = static_cast<uint32_t>(records[record_id]);
+      TORCH_CHECK((packed & 255u) < static_cast<uint32_t>(site_count), "packed incidence owner is out of range");
+      const uint32_t left_code = (packed >> 8u) & 4095u;
+      const uint32_t right_code = (packed >> 20u) & 4095u;
+      TORCH_CHECK(
+          left_code < 2u || left_code - 2u < static_cast<uint32_t>(row_size),
+          "packed left row-local incidence id is outside its track CSR row");
+      TORCH_CHECK(
+          right_code < 2u || right_code - 2u < static_cast<uint32_t>(row_size),
+          "packed right row-local incidence id is outside its track CSR row");
+    }
+  };
+
+  for (int64_t track_id = 0; track_id < track_count; ++track_id) {
+    const int32_t row_size = incidence_offsets[track_id + 1] - incidence_offsets[track_id];
+    check_row(
+        base_records,
+        static_cast<int32_t>(base_offsets[track_id]),
+        static_cast<int32_t>(base_offsets[track_id + 1]),
+        row_size);
+    const int32_t change_begin = static_cast<int32_t>(track_change_offsets[track_id]);
+    const int32_t change_end = static_cast<int32_t>(track_change_offsets[track_id + 1]);
+    for (int32_t change_id = change_begin; change_id < change_end; ++change_id) {
+      check_row(
+          change_records,
+          static_cast<int32_t>(change_offsets[change_id]),
+          static_cast<int32_t>(change_offsets[change_id + 1]),
+          row_size);
+    }
+  }
+}
+
 void check_replay_candidate_mask_count(
     const torch::Tensor& candidate_mask_u32,
     const torch::Tensor& beam_f32,
@@ -448,6 +687,85 @@ void check_replay_candidate_mask_count(
 }
 
 }  // namespace
+
+std::tuple<
+    std::vector<std::string>,
+    std::vector<std::string>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>>
+metal_kinetic_memory_light_selected_kernel_resource_attestation() {
+  // These are exactly the three custom Metal kernels reached by the
+  // material-only executor.  The optional full-geometry VJP is intentionally
+  // absent.  Pair the public op and Metal symbol with the same compiled handle
+  // used by the launch path so the report cannot silently describe a sibling
+  // kernel.
+  auto& k = kernels();
+  const std::vector<std::tuple<
+      const char*,
+      const char*,
+      std::shared_ptr<MetalKernelFunction>>>
+      selected = {
+          {
+              kKineticNodeForwardOperator,
+              kKineticNodeForwardMetalFunction,
+              k.kinetic_precompiled_length_p0_lie_node_forward,
+          },
+          {
+              kKineticSampleAccumulateOperator,
+              kKineticSampleAccumulateMetalFunction,
+              k.kinetic_ragged_p0_lie_sample_mse_vjp_accumulate_only,
+          },
+          {
+              kKineticMaterialVjpOperator,
+              kKineticMaterialVjpMetalFunction,
+              k.kinetic_precompiled_length_p0_lie_material_node_vjp,
+          },
+      };
+
+  std::vector<std::string> operator_names;
+  std::vector<std::string> metal_function_names;
+  std::vector<int64_t> max_threads_per_threadgroup;
+  std::vector<int64_t> thread_execution_width;
+  std::vector<int64_t> static_threadgroup_memory_length_bytes;
+  operator_names.reserve(selected.size());
+  metal_function_names.reserve(selected.size());
+  max_threads_per_threadgroup.reserve(selected.size());
+  thread_execution_width.reserve(selected.size());
+  static_threadgroup_memory_length_bytes.reserve(selected.size());
+
+  const auto checked_i64 = [](const uint64_t value, const char* property) {
+    TORCH_CHECK(
+        value <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+        property,
+        " exceeds the signed int64 ABI range");
+    return static_cast<int64_t>(value);
+  };
+  for (const auto& [operator_name, metal_function_name, function] : selected) {
+    TORCH_CHECK(function != nullptr, "selected Metal kernel handle is null: ", metal_function_name);
+    operator_names.emplace_back(operator_name);
+    metal_function_names.emplace_back(metal_function_name);
+    max_threads_per_threadgroup.emplace_back(checked_i64(
+        function->getMaxThreadsPerThreadgroup(),
+        "getMaxThreadsPerThreadgroup()"));
+    thread_execution_width.emplace_back(checked_i64(
+        function->getThreadExecutionWidth(),
+        "getThreadExecutionWidth()"));
+    static_threadgroup_memory_length_bytes.emplace_back(checked_i64(
+        function->getStaticThreadGroupMemoryLength(),
+        "getStaticThreadGroupMemoryLength()"));
+  }
+
+  // MetalKernelFunction does not expose register allocation, per-thread
+  // private storage, or compiler spill bytes.  Those values are deliberately
+  // not estimated or returned by this ABI.
+  return std::make_tuple(
+      std::move(operator_names),
+      std::move(metal_function_names),
+      std::move(max_threads_per_threadgroup),
+      std::move(thread_execution_width),
+      std::move(static_threadgroup_memory_length_bytes));
+}
 
 torch::Tensor metal_count_power_boundary_events(
     const torch::Tensor& boundary_f32,
@@ -4551,6 +4869,2459 @@ metal_endpoint_record_delta_replace_factorized_packed_framegroup16_recompute_mse
         fn.dispatch((uint64_t)track_count * (uint64_t)chunk_count * framegroup_threads, framegroup_threads);
       });
   return std::make_tuple(loss, grad_site_rgba);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+metal_endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_mse_vjp_direct_atomic_rgb_boundary(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& frame_t_f32,
+    const torch::Tensor& base_offsets_i16,
+    const torch::Tensor& base_record_i32,
+    const torch::Tensor& track_change_offsets_i16,
+    const torch::Tensor& track_chunk_change_offsets_i16,
+    const torch::Tensor& change_frame_i16,
+    const torch::Tensor& change_offsets_i16,
+    const torch::Tensor& change_record_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32) {
+  check_float_mps_2d(boundary_f32, "boundary_f32", 5);
+  check_float_mps_2d(track_ray_coeff_f32, "track_ray_coeff_f32", 12);
+  check_float_mps_1d_any(frame_t_f32, "frame_t_f32");
+  check_i16_mps_1d_any(base_offsets_i16, "base_offsets_i16");
+  check_i32_mps_1d_any(base_record_i32, "base_record_i32");
+  check_i16_mps_1d_any(track_change_offsets_i16, "track_change_offsets_i16");
+  check_i16_mps_1d_any(track_chunk_change_offsets_i16, "track_chunk_change_offsets_i16");
+  check_i16_mps_1d_any(change_frame_i16, "change_frame_i16");
+  check_i16_mps_1d_any(change_offsets_i16, "change_offsets_i16");
+  check_i32_mps_1d_any(change_record_i32, "change_record_i32");
+  check_float_mps_2d(site_rgba_f32, "site_rgba_f32", 4);
+  TORCH_CHECK(target_rgb_f32.device().is_mps(), "target_rgb_f32 must be on MPS");
+  TORCH_CHECK(target_rgb_f32.scalar_type() == torch::kFloat32, "target_rgb_f32 must be float32");
+  TORCH_CHECK(target_rgb_f32.dim() == 3 && target_rgb_f32.size(2) == 3, "target_rgb_f32 must have shape [K,T,3]");
+  TORCH_CHECK(target_rgb_f32.is_contiguous(), "target_rgb_f32 must be contiguous");
+  check_i32_mps_1d(config_i32, "config_i32", 7);
+  TORCH_CHECK(config_f32.device().is_mps(), "config_f32 must be on MPS");
+  TORCH_CHECK(config_f32.scalar_type() == torch::kFloat32, "config_f32 must be float32");
+  TORCH_CHECK(config_f32.dim() == 1 && config_f32.size(0) == 4, "config_f32 must have shape [4]");
+  TORCH_CHECK(config_f32.is_contiguous(), "config_f32 must be contiguous");
+
+  auto config_i32_cpu = config_i32.cpu();
+  const int32_t* config = config_i32_cpu.data_ptr<int32_t>();
+  const int64_t boundary_count = config[0];
+  const int64_t track_count = config[1];
+  const int64_t frame_count = config[2];
+  const int64_t site_count = config[3];
+  const int64_t base_record_count = config[4];
+  const int64_t change_count = config[5];
+  const int64_t change_record_count = config[6];
+  TORCH_CHECK(boundary_count > 0, "config_i32[0] boundary count must be positive");
+  TORCH_CHECK(boundary_count <= 4093, "constant-state packed factorized fused MSE supports boundary count <= 4093");
+  TORCH_CHECK(track_count > 0, "config_i32[1] track count must be positive");
+  TORCH_CHECK(frame_count > 0, "config_i32[2] frame count must be positive");
+  TORCH_CHECK(site_count == site_rgba_f32.size(0), "config_i32[3] must match site_rgba_f32 rows");
+  TORCH_CHECK(
+      site_count > 0 && site_count <= 256,
+      "constant-state packed factorized fused MSE VJP supports site count in [1, 256]");
+  TORCH_CHECK(base_record_count >= 0, "config_i32[4] base record count must be nonnegative");
+  TORCH_CHECK(change_count >= 0, "config_i32[5] change count must be nonnegative");
+  TORCH_CHECK(change_count <= 32767, "int16 chunk-start offsets require change count <= 32767");
+  TORCH_CHECK(change_record_count >= 0, "config_i32[6] change record count must be nonnegative");
+  TORCH_CHECK(boundary_f32.size(0) == boundary_count, "boundary_f32 row count mismatch");
+  TORCH_CHECK(track_ray_coeff_f32.size(0) == track_count, "track_ray_coeff_f32 row count mismatch");
+  TORCH_CHECK(frame_t_f32.size(0) == frame_count, "frame_t_f32 length must match frame count");
+  TORCH_CHECK(base_record_i32.size(0) == base_record_count, "base_record_i32 length mismatch");
+  TORCH_CHECK(change_frame_i16.size(0) == change_count, "change_frame_i16 length must match change count");
+  TORCH_CHECK(change_record_i32.size(0) == change_record_count, "change_record_i32 length mismatch");
+  TORCH_CHECK(base_offsets_i16.size(0) == track_count + 1, "base_offsets_i16 length must be track_count + 1");
+  TORCH_CHECK(
+      track_change_offsets_i16.size(0) == track_count + 1,
+      "track_change_offsets_i16 length must be track_count + 1");
+  TORCH_CHECK(change_offsets_i16.size(0) == change_count + 1, "change_offsets_i16 length must be change_count + 1");
+  TORCH_CHECK(
+      target_rgb_f32.size(0) == track_count && target_rgb_f32.size(1) == frame_count,
+      "target_rgb_f32 shape mismatch");
+  check_segment_tape_offsets_i16_cpu(base_offsets_i16, track_count, base_record_count, 129);
+  check_segment_tape_offsets_i16_cpu(track_change_offsets_i16, track_count, change_count, 2147483647);
+  check_segment_tape_offsets_i16_cpu(change_offsets_i16, change_count, change_record_count, 129);
+
+  auto loss = torch::empty({1}, site_rgba_f32.options().dtype(torch::kFloat32));
+  auto grad_site_rgba = torch::empty({site_count, 4}, site_rgba_f32.options().dtype(torch::kFloat32));
+  auto grad_boundary = torch::empty({boundary_count, 5}, boundary_f32.options().dtype(torch::kFloat32));
+  auto& k = kernels();
+  constexpr uint64_t clear_threads = 256ull;
+  constexpr uint64_t framegroup_threads = 32ull;
+  const int64_t chunk_count = (frame_count + int64_t(framegroup_threads) - 1) / int64_t(framegroup_threads);
+  TORCH_CHECK(
+      track_chunk_change_offsets_i16.size(0) == track_count * (chunk_count + 1),
+      "track_chunk_change_offsets_i16 length mismatch");
+  auto chunk_offsets_cpu = track_chunk_change_offsets_i16.cpu();
+  auto track_offsets_cpu = track_change_offsets_i16.cpu();
+  const int16_t* chunk_offsets = chunk_offsets_cpu.data_ptr<int16_t>();
+  const int16_t* track_offsets = track_offsets_cpu.data_ptr<int16_t>();
+  for (int64_t track_id = 0; track_id < track_count; ++track_id) {
+    const int32_t track_begin = static_cast<int32_t>(track_offsets[track_id]);
+    const int32_t track_end = static_cast<int32_t>(track_offsets[track_id + 1]);
+    TORCH_CHECK(track_begin >= 0 && track_end >= track_begin && track_end <= change_count, "track change offset bounds");
+    int32_t previous = track_begin;
+    for (int64_t chunk_id = 0; chunk_id <= chunk_count; ++chunk_id) {
+      const int64_t chunk_index = track_id * (chunk_count + 1) + chunk_id;
+      const int32_t value = static_cast<int32_t>(chunk_offsets[chunk_index]);
+      TORCH_CHECK(
+          value >= previous && value >= track_begin && value <= track_end,
+          "track_chunk_change_offsets_i16 must be monotonic within each track and bounded by track changes");
+      previous = value;
+    }
+    TORCH_CHECK(previous == track_end, "final chunk change offset must match track change end");
+  }
+  launch(k.clear_endpoint_loss_site_rgba_boundary_grad, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, loss);
+    fn.setArg(1, grad_site_rgba);
+    fn.setArg(2, grad_boundary);
+    fn.setArg(3, config_i32);
+    fn.dispatch((uint64_t)std::max<int64_t>(std::max<int64_t>(site_count, boundary_count), 1), clear_threads);
+  });
+  auto framegroup_kernel =
+      k.endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_mse_vjp_direct_atomic_rgb_boundary;
+  launch(
+      framegroup_kernel,
+      [&](MetalKernelFunction& fn) {
+        fn.setArg(0, boundary_f32);
+        fn.setArg(1, track_ray_coeff_f32);
+        fn.setArg(2, frame_t_f32);
+        fn.setArg(3, base_offsets_i16);
+        fn.setArg(4, base_record_i32);
+        fn.setArg(5, track_change_offsets_i16);
+        fn.setArg(6, track_chunk_change_offsets_i16);
+        fn.setArg(7, change_frame_i16);
+        fn.setArg(8, change_offsets_i16);
+        fn.setArg(9, change_record_i32);
+        fn.setArg(10, site_rgba_f32);
+        fn.setArg(11, target_rgb_f32);
+        fn.setArg(12, config_i32);
+        fn.setArg(13, config_f32);
+        fn.setArg(14, loss);
+        fn.setArg(15, grad_site_rgba);
+        fn.setArg(16, grad_boundary);
+        fn.dispatch((uint64_t)track_count * (uint64_t)chunk_count * framegroup_threads, framegroup_threads);
+      });
+  return std::make_tuple(loss, grad_site_rgba, grad_boundary);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+metal_endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_p0_mse_vjp_sparse_mobius_rgb_boundary(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& frame_t_f32,
+    const torch::Tensor& base_offsets_i16,
+    const torch::Tensor& base_record_incidence_i32,
+    const torch::Tensor& track_change_offsets_i16,
+    const torch::Tensor& track_chunk_change_offsets_i16,
+    const torch::Tensor& change_frame_i16,
+    const torch::Tensor& change_offsets_i16,
+    const torch::Tensor& change_record_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32) {
+  check_float_mps_2d(boundary_f32, "boundary_f32", 5);
+  check_float_mps_2d(track_ray_coeff_f32, "track_ray_coeff_f32", 12);
+  check_float_mps_1d_any(frame_t_f32, "frame_t_f32");
+  check_i16_mps_1d_any(base_offsets_i16, "base_offsets_i16");
+  check_i32_mps_1d_any(base_record_incidence_i32, "base_record_incidence_i32");
+  check_i16_mps_1d_any(track_change_offsets_i16, "track_change_offsets_i16");
+  check_i16_mps_1d_any(track_chunk_change_offsets_i16, "track_chunk_change_offsets_i16");
+  check_i16_mps_1d_any(change_frame_i16, "change_frame_i16");
+  check_i16_mps_1d_any(change_offsets_i16, "change_offsets_i16");
+  check_i32_mps_1d_any(change_record_incidence_i32, "change_record_incidence_i32");
+  check_i32_mps_1d_any(track_incidence_offsets_i32, "track_incidence_offsets_i32");
+  check_i32_mps_1d_any(incidence_boundary_i32, "incidence_boundary_i32");
+  check_float_mps_2d(site_rgba_f32, "site_rgba_f32", 4);
+  TORCH_CHECK(target_rgb_f32.device().is_mps(), "target_rgb_f32 must be on MPS");
+  TORCH_CHECK(target_rgb_f32.scalar_type() == torch::kFloat32, "target_rgb_f32 must be float32");
+  TORCH_CHECK(
+      target_rgb_f32.dim() == 3 && target_rgb_f32.size(2) == 3,
+      "target_rgb_f32 must have shape [K,T,3]");
+  TORCH_CHECK(target_rgb_f32.is_contiguous(), "target_rgb_f32 must be contiguous");
+  check_i32_mps_1d(config_i32, "config_i32", 8);
+  TORCH_CHECK(config_f32.device().is_mps(), "config_f32 must be on MPS");
+  TORCH_CHECK(config_f32.scalar_type() == torch::kFloat32, "config_f32 must be float32");
+  TORCH_CHECK(config_f32.dim() == 1 && config_f32.size(0) == 4, "config_f32 must have shape [4]");
+  TORCH_CHECK(config_f32.is_contiguous(), "config_f32 must be contiguous");
+
+  auto config_i32_cpu = config_i32.cpu();
+  const int32_t* config = config_i32_cpu.data_ptr<int32_t>();
+  const int64_t boundary_count = config[0];
+  const int64_t track_count = config[1];
+  const int64_t frame_count = config[2];
+  const int64_t site_count = config[3];
+  const int64_t base_record_count = config[4];
+  const int64_t change_count = config[5];
+  const int64_t change_record_count = config[6];
+  const int64_t incidence_count = config[7];
+  TORCH_CHECK(boundary_count > 0, "config_i32[0] boundary count must be positive");
+  TORCH_CHECK(track_count > 0, "config_i32[1] track count must be positive");
+  TORCH_CHECK(frame_count > 0, "config_i32[2] frame count must be positive");
+  TORCH_CHECK(site_count == site_rgba_f32.size(0), "config_i32[3] must match site_rgba_f32 rows");
+  TORCH_CHECK(
+      site_count > 0 && site_count <= 256,
+      "sparse-Mobius constant-state P0 VJP supports site count in [1, 256]");
+  TORCH_CHECK(base_record_count >= 0, "config_i32[4] base record count must be nonnegative");
+  TORCH_CHECK(change_count >= 0 && change_count <= 32767, "change count must fit int16 chunk offsets");
+  TORCH_CHECK(change_record_count >= 0, "config_i32[6] change record count must be nonnegative");
+  TORCH_CHECK(incidence_count >= 0, "config_i32[7] incidence count must be nonnegative");
+  TORCH_CHECK(boundary_f32.size(0) == boundary_count, "boundary_f32 row count mismatch");
+  TORCH_CHECK(track_ray_coeff_f32.size(0) == track_count, "track_ray_coeff_f32 row count mismatch");
+  TORCH_CHECK(frame_t_f32.size(0) == frame_count, "frame_t_f32 length must match frame count");
+  TORCH_CHECK(base_record_incidence_i32.size(0) == base_record_count, "base incidence record length mismatch");
+  TORCH_CHECK(change_frame_i16.size(0) == change_count, "change_frame_i16 length must match change count");
+  TORCH_CHECK(
+      change_record_incidence_i32.size(0) == change_record_count,
+      "change incidence record length mismatch");
+  TORCH_CHECK(incidence_boundary_i32.size(0) == incidence_count, "incidence boundary length mismatch");
+  TORCH_CHECK(base_offsets_i16.size(0) == track_count + 1, "base_offsets_i16 length mismatch");
+  TORCH_CHECK(track_change_offsets_i16.size(0) == track_count + 1, "track change offset length mismatch");
+  TORCH_CHECK(change_offsets_i16.size(0) == change_count + 1, "change_offsets_i16 length mismatch");
+  TORCH_CHECK(
+      track_incidence_offsets_i32.size(0) == track_count + 1,
+      "track_incidence_offsets_i32 length mismatch");
+  TORCH_CHECK(
+      target_rgb_f32.size(0) == track_count && target_rgb_f32.size(1) == frame_count,
+      "target_rgb_f32 shape mismatch");
+  check_segment_tape_offsets_i16_cpu(base_offsets_i16, track_count, base_record_count, 129);
+  check_segment_tape_offsets_i16_cpu(track_change_offsets_i16, track_count, change_count, 2147483647);
+  check_segment_tape_offsets_i16_cpu(change_offsets_i16, change_count, change_record_count, 129);
+  check_track_boundary_incidence_csr_cpu(
+      track_incidence_offsets_i32,
+      incidence_boundary_i32,
+      track_count,
+      boundary_count,
+      incidence_count);
+  check_packed_endpoint_incidence_delta_records_cpu(
+      base_offsets_i16,
+      base_record_incidence_i32,
+      track_change_offsets_i16,
+      change_offsets_i16,
+      change_record_incidence_i32,
+      track_incidence_offsets_i32,
+      track_count,
+      site_count);
+
+  constexpr uint64_t clear_threads = 256ull;
+  constexpr uint64_t framegroup_threads = 32ull;
+  const int64_t chunk_count = (frame_count + int64_t(framegroup_threads) - 1) / int64_t(framegroup_threads);
+  TORCH_CHECK(
+      track_chunk_change_offsets_i16.size(0) == track_count * (chunk_count + 1),
+      "track_chunk_change_offsets_i16 length mismatch");
+  auto chunk_offsets_cpu = track_chunk_change_offsets_i16.cpu();
+  auto track_offsets_cpu = track_change_offsets_i16.cpu();
+  const int16_t* chunk_offsets = chunk_offsets_cpu.data_ptr<int16_t>();
+  const int16_t* track_offsets = track_offsets_cpu.data_ptr<int16_t>();
+  for (int64_t track_id = 0; track_id < track_count; ++track_id) {
+    const int32_t track_begin = static_cast<int32_t>(track_offsets[track_id]);
+    const int32_t track_end = static_cast<int32_t>(track_offsets[track_id + 1]);
+    TORCH_CHECK(track_begin >= 0 && track_end >= track_begin && track_end <= change_count, "track change bounds");
+    int32_t previous = track_begin;
+    for (int64_t chunk_id = 0; chunk_id <= chunk_count; ++chunk_id) {
+      const int32_t value = static_cast<int32_t>(
+          chunk_offsets[track_id * (chunk_count + 1) + chunk_id]);
+      TORCH_CHECK(
+          value >= previous && value >= track_begin && value <= track_end,
+          "track chunk change offsets must be monotonic and bounded by their track row");
+      previous = value;
+    }
+    TORCH_CHECK(previous == track_end, "final chunk change offset must match track change end");
+  }
+
+  auto loss = torch::empty({1}, site_rgba_f32.options().dtype(torch::kFloat32));
+  auto grad_site_rgba = torch::empty({site_count, 4}, site_rgba_f32.options().dtype(torch::kFloat32));
+  auto mobius_coeff = torch::empty({incidence_count, 4}, boundary_f32.options().dtype(torch::kFloat32));
+  auto grad_mobius_coeff = torch::empty({incidence_count, 4}, boundary_f32.options().dtype(torch::kFloat32));
+  auto grad_boundary = torch::empty({boundary_count, 5}, boundary_f32.options().dtype(torch::kFloat32));
+  auto& k = kernels();
+  launch(k.clear_endpoint_loss_site_rgba_mobius_boundary_grad, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, loss);
+    fn.setArg(1, grad_site_rgba);
+    fn.setArg(2, grad_mobius_coeff);
+    fn.setArg(3, grad_boundary);
+    fn.setArg(4, config_i32);
+    fn.dispatch(
+        (uint64_t)std::max<int64_t>(
+            std::max<int64_t>(std::max<int64_t>(site_count, boundary_count), incidence_count),
+            1),
+        clear_threads);
+  });
+  launch(k.sparse_mobius_incidence_lower, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, boundary_f32);
+    fn.setArg(1, track_ray_coeff_f32);
+    fn.setArg(2, track_incidence_offsets_i32);
+    fn.setArg(3, incidence_boundary_i32);
+    fn.setArg(4, mobius_coeff);
+    fn.setArg(5, config_i32);
+    fn.dispatch((uint64_t)track_count, clear_threads);
+  });
+  auto framegroup_kernel =
+      k.endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_p0_mse_vjp_sparse_mobius_rgb;
+  launch(framegroup_kernel, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, mobius_coeff);
+    fn.setArg(1, track_ray_coeff_f32);
+    fn.setArg(2, frame_t_f32);
+    fn.setArg(3, base_offsets_i16);
+    fn.setArg(4, base_record_incidence_i32);
+    fn.setArg(5, track_change_offsets_i16);
+    fn.setArg(6, track_chunk_change_offsets_i16);
+    fn.setArg(7, change_frame_i16);
+    fn.setArg(8, change_offsets_i16);
+    fn.setArg(9, change_record_incidence_i32);
+    fn.setArg(10, track_incidence_offsets_i32);
+    fn.setArg(11, site_rgba_f32);
+    fn.setArg(12, target_rgb_f32);
+    fn.setArg(13, config_i32);
+    fn.setArg(14, config_f32);
+    fn.setArg(15, loss);
+    fn.setArg(16, grad_site_rgba);
+    fn.setArg(17, grad_mobius_coeff);
+    fn.dispatch((uint64_t)track_count * (uint64_t)chunk_count * framegroup_threads, framegroup_threads);
+  });
+  launch(k.sparse_mobius_incidence_boundary_vjp, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, track_ray_coeff_f32);
+    fn.setArg(1, track_incidence_offsets_i32);
+    fn.setArg(2, incidence_boundary_i32);
+    fn.setArg(3, grad_mobius_coeff);
+    fn.setArg(4, grad_boundary);
+    fn.setArg(5, config_i32);
+    fn.dispatch((uint64_t)track_count, clear_threads);
+  });
+  return std::make_tuple(loss, grad_site_rgba, grad_mobius_coeff, grad_boundary);
+}
+
+using FixedWordP0CompiledLieResult = std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>;
+
+// Warm launch core. All shapes, values, topology, scalar configuration, and
+// physical-density constraints are certified before this function is reached.
+// Keep this path free of host reads, synchronization, and validation.
+FixedWordP0CompiledLieResult launch_fixed_word_p0_compiled_lie_prevalidated(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t boundary_count,
+    const int64_t track_count,
+    const int64_t node_count,
+    const int64_t sample_count,
+    const int64_t site_count,
+    const int64_t word_count,
+    const int64_t incidence_count) {
+  auto loss = torch::empty({1}, site_rgba_f32.options().dtype(torch::kFloat32));
+  auto prediction_rgb = torch::empty(
+      {track_count, sample_count, 3},
+      site_rgba_f32.options().dtype(torch::kFloat32));
+  auto node_chart = torch::empty(
+      {track_count, node_count, 4},
+      site_rgba_f32.options().dtype(torch::kFloat32));
+  auto grad_node_chart = torch::empty(
+      {track_count, node_count, 4},
+      site_rgba_f32.options().dtype(torch::kFloat32));
+  auto grad_site_rgba = torch::empty({site_count, 4}, site_rgba_f32.options().dtype(torch::kFloat32));
+  auto mobius_coeff = torch::empty({incidence_count, 4}, boundary_f32.options().dtype(torch::kFloat32));
+  auto grad_mobius_coeff = torch::empty({incidence_count, 4}, boundary_f32.options().dtype(torch::kFloat32));
+  auto grad_boundary = torch::empty({boundary_count, 5}, boundary_f32.options().dtype(torch::kFloat32));
+  auto cone_diagnostic = torch::empty({3}, boundary_f32.options().dtype(torch::kInt32));
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  const int64_t node_element_count = track_count * node_count * 4;
+  const int64_t clear_count = std::max<int64_t>(
+      std::max<int64_t>(
+          std::max<int64_t>(node_element_count, site_count),
+          std::max<int64_t>(incidence_count, boundary_count)),
+      3);
+  launch(k.clear_fixed_word_p0_compiled_lie_grad, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, loss);
+    fn.setArg(1, grad_node_chart);
+    fn.setArg(2, grad_site_rgba);
+    fn.setArg(3, grad_mobius_coeff);
+    fn.setArg(4, grad_boundary);
+    fn.setArg(5, cone_diagnostic);
+    fn.setArg(6, config_i32);
+    fn.dispatch((uint64_t)clear_count, threads);
+  });
+  launch(k.sparse_mobius_incidence_lower, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, boundary_f32);
+    fn.setArg(1, track_ray_coeff_f32);
+    fn.setArg(2, track_incidence_offsets_i32);
+    fn.setArg(3, incidence_boundary_i32);
+    fn.setArg(4, mobius_coeff);
+    fn.setArg(5, config_i32);
+    fn.dispatch((uint64_t)track_count, threads);
+  });
+  launch(k.fixed_word_p0_lie_node_forward, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, mobius_coeff);
+    fn.setArg(1, track_ray_coeff_f32);
+    fn.setArg(2, compiler_node_t_f32);
+    fn.setArg(3, word_offsets_i32);
+    fn.setArg(4, word_owner_i32);
+    fn.setArg(5, word_left_incidence_i32);
+    fn.setArg(6, word_right_incidence_i32);
+    fn.setArg(7, track_incidence_offsets_i32);
+    fn.setArg(8, site_rgba_f32);
+    fn.setArg(9, node_chart);
+    fn.setArg(10, config_i32);
+    fn.setArg(11, config_f32);
+    fn.dispatch((uint64_t)track_count * (uint64_t)node_count, threads);
+  });
+  launch(k.fixed_word_p0_lie_sample_mse_vjp, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, node_chart);
+    fn.setArg(1, sample_to_node_f32);
+    fn.setArg(2, target_rgb_f32);
+    fn.setArg(3, background_rgb_f32);
+    fn.setArg(4, prediction_rgb);
+    fn.setArg(5, loss);
+    fn.setArg(6, grad_node_chart);
+    fn.setArg(7, cone_diagnostic);
+    fn.setArg(8, config_i32);
+    fn.setArg(9, config_f32);
+    fn.dispatch((uint64_t)track_count * (uint64_t)sample_count, threads);
+  });
+  launch(k.fixed_word_p0_lie_node_vjp, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, mobius_coeff);
+    fn.setArg(1, track_ray_coeff_f32);
+    fn.setArg(2, compiler_node_t_f32);
+    fn.setArg(3, word_offsets_i32);
+    fn.setArg(4, word_owner_i32);
+    fn.setArg(5, word_left_incidence_i32);
+    fn.setArg(6, word_right_incidence_i32);
+    fn.setArg(7, track_incidence_offsets_i32);
+    fn.setArg(8, site_rgba_f32);
+    fn.setArg(9, node_chart);
+    fn.setArg(10, grad_node_chart);
+    fn.setArg(11, grad_site_rgba);
+    fn.setArg(12, grad_mobius_coeff);
+    fn.setArg(13, config_i32);
+    fn.setArg(14, config_f32);
+    fn.dispatch((uint64_t)track_count * (uint64_t)node_count, threads);
+  });
+  launch(k.sparse_mobius_incidence_boundary_vjp, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, track_ray_coeff_f32);
+    fn.setArg(1, track_incidence_offsets_i32);
+    fn.setArg(2, incidence_boundary_i32);
+    fn.setArg(3, grad_mobius_coeff);
+    fn.setArg(4, grad_boundary);
+    fn.setArg(5, config_i32);
+    fn.dispatch((uint64_t)track_count, threads);
+  });
+  return std::make_tuple(
+      loss,
+      prediction_rgb,
+      node_chart,
+      grad_node_chart,
+      grad_site_rgba,
+      grad_mobius_coeff,
+      grad_boundary,
+      cone_diagnostic);
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32) {
+  check_float_mps_2d(boundary_f32, "boundary_f32", 5);
+  check_float_mps_2d(track_ray_coeff_f32, "track_ray_coeff_f32", 12);
+  check_float_mps_1d_any(compiler_node_t_f32, "compiler_node_t_f32");
+  check_i32_mps_1d_any(word_offsets_i32, "word_offsets_i32");
+  check_i32_mps_1d_any(word_owner_i32, "word_owner_i32");
+  check_i32_mps_1d_any(word_left_incidence_i32, "word_left_incidence_i32");
+  check_i32_mps_1d_any(word_right_incidence_i32, "word_right_incidence_i32");
+  check_i32_mps_1d_any(track_incidence_offsets_i32, "track_incidence_offsets_i32");
+  check_i32_mps_1d_any(incidence_boundary_i32, "incidence_boundary_i32");
+  check_float_mps_2d(site_rgba_f32, "site_rgba_f32", 4);
+  TORCH_CHECK(sample_to_node_f32.device().is_mps(), "sample_to_node_f32 must be on MPS");
+  TORCH_CHECK(sample_to_node_f32.scalar_type() == torch::kFloat32, "sample_to_node_f32 must be float32");
+  TORCH_CHECK(sample_to_node_f32.dim() == 2, "sample_to_node_f32 must have shape [K,J]");
+  TORCH_CHECK(sample_to_node_f32.is_contiguous(), "sample_to_node_f32 must be contiguous");
+  TORCH_CHECK(target_rgb_f32.device().is_mps(), "target_rgb_f32 must be on MPS");
+  TORCH_CHECK(target_rgb_f32.scalar_type() == torch::kFloat32, "target_rgb_f32 must be float32");
+  TORCH_CHECK(
+      target_rgb_f32.dim() == 3 && target_rgb_f32.size(2) == 3,
+      "target_rgb_f32 must have shape [T,K,3]");
+  TORCH_CHECK(target_rgb_f32.is_contiguous(), "target_rgb_f32 must be contiguous");
+  check_float_mps_1d_any(background_rgb_f32, "background_rgb_f32");
+  TORCH_CHECK(background_rgb_f32.size(0) == 3, "background_rgb_f32 must have shape [3]");
+  check_i32_mps_1d(config_i32, "config_i32", 8);
+  TORCH_CHECK(config_f32.device().is_mps(), "config_f32 must be on MPS");
+  TORCH_CHECK(config_f32.scalar_type() == torch::kFloat32, "config_f32 must be float32");
+  TORCH_CHECK(config_f32.dim() == 1 && config_f32.size(0) == 6, "config_f32 must have shape [6]");
+  TORCH_CHECK(config_f32.is_contiguous(), "config_f32 must be contiguous");
+
+  auto config_i32_cpu = config_i32.cpu();
+  const int32_t* config = config_i32_cpu.data_ptr<int32_t>();
+  const int64_t boundary_count = config[0];
+  const int64_t track_count = config[1];
+  const int64_t node_count = config[2];
+  const int64_t sample_count = config[3];
+  const int64_t site_count = config[4];
+  const int64_t word_count = config[5];
+  const int64_t incidence_count = config[6];
+  TORCH_CHECK(boundary_count >= 0, "config_i32[0] boundary count must be nonnegative");
+  TORCH_CHECK(track_count > 0, "config_i32[1] track count must be positive");
+  TORCH_CHECK(node_count > 0, "config_i32[2] compiler node count must be positive");
+  TORCH_CHECK(sample_count > 0, "config_i32[3] selected sample count must be positive");
+  TORCH_CHECK(site_count > 0, "config_i32[4] site count must be positive");
+  TORCH_CHECK(word_count >= track_count, "config_i32[5] word count must cover every nonempty track row");
+  TORCH_CHECK(incidence_count >= 0, "config_i32[6] incidence count must be nonnegative");
+  TORCH_CHECK(config[7] == incidence_count, "config_i32[7] must repeat incidence count for sparse-Mobius lowering");
+  TORCH_CHECK(boundary_f32.size(0) == boundary_count, "boundary_f32 row count mismatch");
+  TORCH_CHECK(track_ray_coeff_f32.size(0) == track_count, "track_ray_coeff_f32 row count mismatch");
+  TORCH_CHECK(compiler_node_t_f32.size(0) == node_count, "compiler_node_t_f32 length mismatch");
+  TORCH_CHECK(word_offsets_i32.size(0) == track_count + 1, "word_offsets_i32 length mismatch");
+  TORCH_CHECK(word_owner_i32.size(0) == word_count, "word_owner_i32 length mismatch");
+  TORCH_CHECK(word_left_incidence_i32.size(0) == word_count, "word_left_incidence_i32 length mismatch");
+  TORCH_CHECK(word_right_incidence_i32.size(0) == word_count, "word_right_incidence_i32 length mismatch");
+  TORCH_CHECK(
+      track_incidence_offsets_i32.size(0) == track_count + 1,
+      "track_incidence_offsets_i32 length mismatch");
+  TORCH_CHECK(incidence_boundary_i32.size(0) == incidence_count, "incidence_boundary_i32 length mismatch");
+  TORCH_CHECK(site_rgba_f32.size(0) == site_count, "site_rgba_f32 row count mismatch");
+  TORCH_CHECK(
+      sample_to_node_f32.size(0) == sample_count && sample_to_node_f32.size(1) == node_count,
+      "sample_to_node_f32 shape mismatch");
+  TORCH_CHECK(
+      target_rgb_f32.size(0) == track_count && target_rgb_f32.size(1) == sample_count,
+      "target_rgb_f32 shape mismatch");
+  check_track_boundary_incidence_csr_cpu(
+      track_incidence_offsets_i32,
+      incidence_boundary_i32,
+      track_count,
+      boundary_count,
+      incidence_count);
+  check_fixed_word_incidence_csr_cpu(
+      word_offsets_i32,
+      word_owner_i32,
+      word_left_incidence_i32,
+      word_right_incidence_i32,
+      track_incidence_offsets_i32,
+      track_count,
+      site_count,
+      word_count);
+  auto config_f32_cpu = config_f32.cpu();
+  const float* scalar_config = config_f32_cpu.data_ptr<float>();
+  TORCH_CHECK(
+      std::isfinite(scalar_config[0]) && std::isfinite(scalar_config[1]) &&
+          std::isfinite(scalar_config[2]) && std::isfinite(scalar_config[3]) &&
+          std::isfinite(scalar_config[4]) && std::isfinite(scalar_config[5]),
+      "config_f32 values must be finite");
+  TORCH_CHECK(scalar_config[1] > scalar_config[0], "config_f32 far must be greater than near");
+  TORCH_CHECK(scalar_config[2] > 0.0f, "config_f32 invalid epsilon must be positive");
+  TORCH_CHECK(scalar_config[3] > 0.0f, "config_f32 physical length epsilon must be positive");
+  TORCH_CHECK(scalar_config[4] >= 0.0f, "config_f32 cone tolerance must be nonnegative");
+  TORCH_CHECK(scalar_config[5] > 0.0f, "config_f32 global loss scale must be positive");
+  return launch_fixed_word_p0_compiled_lie_prevalidated(
+      boundary_f32,
+      track_ray_coeff_f32,
+      compiler_node_t_f32,
+      word_offsets_i32,
+      word_owner_i32,
+      word_left_incidence_i32,
+      word_right_incidence_i32,
+      track_incidence_offsets_i32,
+      incidence_boundary_i32,
+      site_rgba_f32,
+      sample_to_node_f32,
+      target_rgb_f32,
+      background_rgb_f32,
+      config_i32,
+      config_f32,
+      boundary_count,
+      track_count,
+      node_count,
+      sample_count,
+      site_count,
+      word_count,
+      incidence_count);
+}
+
+FixedWordP0CompiledLieResult
+metal_fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary_launch_only(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t boundary_count,
+    const int64_t track_count,
+    const int64_t node_count,
+    const int64_t sample_count,
+    const int64_t site_count,
+    const int64_t word_count,
+    const int64_t incidence_count) {
+  return launch_fixed_word_p0_compiled_lie_prevalidated(
+      boundary_f32,
+      track_ray_coeff_f32,
+      compiler_node_t_f32,
+      word_offsets_i32,
+      word_owner_i32,
+      word_left_incidence_i32,
+      word_right_incidence_i32,
+      track_incidence_offsets_i32,
+      incidence_boundary_i32,
+      site_rgba_f32,
+      sample_to_node_f32,
+      target_rgb_f32,
+      background_rgb_f32,
+      config_i32,
+      config_f32,
+      boundary_count,
+      track_count,
+      node_count,
+      sample_count,
+      site_count,
+      word_count,
+      incidence_count);
+}
+
+torch::Tensor metal_sparse_power_boundary_from_sites_launch_only(
+    const torch::Tensor& boundary_site_pairs_i32,
+    const torch::Tensor& sites_f32,
+    const int64_t boundary_count) {
+  auto boundary_f32 = torch::empty(
+      {boundary_count, 5},
+      sites_f32.options().dtype(torch::kFloat32));
+  if (boundary_count == 0) {
+    return boundary_f32;
+  }
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.sparse_power_boundary_from_sites_launch_only, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, boundary_site_pairs_i32);
+    fn.setArg(1, sites_f32);
+    fn.setArg(2, boundary_f32);
+    fn.dispatch((uint64_t)boundary_count, threads);
+  });
+  return boundary_f32;
+}
+
+torch::Tensor metal_fixed_word_p0_sparse_mobius_lower_launch_only(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& config_i32,
+    const int64_t track_count,
+    const int64_t incidence_count) {
+  auto mobius_coeff = torch::empty(
+      {incidence_count, 4},
+      boundary_f32.options().dtype(torch::kFloat32));
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.sparse_mobius_incidence_lower, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, boundary_f32);
+    fn.setArg(1, track_ray_coeff_f32);
+    fn.setArg(2, track_incidence_offsets_i32);
+    fn.setArg(3, incidence_boundary_i32);
+    fn.setArg(4, mobius_coeff);
+    fn.setArg(5, config_i32);
+    fn.dispatch((uint64_t)track_count, threads);
+  });
+  return mobius_coeff;
+}
+
+torch::Tensor metal_fixed_word_p0_lie_node_forward_launch_only(
+    const torch::Tensor& mobius_coeff_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+  auto node_chart = torch::empty(
+      {track_count, node_count, 4},
+      site_rgba_f32.options().dtype(torch::kFloat32));
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.fixed_word_p0_lie_node_forward, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, mobius_coeff_f32);
+    fn.setArg(1, track_ray_coeff_f32);
+    fn.setArg(2, compiler_node_t_f32);
+    fn.setArg(3, word_offsets_i32);
+    fn.setArg(4, word_owner_i32);
+    fn.setArg(5, word_left_incidence_i32);
+    fn.setArg(6, word_right_incidence_i32);
+    fn.setArg(7, track_incidence_offsets_i32);
+    fn.setArg(8, site_rgba_f32);
+    fn.setArg(9, node_chart);
+    fn.setArg(10, config_i32);
+    fn.setArg(11, config_f32);
+    fn.dispatch((uint64_t)track_count * (uint64_t)node_count, threads);
+  });
+  return node_chart;
+}
+
+torch::Tensor metal_kinetic_precompiled_length_p0_lie_node_forward_launch_only(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+  auto node_chart = torch::empty(
+      {track_count, node_count, 4},
+      site_rgba_f32.options().dtype(torch::kFloat32));
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.kinetic_precompiled_length_p0_lie_node_forward, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, word_offsets_i32);
+    fn.setArg(1, word_owner_i32);
+    fn.setArg(2, node_physical_length_f32);
+    fn.setArg(3, site_rgba_f32);
+    fn.setArg(4, node_chart);
+    fn.setArg(5, config_i32);
+    fn.setArg(6, config_f32);
+    fn.dispatch((uint64_t)track_count * (uint64_t)node_count, threads);
+  });
+  return node_chart;
+}
+
+torch::Tensor metal_kinetic_precompiled_length_p0_lie_node_forward_into_launch_only_v1(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& node_chart_out_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+  TORCH_CHECK(
+      node_chart_out_f32.device() == site_rgba_f32.device(),
+      "node_chart_out_f32 must share the site material device");
+  TORCH_CHECK(
+      node_chart_out_f32.scalar_type() == torch::kFloat32 &&
+          node_chart_out_f32.dim() == 3 &&
+          node_chart_out_f32.size(0) == track_count &&
+          node_chart_out_f32.size(1) == node_count &&
+          node_chart_out_f32.size(2) == 4 &&
+          node_chart_out_f32.is_contiguous(),
+      "node_chart_out_f32 must be contiguous float32 [track_count,node_count,4]");
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.kinetic_precompiled_length_p0_lie_node_forward, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, word_offsets_i32);
+    fn.setArg(1, word_owner_i32);
+    fn.setArg(2, node_physical_length_f32);
+    fn.setArg(3, site_rgba_f32);
+    fn.setArg(4, node_chart_out_f32);
+    fn.setArg(5, config_i32);
+    fn.setArg(6, config_f32);
+    fn.dispatch((uint64_t)track_count * (uint64_t)node_count, threads);
+  });
+  return node_chart_out_f32;
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+metal_fixed_word_p0_lie_sample_state_init_launch_only(
+    const torch::Tensor& reference_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+  auto loss = torch::zeros({1}, reference_f32.options().dtype(torch::kFloat32));
+  auto grad_node_chart = torch::zeros(
+      {track_count, node_count, 4},
+      reference_f32.options().dtype(torch::kFloat32));
+  auto cone_diagnostic = torch::zeros({3}, reference_f32.options().dtype(torch::kInt32));
+  return std::make_tuple(loss, grad_node_chart, cone_diagnostic);
+}
+
+torch::Tensor metal_fixed_word_p0_lie_sample_accumulate_launch_only(
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& loss_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& cone_diagnostic_i32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t sample_count) {
+  auto prediction_rgb = torch::empty(
+      {track_count, sample_count, 3},
+      node_chart_f32.options().dtype(torch::kFloat32));
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.fixed_word_p0_lie_sample_mse_vjp, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, node_chart_f32);
+    fn.setArg(1, sample_to_node_f32);
+    fn.setArg(2, target_rgb_f32);
+    fn.setArg(3, background_rgb_f32);
+    fn.setArg(4, prediction_rgb);
+    fn.setArg(5, loss_f32);
+    fn.setArg(6, grad_node_chart_f32);
+    fn.setArg(7, cone_diagnostic_i32);
+    fn.setArg(8, config_i32);
+    fn.setArg(9, config_f32);
+    fn.dispatch((uint64_t)track_count * (uint64_t)sample_count, threads);
+  });
+  return prediction_rgb;
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+metal_fixed_word_p0_lie_sample_accumulate_loss_only_launch_only(
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& loss_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& cone_diagnostic_i32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t sample_count) {
+  // Training consumes only the accumulated scalar loss and node cotangent.
+  // Do not allocate or write the diagnostic [Bp,K,3] prediction tensor.
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.fixed_word_p0_lie_sample_mse_vjp_accumulate_only, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, node_chart_f32);
+    fn.setArg(1, sample_to_node_f32);
+    fn.setArg(2, target_rgb_f32);
+    fn.setArg(3, background_rgb_f32);
+    fn.setArg(4, loss_f32);
+    fn.setArg(5, grad_node_chart_f32);
+    fn.setArg(6, cone_diagnostic_i32);
+    fn.setArg(7, config_i32);
+    fn.setArg(8, config_f32);
+    fn.dispatch((uint64_t)track_count * (uint64_t)sample_count, threads);
+  });
+  return std::make_tuple(loss_f32, grad_node_chart_f32, cone_diagnostic_i32);
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+metal_fixed_word_p0_lie_world_grad_init_launch_only(
+    const torch::Tensor& reference_f32,
+    const int64_t site_count,
+    const int64_t incidence_count,
+    const int64_t boundary_count) {
+  auto grad_site_rgba = torch::zeros(
+      {site_count, 4},
+      reference_f32.options().dtype(torch::kFloat32));
+  auto grad_mobius_coeff = torch::zeros(
+      {incidence_count, 4},
+      reference_f32.options().dtype(torch::kFloat32));
+  auto grad_boundary = torch::zeros(
+      {boundary_count, 5},
+      reference_f32.options().dtype(torch::kFloat32));
+  return std::make_tuple(grad_site_rgba, grad_mobius_coeff, grad_boundary);
+}
+
+torch::Tensor metal_fixed_word_p0_lie_material_world_grad_init_launch_only(
+    const torch::Tensor& reference_f32,
+    const int64_t site_count) {
+  return torch::zeros(
+      {site_count, 4},
+      reference_f32.options().dtype(torch::kFloat32));
+}
+
+std::tuple<torch::Tensor, torch::Tensor>
+metal_fixed_word_p0_lie_node_vjp_accumulate_launch_only(
+    const torch::Tensor& mobius_coeff_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_mobius_coeff_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.fixed_word_p0_lie_node_vjp, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, mobius_coeff_f32);
+    fn.setArg(1, track_ray_coeff_f32);
+    fn.setArg(2, compiler_node_t_f32);
+    fn.setArg(3, word_offsets_i32);
+    fn.setArg(4, word_owner_i32);
+    fn.setArg(5, word_left_incidence_i32);
+    fn.setArg(6, word_right_incidence_i32);
+    fn.setArg(7, track_incidence_offsets_i32);
+    fn.setArg(8, site_rgba_f32);
+    fn.setArg(9, node_chart_f32);
+    fn.setArg(10, grad_node_chart_f32);
+    fn.setArg(11, grad_site_rgba_f32);
+    fn.setArg(12, grad_mobius_coeff_f32);
+    fn.setArg(13, config_i32);
+    fn.setArg(14, config_f32);
+    fn.dispatch((uint64_t)track_count * (uint64_t)node_count, threads);
+  });
+  return std::make_tuple(grad_site_rgba_f32, grad_mobius_coeff_f32);
+}
+
+std::tuple<torch::Tensor, torch::Tensor>
+metal_kinetic_precompiled_length_p0_lie_node_vjp_accumulate_launch_only(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+  auto grad_node_physical_length = torch::zeros_like(node_physical_length_f32);
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.kinetic_precompiled_length_p0_lie_node_vjp, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, word_offsets_i32);
+    fn.setArg(1, word_owner_i32);
+    fn.setArg(2, node_physical_length_f32);
+    fn.setArg(3, site_rgba_f32);
+    fn.setArg(4, node_chart_f32);
+    fn.setArg(5, grad_node_chart_f32);
+    fn.setArg(6, grad_site_rgba_f32);
+    fn.setArg(7, grad_node_physical_length);
+    fn.setArg(8, config_i32);
+    fn.setArg(9, config_f32);
+    fn.dispatch((uint64_t)track_count * (uint64_t)node_count, threads);
+  });
+  return std::make_tuple(grad_site_rgba_f32, grad_node_physical_length);
+}
+
+torch::Tensor
+metal_kinetic_precompiled_length_p0_lie_material_node_vjp_accumulate_launch_only(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+  // Material training freezes compiled geometry. Reuse the material bar as
+  // the kernel's disabled buffer(7) argument instead of allocating [J,W].
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.kinetic_precompiled_length_p0_lie_material_node_vjp, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, word_offsets_i32);
+    fn.setArg(1, word_owner_i32);
+    fn.setArg(2, node_physical_length_f32);
+    fn.setArg(3, site_rgba_f32);
+    fn.setArg(4, node_chart_f32);
+    fn.setArg(5, grad_node_chart_f32);
+    fn.setArg(6, grad_site_rgba_f32);
+    fn.setArg(7, grad_site_rgba_f32);
+    fn.setArg(8, config_i32);
+    fn.setArg(9, config_f32);
+    fn.dispatch((uint64_t)track_count * (uint64_t)node_count, threads);
+  });
+  return grad_site_rgba_f32;
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_kinetic_fused_union_full_vjp_phase_core_v2(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& compact_to_geometry_output_i64,
+    const torch::Tensor& geometry_output_source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_union_positions0_f32,
+    const torch::Tensor& grad_union_velocities_f32,
+    const torch::Tensor& grad_union_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& validation_status_i32,
+    const bool run_validation,
+    const bool run_accumulation,
+    const bool validate_shared_union_ledgers,
+    const int64_t global_site_count,
+    const int64_t union_site_count,
+    const int64_t row_count,
+    const int64_t node_count) {
+  // This is the raw exact P_b=P_U Q_b boundary. It deliberately performs no
+  // persistent commit and retains split phases so an all-block coordinator or
+  // a later bounded-block transaction-local coordinator can own admission.
+  TORCH_CHECK(row_count > 0, "union-v2 row_count must be positive");
+  TORCH_CHECK(node_count > 1, "union-v2 node_count must be at least two");
+  TORCH_CHECK(global_site_count > 0, "union-v2 global_site_count must be positive");
+  TORCH_CHECK(
+      union_site_count > 0 && union_site_count <= global_site_count,
+      "union-v2 requires 0 < union_site_count <= global_site_count");
+  constexpr int64_t max_i32 = std::numeric_limits<int32_t>::max();
+  TORCH_CHECK(
+      row_count <= max_i32 && node_count <= max_i32 &&
+          global_site_count <= max_i32 && union_site_count <= max_i32,
+      "union-v2 counts must fit int32 Metal constants");
+  check_i32_mps_1d(word_offsets_i32, "word_offsets_i32", row_count + 1);
+  check_i32_mps_1d_any(word_owner_i32, "word_owner_i32");
+  TORCH_CHECK(
+      word_owner_i32.numel() >= row_count,
+      "union-v2 rows must own at least one word");
+  const int64_t word_count = word_owner_i32.numel();
+
+  const auto check_i64_index = [&](const torch::Tensor& tensor,
+                                   const char* name,
+                                   const int64_t expected_count) {
+    TORCH_CHECK(tensor.device().is_mps(), name, " must be on MPS");
+    TORCH_CHECK(tensor.scalar_type() == torch::kInt64, name, " must be int64");
+    TORCH_CHECK(
+        tensor.dim() == 1 && tensor.numel() == expected_count &&
+            tensor.is_contiguous(),
+        name,
+        " must be contiguous rank-1 with the exact expected count");
+  };
+  TORCH_CHECK(
+      source_site_ids_i64.device().is_mps() &&
+          source_site_ids_i64.scalar_type() == torch::kInt64 &&
+          source_site_ids_i64.dim() == 1 && source_site_ids_i64.numel() > 0 &&
+          source_site_ids_i64.is_contiguous(),
+      "source_site_ids_i64 must be nonempty contiguous MPS int64");
+  const int64_t compact_site_count = source_site_ids_i64.numel();
+  TORCH_CHECK(
+      compact_site_count <= global_site_count,
+      "union-v2 compact source table cannot exceed the global world");
+  check_i64_index(
+      compact_to_geometry_output_i64,
+      "compact_to_geometry_output_i64",
+      compact_site_count);
+  check_i64_index(
+      geometry_output_source_site_ids_i64,
+      "geometry_output_source_site_ids_i64",
+      union_site_count);
+  TORCH_CHECK(
+      compact_site_count <= max_i32 && word_count <= max_i32,
+      "union-v2 compact/word counts must fit int32 Metal constants");
+
+  TORCH_CHECK(
+      node_physical_length_f32.device().is_mps() &&
+          node_physical_length_f32.scalar_type() == torch::kFloat32 &&
+          node_physical_length_f32.dim() == 2 &&
+          node_physical_length_f32.size(0) == node_count &&
+          node_physical_length_f32.size(1) == word_count &&
+          node_physical_length_f32.is_contiguous(),
+      "node_physical_length_f32 must be contiguous MPS float32 [node_count,word_count]");
+  check_float_mps_2d(site_rgba_f32, "site_rgba_f32", 4);
+  TORCH_CHECK(
+      site_rgba_f32.size(0) == compact_site_count,
+      "site_rgba_f32 must have compact_site_count rows");
+  TORCH_CHECK(
+      node_chart_f32.device().is_mps() &&
+          node_chart_f32.scalar_type() == torch::kFloat32 &&
+          node_chart_f32.dim() == 3 && node_chart_f32.size(0) == row_count &&
+          node_chart_f32.size(1) == node_count && node_chart_f32.size(2) == 4 &&
+          node_chart_f32.is_contiguous(),
+      "node_chart_f32 must be contiguous MPS float32 [row_count,node_count,4]");
+  TORCH_CHECK(
+      grad_node_chart_f32.device().is_mps() &&
+          grad_node_chart_f32.scalar_type() == torch::kFloat32 &&
+          grad_node_chart_f32.sizes() == node_chart_f32.sizes() &&
+          grad_node_chart_f32.is_contiguous(),
+      "grad_node_chart_f32 must match node_chart_f32");
+  TORCH_CHECK(
+      row_node_time_f32.device().is_mps() &&
+          row_node_time_f32.scalar_type() == torch::kFloat32 &&
+          row_node_time_f32.dim() == 2 &&
+          row_node_time_f32.size(0) == row_count &&
+          row_node_time_f32.size(1) == node_count &&
+          row_node_time_f32.is_contiguous(),
+      "row_node_time_f32 must be contiguous MPS float32 [row_count,node_count]");
+  check_float_mps_2d(row_near_far_f32, "row_near_far_f32", 2);
+  check_float_mps_2d(row_ray_coeff_f32, "row_ray_coeff_f32", 12);
+  TORCH_CHECK(
+      row_near_far_f32.size(0) == row_count &&
+          row_ray_coeff_f32.size(0) == row_count,
+      "union-v2 row payloads must have row_count rows");
+  check_float_mps_2d(compact_positions0_f32, "compact_positions0_f32", 3);
+  check_float_mps_2d(compact_velocities_f32, "compact_velocities_f32", 3);
+  TORCH_CHECK(
+      compact_positions0_f32.size(0) == compact_site_count &&
+          compact_velocities_f32.size(0) == compact_site_count,
+      "compact geometry tables must have compact_site_count rows");
+  TORCH_CHECK(
+      compact_weight_coefficients_f32.device().is_mps() &&
+          compact_weight_coefficients_f32.scalar_type() == torch::kFloat32 &&
+          compact_weight_coefficients_f32.dim() == 2 &&
+          compact_weight_coefficients_f32.size(0) == compact_site_count &&
+          compact_weight_coefficients_f32.size(1) >= 1 &&
+          compact_weight_coefficients_f32.size(1) <= 3 &&
+          compact_weight_coefficients_f32.is_contiguous(),
+      "compact_weight_coefficients_f32 must be contiguous MPS float32 [compact_site_count,C<=3]");
+  const int64_t weight_coefficient_count =
+      compact_weight_coefficients_f32.size(1);
+
+  check_float_mps_2d(grad_site_rgba_f32, "grad_site_rgba_f32", 4);
+  check_float_mps_2d(grad_union_positions0_f32, "grad_union_positions0_f32", 3);
+  check_float_mps_2d(grad_union_velocities_f32, "grad_union_velocities_f32", 3);
+  TORCH_CHECK(
+      grad_site_rgba_f32.size(0) == compact_site_count,
+      "grad_site_rgba_f32 must have compact_site_count rows");
+  TORCH_CHECK(
+      grad_union_positions0_f32.size(0) == union_site_count &&
+          grad_union_velocities_f32.size(0) == union_site_count,
+      "union geometry bars must have union_site_count rows");
+  TORCH_CHECK(
+      grad_union_weight_coefficients_f32.device().is_mps() &&
+          grad_union_weight_coefficients_f32.scalar_type() == torch::kFloat32 &&
+          grad_union_weight_coefficients_f32.dim() == 2 &&
+          grad_union_weight_coefficients_f32.size(0) == union_site_count &&
+          grad_union_weight_coefficients_f32.size(1) ==
+              weight_coefficient_count &&
+          grad_union_weight_coefficients_f32.is_contiguous(),
+      "grad_union_weight_coefficients_f32 must be contiguous MPS float32 [union_site_count,C]");
+  check_i32_mps_1d(config_i32, "config_i32", 7);
+  TORCH_CHECK(
+      config_f32.device().is_mps() &&
+          config_f32.scalar_type() == torch::kFloat32 &&
+          config_f32.dim() == 1 && config_f32.numel() == 7 &&
+          config_f32.is_contiguous(),
+      "config_f32 must be contiguous MPS float32 [7]");
+  TORCH_CHECK(
+      validation_status_i32.device().is_mps() &&
+          validation_status_i32.scalar_type() == torch::kInt32 &&
+          validation_status_i32.dim() == 1 &&
+          validation_status_i32.numel() == 1 &&
+          validation_status_i32.is_contiguous(),
+      "union-v2 validation status must be contiguous MPS int32 [1]");
+  TORCH_CHECK(
+      run_validation || run_accumulation,
+      "union-v2 phase must validate, accumulate, or do both");
+  TORCH_CHECK(
+      run_validation || !validate_shared_union_ledgers,
+      "shared union ledgers can only be scanned during validation");
+
+  const std::array<const torch::Tensor*, 21> all_tensors = {
+      &word_offsets_i32,
+      &word_owner_i32,
+      &source_site_ids_i64,
+      &compact_to_geometry_output_i64,
+      &geometry_output_source_site_ids_i64,
+      &node_physical_length_f32,
+      &site_rgba_f32,
+      &node_chart_f32,
+      &row_node_time_f32,
+      &row_near_far_f32,
+      &row_ray_coeff_f32,
+      &compact_positions0_f32,
+      &compact_velocities_f32,
+      &compact_weight_coefficients_f32,
+      &grad_node_chart_f32,
+      &grad_site_rgba_f32,
+      &grad_union_positions0_f32,
+      &grad_union_velocities_f32,
+      &grad_union_weight_coefficients_f32,
+      &config_i32,
+      &config_f32};
+  for (const torch::Tensor* tensor : all_tensors) {
+    TORCH_CHECK(
+        tensor->device() == site_rgba_f32.device(),
+        "all union-v2 tensors must share one MPS device");
+    TORCH_CHECK(
+        !validation_status_i32.is_alias_of(*tensor),
+        "union-v2 status must not alias launch tensors");
+  }
+  const std::array<const torch::Tensor*, 4> output_bars = {
+      &grad_site_rgba_f32,
+      &grad_union_positions0_f32,
+      &grad_union_velocities_f32,
+      &grad_union_weight_coefficients_f32};
+  const std::array<const torch::Tensor*, 17> read_inputs = {
+      &word_offsets_i32,
+      &word_owner_i32,
+      &source_site_ids_i64,
+      &compact_to_geometry_output_i64,
+      &geometry_output_source_site_ids_i64,
+      &node_physical_length_f32,
+      &site_rgba_f32,
+      &node_chart_f32,
+      &row_node_time_f32,
+      &row_near_far_f32,
+      &row_ray_coeff_f32,
+      &compact_positions0_f32,
+      &compact_velocities_f32,
+      &compact_weight_coefficients_f32,
+      &grad_node_chart_f32,
+      &config_i32,
+      &config_f32};
+  for (size_t left = 0; left < output_bars.size(); ++left) {
+    for (size_t right = left + 1; right < output_bars.size(); ++right) {
+      TORCH_CHECK(
+          !output_bars[left]->is_alias_of(*output_bars[right]),
+          "union-v2 output bars must be storage-distinct");
+    }
+    for (const torch::Tensor* input : read_inputs) {
+      TORCH_CHECK(
+          !output_bars[left]->is_alias_of(*input),
+          "union-v2 output bars must not alias read inputs");
+    }
+  }
+
+  constexpr uint64_t max_u32 = std::numeric_limits<uint32_t>::max();
+  const auto require_u32_product = [max_u32](
+                                       const uint64_t left,
+                                       const uint64_t right,
+                                       const char* message) {
+    TORCH_CHECK(left == 0 || right <= max_u32 / left, message);
+  };
+  require_u32_product(row_count, node_count, "union-v2 row-node indexing exceeds uint32");
+  require_u32_product(node_count, word_count, "union-v2 node-word indexing exceeds uint32");
+  require_u32_product(compact_site_count, 4u, "union-v2 compact material indexing exceeds uint32");
+  require_u32_product(compact_site_count, 3u, "union-v2 compact geometry indexing exceeds uint32");
+  require_u32_product(
+      compact_site_count,
+      weight_coefficient_count,
+      "union-v2 compact weight indexing exceeds uint32");
+  require_u32_product(union_site_count, 3u, "union-v2 geometry indexing exceeds uint32");
+  require_u32_product(
+      union_site_count,
+      weight_coefficient_count,
+      "union-v2 weight indexing exceeds uint32");
+
+  const int32_t row_count_i32 = static_cast<int32_t>(row_count);
+  const int32_t node_count_i32 = static_cast<int32_t>(node_count);
+  const int32_t compact_site_count_i32 =
+      static_cast<int32_t>(compact_site_count);
+  const int32_t word_count_i32 = static_cast<int32_t>(word_count);
+  const int32_t weight_coefficient_count_i32 =
+      static_cast<int32_t>(weight_coefficient_count);
+  const int32_t global_site_count_i32 =
+      static_cast<int32_t>(global_site_count);
+  const int32_t union_site_count_i32 =
+      static_cast<int32_t>(union_site_count);
+  const int32_t validate_shared_union_ledgers_i32 =
+      validate_shared_union_ledgers ? 1 : 0;
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  if (run_validation) {
+    launch(k.kinetic_fused_union_full_vjp_validate_v2, [&](MetalKernelFunction& fn) {
+      fn.setArg(0, word_offsets_i32);
+      fn.setArg(1, word_owner_i32);
+      fn.setArg(2, source_site_ids_i64);
+      fn.setArg(3, node_physical_length_f32);
+      fn.setArg(4, site_rgba_f32);
+      fn.setArg(5, node_chart_f32);
+      fn.setArg(6, row_node_time_f32);
+      fn.setArg(7, row_near_far_f32);
+      fn.setArg(8, row_ray_coeff_f32);
+      fn.setArg(9, compact_positions0_f32);
+      fn.setArg(10, compact_velocities_f32);
+      fn.setArg(11, compact_weight_coefficients_f32);
+      fn.setArg(12, grad_node_chart_f32);
+      fn.setArg(13, grad_site_rgba_f32);
+      fn.setArg(14, grad_union_positions0_f32);
+      fn.setArg(15, grad_union_velocities_f32);
+      fn.setArg(16, grad_union_weight_coefficients_f32);
+      fn.setArg(17, config_i32);
+      fn.setArg(18, config_f32);
+      fn.setArg(19, row_count_i32);
+      fn.setArg(20, node_count_i32);
+      fn.setArg(21, compact_site_count_i32);
+      fn.setArg(22, word_count_i32);
+      fn.setArg(23, weight_coefficient_count_i32);
+      fn.setArg(24, global_site_count_i32);
+      fn.setArg(25, validation_status_i32);
+      fn.setArg(26, validate_shared_union_ledgers_i32);
+      fn.setArg(27, compact_to_geometry_output_i64);
+      fn.setArg(28, geometry_output_source_site_ids_i64);
+      fn.setArg(29, union_site_count_i32);
+      fn.dispatch(
+          static_cast<uint64_t>(row_count) * static_cast<uint64_t>(node_count),
+          threads);
+    });
+  }
+  if (run_accumulation) {
+    launch(k.kinetic_fused_union_full_vjp_v2, [&](MetalKernelFunction& fn) {
+      fn.setArg(0, word_offsets_i32);
+      fn.setArg(1, word_owner_i32);
+      fn.setArg(2, source_site_ids_i64);
+      fn.setArg(3, node_physical_length_f32);
+      fn.setArg(4, site_rgba_f32);
+      fn.setArg(5, node_chart_f32);
+      fn.setArg(6, row_node_time_f32);
+      fn.setArg(7, row_near_far_f32);
+      fn.setArg(8, row_ray_coeff_f32);
+      fn.setArg(9, compact_positions0_f32);
+      fn.setArg(10, compact_velocities_f32);
+      fn.setArg(11, compact_weight_coefficients_f32);
+      fn.setArg(12, grad_node_chart_f32);
+      fn.setArg(13, grad_site_rgba_f32);
+      fn.setArg(14, grad_union_positions0_f32);
+      fn.setArg(15, grad_union_velocities_f32);
+      fn.setArg(16, grad_union_weight_coefficients_f32);
+      fn.setArg(17, config_i32);
+      fn.setArg(18, config_f32);
+      fn.setArg(19, row_count_i32);
+      fn.setArg(20, node_count_i32);
+      fn.setArg(21, compact_site_count_i32);
+      fn.setArg(22, word_count_i32);
+      fn.setArg(23, weight_coefficient_count_i32);
+      fn.setArg(24, global_site_count_i32);
+      fn.setArg(25, validation_status_i32);
+      fn.setArg(26, compact_to_geometry_output_i64);
+      fn.setArg(27, geometry_output_source_site_ids_i64);
+      fn.setArg(28, union_site_count_i32);
+      fn.dispatch(
+          static_cast<uint64_t>(row_count) * static_cast<uint64_t>(node_count),
+          threads);
+    });
+  }
+  return std::make_tuple(
+      grad_site_rgba_f32,
+      grad_union_positions0_f32,
+      grad_union_velocities_f32,
+      grad_union_weight_coefficients_f32,
+      validation_status_i32);
+}
+
+torch::Tensor
+metal_kinetic_fused_union_full_vjp_validate_shared_status_launch_only_v2(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& compact_to_geometry_output_i64,
+    const torch::Tensor& geometry_output_source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_union_positions0_f32,
+    const torch::Tensor& grad_union_velocities_f32,
+    const torch::Tensor& grad_union_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& validation_status_i32,
+    const bool validate_shared_union_ledgers,
+    const int64_t global_site_count,
+    const int64_t union_site_count,
+    const int64_t row_count,
+    const int64_t node_count) {
+  auto result = metal_kinetic_fused_union_full_vjp_phase_core_v2(
+      word_offsets_i32,
+      word_owner_i32,
+      source_site_ids_i64,
+      compact_to_geometry_output_i64,
+      geometry_output_source_site_ids_i64,
+      node_physical_length_f32,
+      site_rgba_f32,
+      node_chart_f32,
+      row_node_time_f32,
+      row_near_far_f32,
+      row_ray_coeff_f32,
+      compact_positions0_f32,
+      compact_velocities_f32,
+      compact_weight_coefficients_f32,
+      grad_node_chart_f32,
+      grad_site_rgba_f32,
+      grad_union_positions0_f32,
+      grad_union_velocities_f32,
+      grad_union_weight_coefficients_f32,
+      config_i32,
+      config_f32,
+      validation_status_i32,
+      true,
+      false,
+      validate_shared_union_ledgers,
+      global_site_count,
+      union_site_count,
+      row_count,
+      node_count);
+  return std::get<4>(result);
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_kinetic_fused_union_full_vjp_accumulate_shared_status_launch_only_v2(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& compact_to_geometry_output_i64,
+    const torch::Tensor& geometry_output_source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_union_positions0_f32,
+    const torch::Tensor& grad_union_velocities_f32,
+    const torch::Tensor& grad_union_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& validation_status_i32,
+    const int64_t global_site_count,
+    const int64_t union_site_count,
+    const int64_t row_count,
+    const int64_t node_count) {
+  return metal_kinetic_fused_union_full_vjp_phase_core_v2(
+      word_offsets_i32,
+      word_owner_i32,
+      source_site_ids_i64,
+      compact_to_geometry_output_i64,
+      geometry_output_source_site_ids_i64,
+      node_physical_length_f32,
+      site_rgba_f32,
+      node_chart_f32,
+      row_node_time_f32,
+      row_near_far_f32,
+      row_ray_coeff_f32,
+      compact_positions0_f32,
+      compact_velocities_f32,
+      compact_weight_coefficients_f32,
+      grad_node_chart_f32,
+      grad_site_rgba_f32,
+      grad_union_positions0_f32,
+      grad_union_velocities_f32,
+      grad_union_weight_coefficients_f32,
+      config_i32,
+      config_f32,
+      validation_status_i32,
+      false,
+      true,
+      false,
+      global_site_count,
+      union_site_count,
+      row_count,
+      node_count);
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_kinetic_fused_union_full_vjp_finalize_shared_status_launch_only_v2(
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_union_positions0_f32,
+    const torch::Tensor& grad_union_velocities_f32,
+    const torch::Tensor& grad_union_weight_coefficients_f32,
+    const torch::Tensor& validation_status_i32,
+    const bool finalize_shared_union_ledgers,
+    const int64_t union_site_count) {
+  check_float_mps_2d(grad_site_rgba_f32, "grad_site_rgba_f32", 4);
+  check_float_mps_2d(grad_union_positions0_f32, "grad_union_positions0_f32", 3);
+  check_float_mps_2d(grad_union_velocities_f32, "grad_union_velocities_f32", 3);
+  TORCH_CHECK(
+      union_site_count > 0 &&
+          grad_union_positions0_f32.size(0) == union_site_count &&
+          grad_union_velocities_f32.size(0) == union_site_count,
+      "union-v2 finalizer geometry bars must have union_site_count rows");
+  TORCH_CHECK(
+      grad_union_weight_coefficients_f32.device().is_mps() &&
+          grad_union_weight_coefficients_f32.scalar_type() == torch::kFloat32 &&
+          grad_union_weight_coefficients_f32.dim() == 2 &&
+          grad_union_weight_coefficients_f32.size(0) == union_site_count &&
+          grad_union_weight_coefficients_f32.size(1) >= 1 &&
+          grad_union_weight_coefficients_f32.size(1) <= 3 &&
+          grad_union_weight_coefficients_f32.is_contiguous(),
+      "union-v2 finalizer weight bar must be MPS float32 [union_site_count,C<=3]");
+  TORCH_CHECK(
+      validation_status_i32.device().is_mps() &&
+          validation_status_i32.scalar_type() == torch::kInt32 &&
+          validation_status_i32.dim() == 1 &&
+          validation_status_i32.numel() == 1 &&
+          validation_status_i32.is_contiguous(),
+      "union-v2 finalizer status must be contiguous MPS int32 [1]");
+  const std::array<const torch::Tensor*, 4> bars = {
+      &grad_site_rgba_f32,
+      &grad_union_positions0_f32,
+      &grad_union_velocities_f32,
+      &grad_union_weight_coefficients_f32};
+  for (size_t left = 0; left < bars.size(); ++left) {
+    TORCH_CHECK(
+        bars[left]->device() == grad_site_rgba_f32.device(),
+        "union-v2 finalizer bars must share one device");
+    TORCH_CHECK(
+        !validation_status_i32.is_alias_of(*bars[left]),
+        "union-v2 finalizer status must not alias bars");
+    for (size_t right = left + 1; right < bars.size(); ++right) {
+      TORCH_CHECK(
+          !bars[left]->is_alias_of(*bars[right]),
+          "union-v2 finalizer bars must be storage-distinct");
+    }
+  }
+  constexpr uint64_t max_u32 = std::numeric_limits<uint32_t>::max();
+  const int64_t compact_site_count = grad_site_rgba_f32.size(0);
+  const int64_t weight_coefficient_count =
+      grad_union_weight_coefficients_f32.size(1);
+  TORCH_CHECK(
+      compact_site_count <= std::numeric_limits<int32_t>::max() &&
+          union_site_count <= std::numeric_limits<int32_t>::max(),
+      "union-v2 finalizer counts must fit int32");
+  const uint64_t compact_entries =
+      static_cast<uint64_t>(compact_site_count) * 4u;
+  const uint64_t union_geometry_entries = finalize_shared_union_ledgers
+      ? static_cast<uint64_t>(union_site_count) * 3u
+      : 0u;
+  const uint64_t union_weight_entries = finalize_shared_union_ledgers
+      ? static_cast<uint64_t>(union_site_count) *
+            static_cast<uint64_t>(weight_coefficient_count)
+      : 0u;
+  TORCH_CHECK(
+      compact_entries <= max_u32 && union_geometry_entries <= max_u32 &&
+          union_weight_entries <= max_u32,
+      "union-v2 finalizer indexing exceeds uint32");
+  const uint64_t finalizer_entry_count = std::max(
+      compact_entries,
+      std::max(union_geometry_entries, union_weight_entries));
+  const int32_t compact_site_count_i32 =
+      static_cast<int32_t>(compact_site_count);
+  const int32_t union_site_count_i32 =
+      static_cast<int32_t>(union_site_count);
+  const int32_t weight_coefficient_count_i32 =
+      static_cast<int32_t>(weight_coefficient_count);
+  const int32_t finalize_shared_union_ledgers_i32 =
+      finalize_shared_union_ledgers ? 1 : 0;
+  auto& k = kernels();
+  launch(k.kinetic_fused_union_full_vjp_finalize_v2, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, grad_site_rgba_f32);
+    fn.setArg(1, grad_union_positions0_f32);
+    fn.setArg(2, grad_union_velocities_f32);
+    fn.setArg(3, grad_union_weight_coefficients_f32);
+    fn.setArg(4, validation_status_i32);
+    fn.setArg(5, compact_site_count_i32);
+    fn.setArg(6, union_site_count_i32);
+    fn.setArg(7, weight_coefficient_count_i32);
+    fn.setArg(8, finalize_shared_union_ledgers_i32);
+    fn.dispatch(finalizer_entry_count, 256ull);
+  });
+  return std::make_tuple(
+      grad_site_rgba_f32,
+      grad_union_positions0_f32,
+      grad_union_velocities_f32,
+      grad_union_weight_coefficients_f32,
+      validation_status_i32);
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_kinetic_fused_direct_full_vjp_phase_core_v1(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_global_positions0_f32,
+    const torch::Tensor& grad_global_velocities_f32,
+    const torch::Tensor& grad_global_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t row_count,
+    const int64_t node_count,
+    const torch::Tensor& validation_status_i32,
+    const bool run_validation,
+    const bool run_accumulation,
+    const bool validate_shared_global_ledgers) {
+  // Source-only until this suffixed ABI is rebuilt and checked against the
+  // staged certified sparse oracle.  Every gradient output is caller-owned.
+  // The fifth return aliases one scalar int32 validation receipt.  The combined
+  // wrapper owns that scalar; split-phase callers own and reuse it across every
+  // block in one transaction.  This v1 is fixed-camera-only and has neither a
+  // ray-bar output nor a placeholder alias; it also has no [J,W] length-bar
+  // allocation or copy.
+  TORCH_CHECK(row_count > 0, "fused kinetic row_count must be positive");
+  TORCH_CHECK(node_count > 1, "fused kinetic node_count must be at least two");
+  constexpr int64_t max_i32 = std::numeric_limits<int32_t>::max();
+  TORCH_CHECK(
+      row_count < max_i32 && node_count <= max_i32,
+      "fused kinetic row/node counts must fit int32 Metal constants");
+  check_i32_mps_1d(word_offsets_i32, "word_offsets_i32", row_count + 1);
+  check_i32_mps_1d_any(word_owner_i32, "word_owner_i32");
+  TORCH_CHECK(word_owner_i32.numel() >= row_count, "fused kinetic rows must own at least one word");
+  TORCH_CHECK(
+      source_site_ids_i64.device().is_mps(),
+      "source_site_ids_i64 must be on MPS");
+  TORCH_CHECK(
+      source_site_ids_i64.scalar_type() == torch::kInt64,
+      "source_site_ids_i64 must be int64");
+  TORCH_CHECK(
+      source_site_ids_i64.dim() == 1 && source_site_ids_i64.numel() > 0,
+      "source_site_ids_i64 must be a nonempty rank-1 tensor");
+  TORCH_CHECK(source_site_ids_i64.is_contiguous(), "source_site_ids_i64 must be contiguous");
+
+  const int64_t word_count = word_owner_i32.numel();
+  const int64_t compact_site_count = source_site_ids_i64.numel();
+  const int64_t global_site_count = grad_global_positions0_f32.size(0);
+  TORCH_CHECK(
+      node_physical_length_f32.device().is_mps() &&
+          node_physical_length_f32.scalar_type() == torch::kFloat32 &&
+          node_physical_length_f32.dim() == 2 &&
+          node_physical_length_f32.size(0) == node_count &&
+          node_physical_length_f32.size(1) == word_count &&
+          node_physical_length_f32.is_contiguous(),
+      "node_physical_length_f32 must be contiguous MPS float32 [node_count,word_count]");
+  check_float_mps_2d(site_rgba_f32, "site_rgba_f32", 4);
+  TORCH_CHECK(
+      site_rgba_f32.size(0) == compact_site_count,
+      "site_rgba_f32 must have compact_site_count rows");
+  TORCH_CHECK(
+      node_chart_f32.device().is_mps() &&
+          node_chart_f32.scalar_type() == torch::kFloat32 &&
+          node_chart_f32.dim() == 3 && node_chart_f32.size(0) == row_count &&
+          node_chart_f32.size(1) == node_count && node_chart_f32.size(2) == 4 &&
+          node_chart_f32.is_contiguous(),
+      "node_chart_f32 must be contiguous MPS float32 [row_count,node_count,4]");
+  TORCH_CHECK(
+      grad_node_chart_f32.device().is_mps() &&
+          grad_node_chart_f32.scalar_type() == torch::kFloat32 &&
+          grad_node_chart_f32.sizes() == node_chart_f32.sizes() &&
+          grad_node_chart_f32.is_contiguous(),
+      "grad_node_chart_f32 must match node_chart_f32");
+  TORCH_CHECK(
+      row_node_time_f32.device().is_mps() &&
+          row_node_time_f32.scalar_type() == torch::kFloat32 &&
+          row_node_time_f32.dim() == 2 && row_node_time_f32.size(0) == row_count &&
+          row_node_time_f32.size(1) == node_count && row_node_time_f32.is_contiguous(),
+      "row_node_time_f32 must be contiguous MPS float32 [row_count,node_count]");
+  check_float_mps_2d(row_near_far_f32, "row_near_far_f32", 2);
+  TORCH_CHECK(
+      row_near_far_f32.size(0) == row_count,
+      "row_near_far_f32 must have row_count rows");
+  check_float_mps_2d(row_ray_coeff_f32, "row_ray_coeff_f32", 12);
+  TORCH_CHECK(
+      row_ray_coeff_f32.size(0) == row_count,
+      "row_ray_coeff_f32 must have row_count rows");
+  check_float_mps_2d(compact_positions0_f32, "compact_positions0_f32", 3);
+  check_float_mps_2d(compact_velocities_f32, "compact_velocities_f32", 3);
+  TORCH_CHECK(
+      compact_positions0_f32.size(0) == compact_site_count &&
+          compact_velocities_f32.size(0) == compact_site_count,
+      "compact position and velocity tables must have compact_site_count rows");
+  TORCH_CHECK(
+      compact_weight_coefficients_f32.device().is_mps() &&
+          compact_weight_coefficients_f32.scalar_type() == torch::kFloat32 &&
+          compact_weight_coefficients_f32.dim() == 2 &&
+          compact_weight_coefficients_f32.size(0) == compact_site_count &&
+          compact_weight_coefficients_f32.size(1) >= 1 &&
+          compact_weight_coefficients_f32.size(1) <= 3 &&
+          compact_weight_coefficients_f32.is_contiguous(),
+      "compact_weight_coefficients_f32 must be contiguous MPS float32 [compact_site_count,C<=3]");
+  const int64_t weight_coefficient_count = compact_weight_coefficients_f32.size(1);
+
+  check_float_mps_2d(grad_site_rgba_f32, "grad_site_rgba_f32", 4);
+  check_float_mps_2d(grad_global_positions0_f32, "grad_global_positions0_f32", 3);
+  check_float_mps_2d(grad_global_velocities_f32, "grad_global_velocities_f32", 3);
+  TORCH_CHECK(
+      grad_site_rgba_f32.size(0) == compact_site_count,
+      "grad_site_rgba_f32 must have compact_site_count rows");
+  TORCH_CHECK(global_site_count >= compact_site_count, "global site table cannot be smaller than compact sites");
+  TORCH_CHECK(
+      grad_global_velocities_f32.size(0) == global_site_count,
+      "global position and velocity bars must have equal row counts");
+  TORCH_CHECK(
+      grad_global_weight_coefficients_f32.device().is_mps() &&
+          grad_global_weight_coefficients_f32.scalar_type() == torch::kFloat32 &&
+          grad_global_weight_coefficients_f32.dim() == 2 &&
+          grad_global_weight_coefficients_f32.size(0) == global_site_count &&
+          grad_global_weight_coefficients_f32.size(1) == weight_coefficient_count &&
+          grad_global_weight_coefficients_f32.is_contiguous(),
+      "grad_global_weight_coefficients_f32 must be contiguous MPS float32 [global_site_count,C]");
+  check_i32_mps_1d(config_i32, "config_i32", 6);
+  TORCH_CHECK(config_f32.device().is_mps(), "config_f32 must be on MPS");
+  TORCH_CHECK(config_f32.scalar_type() == torch::kFloat32, "config_f32 must be float32");
+  TORCH_CHECK(config_f32.dim() == 1 && config_f32.numel() == 7, "config_f32 must have shape [7]");
+  TORCH_CHECK(config_f32.is_contiguous(), "config_f32 must be contiguous");
+  TORCH_CHECK(
+      validation_status_i32.device().is_mps() &&
+          validation_status_i32.scalar_type() == torch::kInt32 &&
+          validation_status_i32.dim() == 1 &&
+          validation_status_i32.numel() == 1 &&
+          validation_status_i32.is_contiguous(),
+      "fused kinetic shared validation status must be contiguous MPS int32 [1]");
+  TORCH_CHECK(
+      validation_status_i32.device() == site_rgba_f32.device(),
+      "fused kinetic shared validation status must use the launch MPS device");
+  TORCH_CHECK(
+      run_validation || run_accumulation,
+      "fused kinetic phase core must validate, accumulate, or perform both phases");
+  TORCH_CHECK(
+      run_validation || !validate_shared_global_ledgers,
+      "shared global ledgers can only be scanned by a validation phase");
+
+  const std::array<const torch::Tensor*, 19> all_tensors = {
+      &word_offsets_i32,
+      &word_owner_i32,
+      &source_site_ids_i64,
+      &node_physical_length_f32,
+      &site_rgba_f32,
+      &node_chart_f32,
+      &row_node_time_f32,
+      &row_near_far_f32,
+      &row_ray_coeff_f32,
+      &compact_positions0_f32,
+      &compact_velocities_f32,
+      &compact_weight_coefficients_f32,
+      &grad_node_chart_f32,
+      &grad_site_rgba_f32,
+      &grad_global_positions0_f32,
+      &grad_global_velocities_f32,
+      &grad_global_weight_coefficients_f32,
+      &config_i32,
+      &config_f32};
+  for (const torch::Tensor* tensor : all_tensors) {
+    TORCH_CHECK(
+        tensor->device() == site_rgba_f32.device(),
+        "all fused kinetic tensors must share one MPS device");
+  }
+
+  const std::array<const torch::Tensor*, 4> output_bars = {
+      &grad_site_rgba_f32,
+      &grad_global_positions0_f32,
+      &grad_global_velocities_f32,
+      &grad_global_weight_coefficients_f32};
+  const std::array<const torch::Tensor*, 15> read_inputs = {
+      &word_offsets_i32,
+      &word_owner_i32,
+      &source_site_ids_i64,
+      &node_physical_length_f32,
+      &site_rgba_f32,
+      &node_chart_f32,
+      &row_node_time_f32,
+      &row_near_far_f32,
+      &row_ray_coeff_f32,
+      &compact_positions0_f32,
+      &compact_velocities_f32,
+      &compact_weight_coefficients_f32,
+      &grad_node_chart_f32,
+      &config_i32,
+      &config_f32};
+  for (size_t left = 0; left < output_bars.size(); ++left) {
+    for (size_t right = left + 1; right < output_bars.size(); ++right) {
+      TORCH_CHECK(
+          !output_bars[left]->is_alias_of(*output_bars[right]),
+          "fused kinetic output bars must be storage-distinct");
+    }
+    for (const torch::Tensor* input : read_inputs) {
+      TORCH_CHECK(
+          !output_bars[left]->is_alias_of(*input),
+          "fused kinetic output bars must not alias primal/cotangent inputs");
+    }
+  }
+  for (const torch::Tensor* tensor : all_tensors) {
+    TORCH_CHECK(
+        !validation_status_i32.is_alias_of(*tensor),
+        "fused kinetic validation status must not alias launch inputs or bars");
+  }
+  TORCH_CHECK(
+      row_count <= max_i32 && node_count <= max_i32 &&
+          compact_site_count <= max_i32 && word_count <= max_i32 &&
+          weight_coefficient_count <= max_i32 && global_site_count <= max_i32,
+      "fused kinetic launch counts must fit int32 Metal constants");
+  constexpr uint64_t max_u32 = std::numeric_limits<uint32_t>::max();
+  const auto require_u32_product = [max_u32](
+                                       const uint64_t left,
+                                       const uint64_t right,
+                                       const char* message) {
+    TORCH_CHECK(left == 0 || right <= max_u32 / left, message);
+  };
+  const uint64_t row_count_u64 = static_cast<uint64_t>(row_count);
+  const uint64_t node_count_u64 = static_cast<uint64_t>(node_count);
+  const uint64_t word_count_u64 = static_cast<uint64_t>(word_count);
+  const uint64_t compact_site_count_u64 =
+      static_cast<uint64_t>(compact_site_count);
+  const uint64_t global_site_count_u64 =
+      static_cast<uint64_t>(global_site_count);
+  const uint64_t weight_coefficient_count_u64 =
+      static_cast<uint64_t>(weight_coefficient_count);
+  require_u32_product(
+      row_count_u64,
+      node_count_u64,
+      "fused kinetic row-node indexing exceeds uint32");
+  const uint64_t row_node_count_u64 = row_count_u64 * node_count_u64;
+  require_u32_product(
+      row_node_count_u64,
+      4u,
+      "fused kinetic row-node chart indexing exceeds uint32");
+  require_u32_product(
+      node_count_u64,
+      word_count_u64,
+      "fused kinetic node-word indexing exceeds uint32");
+  require_u32_product(
+      row_count_u64,
+      12u,
+      "fused kinetic row-ray indexing exceeds uint32");
+  require_u32_product(
+      row_count_u64,
+      2u,
+      "fused kinetic row-domain indexing exceeds uint32");
+  require_u32_product(
+      compact_site_count_u64,
+      4u,
+      "fused kinetic compact material indexing exceeds uint32");
+  require_u32_product(
+      compact_site_count_u64,
+      3u,
+      "fused kinetic compact geometry indexing exceeds uint32");
+  require_u32_product(
+      compact_site_count_u64,
+      weight_coefficient_count_u64,
+      "fused kinetic compact weight indexing exceeds uint32");
+  require_u32_product(
+      global_site_count_u64,
+      3u,
+      "fused kinetic global geometry indexing exceeds uint32");
+  require_u32_product(
+      global_site_count_u64,
+      weight_coefficient_count_u64,
+      "fused kinetic global weight indexing exceeds uint32");
+  const int32_t row_count_i32 = static_cast<int32_t>(row_count);
+  const int32_t node_count_i32 = static_cast<int32_t>(node_count);
+  const int32_t compact_site_count_i32 = static_cast<int32_t>(compact_site_count);
+  const int32_t word_count_i32 = static_cast<int32_t>(word_count);
+  const int32_t weight_coefficient_count_i32 =
+      static_cast<int32_t>(weight_coefficient_count);
+  const int32_t global_site_count_i32 = static_cast<int32_t>(global_site_count);
+  const int32_t validate_shared_global_ledgers_i32 =
+      validate_shared_global_ledgers ? 1 : 0;
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  // A single bounded status scalar is the only extra device state. Validation
+  // admits only finite, exactly-zero output scratch; validation and guarded
+  // accumulation are enqueued in that order on the same MPS stream. The
+  // accumulation grid reads the completed shared status before any atomic, so
+  // prewrite rejection leaves all four caller-owned bars byte-for-byte
+  // untouched without introducing a mid-block host fence. Hidden-alias
+  // ownership and post-rejection quarantine remain caller obligations.
+  if (run_validation) {
+    launch(k.kinetic_fused_direct_full_vjp_validate_v1, [&](MetalKernelFunction& fn) {
+      fn.setArg(0, word_offsets_i32);
+      fn.setArg(1, word_owner_i32);
+      fn.setArg(2, source_site_ids_i64);
+      fn.setArg(3, node_physical_length_f32);
+      fn.setArg(4, site_rgba_f32);
+      fn.setArg(5, node_chart_f32);
+      fn.setArg(6, row_node_time_f32);
+      fn.setArg(7, row_near_far_f32);
+      fn.setArg(8, row_ray_coeff_f32);
+      fn.setArg(9, compact_positions0_f32);
+      fn.setArg(10, compact_velocities_f32);
+      fn.setArg(11, compact_weight_coefficients_f32);
+      fn.setArg(12, grad_node_chart_f32);
+      fn.setArg(13, grad_site_rgba_f32);
+      fn.setArg(14, grad_global_positions0_f32);
+      fn.setArg(15, grad_global_velocities_f32);
+      fn.setArg(16, grad_global_weight_coefficients_f32);
+      fn.setArg(17, config_i32);
+      fn.setArg(18, config_f32);
+      fn.setArg(19, row_count_i32);
+      fn.setArg(20, node_count_i32);
+      fn.setArg(21, compact_site_count_i32);
+      fn.setArg(22, word_count_i32);
+      fn.setArg(23, weight_coefficient_count_i32);
+      fn.setArg(24, global_site_count_i32);
+      fn.setArg(25, validation_status_i32);
+      fn.setArg(26, validate_shared_global_ledgers_i32);
+      fn.dispatch((uint64_t)row_count * (uint64_t)node_count, threads);
+    });
+  }
+  if (run_accumulation) {
+    launch(k.kinetic_fused_direct_full_vjp_v1, [&](MetalKernelFunction& fn) {
+      fn.setArg(0, word_offsets_i32);
+      fn.setArg(1, word_owner_i32);
+      fn.setArg(2, source_site_ids_i64);
+      fn.setArg(3, node_physical_length_f32);
+      fn.setArg(4, site_rgba_f32);
+      fn.setArg(5, node_chart_f32);
+      fn.setArg(6, row_node_time_f32);
+      fn.setArg(7, row_near_far_f32);
+      fn.setArg(8, row_ray_coeff_f32);
+      fn.setArg(9, compact_positions0_f32);
+      fn.setArg(10, compact_velocities_f32);
+      fn.setArg(11, compact_weight_coefficients_f32);
+      fn.setArg(12, grad_node_chart_f32);
+      fn.setArg(13, grad_site_rgba_f32);
+      fn.setArg(14, grad_global_positions0_f32);
+      fn.setArg(15, grad_global_velocities_f32);
+      fn.setArg(16, grad_global_weight_coefficients_f32);
+      fn.setArg(17, config_i32);
+      fn.setArg(18, config_f32);
+      fn.setArg(19, row_count_i32);
+      fn.setArg(20, node_count_i32);
+      fn.setArg(21, compact_site_count_i32);
+      fn.setArg(22, word_count_i32);
+      fn.setArg(23, weight_coefficient_count_i32);
+      fn.setArg(24, global_site_count_i32);
+      fn.setArg(25, validation_status_i32);
+      fn.dispatch((uint64_t)row_count * (uint64_t)node_count, threads);
+    });
+  }
+  return std::make_tuple(
+      grad_site_rgba_f32,
+      grad_global_positions0_f32,
+      grad_global_velocities_f32,
+      grad_global_weight_coefficients_f32,
+      validation_status_i32);
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_kinetic_fused_direct_full_vjp_finalize_shared_status_launch_only_v1(
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_global_positions0_f32,
+    const torch::Tensor& grad_global_velocities_f32,
+    const torch::Tensor& grad_global_weight_coefficients_f32,
+    const torch::Tensor& validation_status_i32,
+    const bool finalize_shared_global_ledgers) {
+  // This pass detects nonfinite destination sums after guarded atomics.  The
+  // bars are transaction-local scratch: a nonzero receipt quarantines them
+  // instead of promising rollback.  State remains one caller-owned int32.
+  check_float_mps_2d(grad_site_rgba_f32, "grad_site_rgba_f32", 4);
+  check_float_mps_2d(
+      grad_global_positions0_f32, "grad_global_positions0_f32", 3);
+  check_float_mps_2d(
+      grad_global_velocities_f32, "grad_global_velocities_f32", 3);
+  TORCH_CHECK(
+      grad_global_weight_coefficients_f32.device().is_mps() &&
+          grad_global_weight_coefficients_f32.scalar_type() == torch::kFloat32 &&
+          grad_global_weight_coefficients_f32.dim() == 2 &&
+          grad_global_weight_coefficients_f32.size(1) >= 1 &&
+          grad_global_weight_coefficients_f32.size(1) <= 3 &&
+          grad_global_weight_coefficients_f32.is_contiguous(),
+      "grad_global_weight_coefficients_f32 must be contiguous MPS float32 [global_site_count,C<=3]");
+  const int64_t compact_site_count = grad_site_rgba_f32.size(0);
+  const int64_t global_site_count = grad_global_positions0_f32.size(0);
+  const int64_t weight_coefficient_count =
+      grad_global_weight_coefficients_f32.size(1);
+  TORCH_CHECK(
+      compact_site_count > 0 && global_site_count >= compact_site_count,
+      "fused kinetic finalizer requires 0 < compact_site_count <= global_site_count");
+  TORCH_CHECK(
+      grad_global_velocities_f32.size(0) == global_site_count &&
+          grad_global_weight_coefficients_f32.size(0) == global_site_count,
+      "fused kinetic finalizer global ledgers must share one site count");
+  TORCH_CHECK(
+      validation_status_i32.device().is_mps() &&
+          validation_status_i32.scalar_type() == torch::kInt32 &&
+          validation_status_i32.dim() == 1 &&
+          validation_status_i32.numel() == 1 &&
+          validation_status_i32.is_contiguous(),
+      "fused kinetic finalizer status must be contiguous MPS int32 [1]");
+  TORCH_CHECK(
+      validation_status_i32.device() == grad_site_rgba_f32.device(),
+      "fused kinetic finalizer status must share the gradient-ledger MPS device");
+  const std::array<const torch::Tensor*, 4> bars = {
+      &grad_site_rgba_f32,
+      &grad_global_positions0_f32,
+      &grad_global_velocities_f32,
+      &grad_global_weight_coefficients_f32};
+  for (size_t left = 0; left < bars.size(); ++left) {
+    TORCH_CHECK(
+        bars[left]->device() == grad_site_rgba_f32.device(),
+        "fused kinetic finalizer bars must share one MPS device");
+    TORCH_CHECK(
+        !validation_status_i32.is_alias_of(*bars[left]),
+        "fused kinetic finalizer status must not alias a gradient ledger");
+    for (size_t right = left + 1; right < bars.size(); ++right) {
+      TORCH_CHECK(
+          !bars[left]->is_alias_of(*bars[right]),
+          "fused kinetic finalizer gradient ledgers must be storage-distinct");
+    }
+  }
+  constexpr int64_t max_i32 = std::numeric_limits<int32_t>::max();
+  TORCH_CHECK(
+      compact_site_count <= max_i32 && global_site_count <= max_i32 &&
+          weight_coefficient_count <= max_i32,
+      "fused kinetic finalizer counts must fit int32 Metal constants");
+  constexpr uint64_t max_u32 = std::numeric_limits<uint32_t>::max();
+  const uint64_t compact_entries =
+      static_cast<uint64_t>(compact_site_count) * 4u;
+  const uint64_t global_geometry_entries =
+      finalize_shared_global_ledgers
+      ? static_cast<uint64_t>(global_site_count) * 3u
+      : 0u;
+  const uint64_t global_weight_entries =
+      finalize_shared_global_ledgers
+      ? static_cast<uint64_t>(global_site_count) *
+          static_cast<uint64_t>(weight_coefficient_count)
+      : 0u;
+  const uint64_t finalizer_entry_count = std::max(
+      compact_entries,
+      std::max(global_geometry_entries, global_weight_entries));
+  TORCH_CHECK(
+      compact_entries <= max_u32 && global_geometry_entries <= max_u32 &&
+          global_weight_entries <= max_u32,
+      "fused kinetic finalizer indexing exceeds uint32");
+  const int32_t compact_site_count_i32 =
+      static_cast<int32_t>(compact_site_count);
+  const int32_t global_site_count_i32 =
+      static_cast<int32_t>(global_site_count);
+  const int32_t weight_coefficient_count_i32 =
+      static_cast<int32_t>(weight_coefficient_count);
+  const int32_t finalize_shared_global_ledgers_i32 =
+      finalize_shared_global_ledgers ? 1 : 0;
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.kinetic_fused_direct_full_vjp_finalize_v1, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, grad_site_rgba_f32);
+    fn.setArg(1, grad_global_positions0_f32);
+    fn.setArg(2, grad_global_velocities_f32);
+    fn.setArg(3, grad_global_weight_coefficients_f32);
+    fn.setArg(4, validation_status_i32);
+    fn.setArg(5, compact_site_count_i32);
+    fn.setArg(6, global_site_count_i32);
+    fn.setArg(7, weight_coefficient_count_i32);
+    fn.setArg(8, finalize_shared_global_ledgers_i32);
+    fn.dispatch(finalizer_entry_count, threads);
+  });
+  return std::make_tuple(
+      grad_site_rgba_f32,
+      grad_global_positions0_f32,
+      grad_global_velocities_f32,
+      grad_global_weight_coefficients_f32,
+      validation_status_i32);
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_kinetic_fused_direct_full_vjp_accumulate_launch_only_v1(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_global_positions0_f32,
+    const torch::Tensor& grad_global_velocities_f32,
+    const torch::Tensor& grad_global_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t row_count,
+    const int64_t node_count) {
+  torch::Tensor validation_status_i32 = torch::zeros({1}, config_i32.options());
+  auto guarded_result = metal_kinetic_fused_direct_full_vjp_phase_core_v1(
+      word_offsets_i32,
+      word_owner_i32,
+      source_site_ids_i64,
+      node_physical_length_f32,
+      site_rgba_f32,
+      node_chart_f32,
+      row_node_time_f32,
+      row_near_far_f32,
+      row_ray_coeff_f32,
+      compact_positions0_f32,
+      compact_velocities_f32,
+      compact_weight_coefficients_f32,
+      grad_node_chart_f32,
+      grad_site_rgba_f32,
+      grad_global_positions0_f32,
+      grad_global_velocities_f32,
+      grad_global_weight_coefficients_f32,
+      config_i32,
+      config_f32,
+      row_count,
+      node_count,
+      validation_status_i32,
+      true,
+      true,
+      true);
+  return metal_kinetic_fused_direct_full_vjp_finalize_shared_status_launch_only_v1(
+      std::get<0>(guarded_result),
+      std::get<1>(guarded_result),
+      std::get<2>(guarded_result),
+      std::get<3>(guarded_result),
+      std::get<4>(guarded_result),
+      true);
+}
+
+torch::Tensor
+metal_kinetic_fused_direct_full_vjp_validate_shared_status_launch_only_v1(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_global_positions0_f32,
+    const torch::Tensor& grad_global_velocities_f32,
+    const torch::Tensor& grad_global_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& validation_status_i32,
+    const bool validate_shared_global_ledgers,
+    const int64_t row_count,
+    const int64_t node_count) {
+  auto result = metal_kinetic_fused_direct_full_vjp_phase_core_v1(
+      word_offsets_i32,
+      word_owner_i32,
+      source_site_ids_i64,
+      node_physical_length_f32,
+      site_rgba_f32,
+      node_chart_f32,
+      row_node_time_f32,
+      row_near_far_f32,
+      row_ray_coeff_f32,
+      compact_positions0_f32,
+      compact_velocities_f32,
+      compact_weight_coefficients_f32,
+      grad_node_chart_f32,
+      grad_site_rgba_f32,
+      grad_global_positions0_f32,
+      grad_global_velocities_f32,
+      grad_global_weight_coefficients_f32,
+      config_i32,
+      config_f32,
+      row_count,
+      node_count,
+      validation_status_i32,
+      true,
+      false,
+      validate_shared_global_ledgers);
+  return std::get<4>(result);
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_kinetic_fused_direct_full_vjp_accumulate_shared_status_launch_only_v1(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_global_positions0_f32,
+    const torch::Tensor& grad_global_velocities_f32,
+    const torch::Tensor& grad_global_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& validation_status_i32,
+    const int64_t row_count,
+    const int64_t node_count) {
+  return metal_kinetic_fused_direct_full_vjp_phase_core_v1(
+      word_offsets_i32,
+      word_owner_i32,
+      source_site_ids_i64,
+      node_physical_length_f32,
+      site_rgba_f32,
+      node_chart_f32,
+      row_node_time_f32,
+      row_near_far_f32,
+      row_ray_coeff_f32,
+      compact_positions0_f32,
+      compact_velocities_f32,
+      compact_weight_coefficients_f32,
+      grad_node_chart_f32,
+      grad_site_rgba_f32,
+      grad_global_positions0_f32,
+      grad_global_velocities_f32,
+      grad_global_weight_coefficients_f32,
+      config_i32,
+      config_f32,
+      row_count,
+      node_count,
+      validation_status_i32,
+      false,
+      true,
+      false);
+}
+
+torch::Tensor metal_fixed_word_p0_lie_material_node_vjp_accumulate_launch_only(
+    const torch::Tensor& mobius_coeff_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.fixed_word_p0_lie_material_node_vjp, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, mobius_coeff_f32);
+    fn.setArg(1, track_ray_coeff_f32);
+    fn.setArg(2, compiler_node_t_f32);
+    fn.setArg(3, word_offsets_i32);
+    fn.setArg(4, word_owner_i32);
+    fn.setArg(5, word_left_incidence_i32);
+    fn.setArg(6, word_right_incidence_i32);
+    fn.setArg(7, track_incidence_offsets_i32);
+    fn.setArg(8, site_rgba_f32);
+    fn.setArg(9, node_chart_f32);
+    fn.setArg(10, grad_node_chart_f32);
+    fn.setArg(11, grad_site_rgba_f32);
+    fn.setArg(12, config_i32);
+    fn.setArg(13, config_f32);
+    fn.dispatch((uint64_t)track_count * (uint64_t)node_count, threads);
+  });
+  return grad_site_rgba_f32;
+}
+
+torch::Tensor metal_kinetic_ragged_p0_lie_sample_accumulate_launch_only(
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& sample_row_i32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& loss_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& cone_diagnostic_i32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t row_count,
+    const int64_t node_count,
+    const int64_t sample_count) {
+  (void)row_count;
+  (void)node_count;
+  auto prediction_rgb = torch::empty(
+      {sample_count, 3},
+      node_chart_f32.options().dtype(torch::kFloat32));
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.kinetic_ragged_p0_lie_sample_mse_vjp, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, node_chart_f32);
+    fn.setArg(1, sample_row_i32);
+    fn.setArg(2, sample_to_node_f32);
+    fn.setArg(3, target_rgb_f32);
+    fn.setArg(4, background_rgb_f32);
+    fn.setArg(5, prediction_rgb);
+    fn.setArg(6, loss_f32);
+    fn.setArg(7, grad_node_chart_f32);
+    fn.setArg(8, cone_diagnostic_i32);
+    fn.setArg(9, config_i32);
+    fn.setArg(10, config_f32);
+    fn.dispatch((uint64_t)sample_count, threads);
+  });
+  return prediction_rgb;
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+metal_kinetic_ragged_p0_lie_sample_accumulate_loss_only_launch_only(
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& sample_row_i32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& loss_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& cone_diagnostic_i32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t row_count,
+    const int64_t node_count,
+    const int64_t sample_count) {
+  (void)row_count;
+  (void)node_count;
+  // Hot-path reduction mutates only caller-owned scalar/node/diagnostic state.
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.kinetic_ragged_p0_lie_sample_mse_vjp_accumulate_only, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, node_chart_f32);
+    fn.setArg(1, sample_row_i32);
+    fn.setArg(2, sample_to_node_f32);
+    fn.setArg(3, target_rgb_f32);
+    fn.setArg(4, background_rgb_f32);
+    fn.setArg(5, loss_f32);
+    fn.setArg(6, grad_node_chart_f32);
+    fn.setArg(7, cone_diagnostic_i32);
+    fn.setArg(8, config_i32);
+    fn.setArg(9, config_f32);
+    fn.dispatch((uint64_t)sample_count, threads);
+  });
+  return std::make_tuple(loss_f32, grad_node_chart_f32, cone_diagnostic_i32);
+}
+
+torch::Tensor metal_fixed_word_p0_sparse_mobius_boundary_finalize_launch_only(
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& grad_mobius_coeff_f32,
+    const torch::Tensor& grad_boundary_f32,
+    const torch::Tensor& config_i32,
+    const int64_t track_count) {
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.sparse_mobius_incidence_boundary_vjp, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, track_ray_coeff_f32);
+    fn.setArg(1, track_incidence_offsets_i32);
+    fn.setArg(2, incidence_boundary_i32);
+    fn.setArg(3, grad_mobius_coeff_f32);
+    fn.setArg(4, grad_boundary_f32);
+    fn.setArg(5, config_i32);
+    fn.dispatch((uint64_t)track_count, threads);
+  });
+  return grad_boundary_f32;
+}
+
+torch::Tensor metal_sparse_power_boundary_vjp_to_sites_launch_only(
+    const torch::Tensor& active_boundary_site_pairs_i32,
+    const torch::Tensor& sites_f32,
+    const torch::Tensor& grad_boundary_f32) {
+  const int64_t active_count = active_boundary_site_pairs_i32.size(0);
+
+  // Shapes, devices, topology, and site count were checked while preparing the
+  // resident token. The kernel still guards every sparse index.
+  auto grad_sites = torch::zeros_like(sites_f32);
+  if (active_count == 0) {
+    return grad_sites;
+  }
+  auto& k = kernels();
+  constexpr uint64_t threads = 256ull;
+  launch(k.sparse_power_boundary_site_vjp_launch_only, [&](MetalKernelFunction& fn) {
+    fn.setArg(0, active_boundary_site_pairs_i32);
+    fn.setArg(1, sites_f32);
+    fn.setArg(2, grad_boundary_f32);
+    fn.setArg(3, grad_sites);
+    fn.dispatch((uint64_t)active_count, threads);
+  });
+  return grad_sites;
 }
 
 std::tuple<torch::Tensor, torch::Tensor>

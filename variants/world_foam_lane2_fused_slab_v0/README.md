@@ -9,6 +9,48 @@ events and 2D+time power-boundary event counts, plus local Torch/MPS bridge
   sources for real-ray forward, VJP, reduced-VJP, CSR candidate storage, CSR
   frozen-geometry autograd, and frozen-geometry training/eval smokes.
 
+## Current native build boundary (2026-08-15)
+
+`bindings.cpp` is now sealed at exactly 133 unique schemas with 133 matching
+`CompositeExplicitAutograd` implementations. The retained
+`_C.cpython-311-darwin.so` predates the latest 30 registrations and exposes
+only 103, so it is a diagnostic stale binary and must not be used for G4/G6.
+This is a build-state mismatch, not a missing registration in current source.
+
+`native_build_contract.py` is the standard-library source of truth used by
+both `setup.py` and the repository verifiers. It pins the two translation
+units, runtime-compiled Metal sources, headers/Python ABI files, the 133-schema
+name/signature digests, and the 30 memory-light/full-geometry schemas added
+after the retained binary. `setup.py` fails before compilation if that contract
+drifts and declares the header/Metal inputs as build dependencies.
+
+On an operator-approved quiet host, force the correct CPython 3.11 rebuild:
+
+```bash
+( cd /Users/nicholasbardy/git/gsplats_browser/dynaworld/third_party/fast-mac-gsplat/variants/world_foam_lane2_fused_slab_v0
+  UV_CACHE_DIR=/private/tmp/uv-cache uv run \
+    --project /Users/nicholasbardy/git/gsplats_browser/dynaworld \
+    python setup.py build_ext --inplace --force )
+```
+
+Then attest and independently verify the build without launching Metal:
+
+```bash
+cd /Users/nicholasbardy/git/gsplats_browser/dynaworld
+PYTHONPATH=research_experiments/world_foam_lane2 .venv/bin/python \
+  research_experiments/world_foam_lane2/attest_worldfoam_fused_slab_build.py \
+  --write-receipt
+PYTHONPATH=research_experiments/world_foam_lane2 .venv/bin/python \
+  research_experiments/world_foam_lane2/verify_worldfoam_native_variant_imports.py
+```
+
+Acceptance requires the exact active-interpreter path
+`torch_world_foam_lane2_fused_slab/_C.cpython-311-darwin.so`, exact source and
+binary hashes, CPython 3.11/Darwin architecture, Torch and compiler identities,
+all 133 source signatures, all 133 dispatcher signatures, and a kernel for
+every schema. The receipt scope is build and registration only: it does not
+claim Metal execution, numerical parity, memory fit, speed, or paper quality.
+
 ## Source Inventory
 
 The complete source surface is:
@@ -37,6 +79,8 @@ The complete source surface is:
   `world_foam_lane2_fused_slab_v0.shared_realray_rgba_depth_vjp`.
 - `torch_world_foam_lane2_fused_slab/ops.py`: thin Python tensor validator/wrapper.
 - `setup.py`: local extension build recipe matching the STAR-UVT bridge shape.
+- `native_build_contract.py`: exact translation-unit, dependency, and
+  133-schema source contract consumed before every build.
 - `tools/static_validate.py`: local static validator for the shared ABI,
   power-boundary CPU fixture, and Metal source compilation.
 - `tools/smoke_power_boundary_mps.py`: first MPS count-only runtime smoke.

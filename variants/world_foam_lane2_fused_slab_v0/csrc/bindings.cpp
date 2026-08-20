@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <string>
+#include <tuple>
 #include <vector>
 
 namespace world_foam_lane2_fused_slab {
@@ -2612,6 +2614,492 @@ metal_endpoint_record_delta_replace_factorized_packed_framegroup16_recompute_mse
     const torch::Tensor& target_rgb_f32,
     const torch::Tensor& config_i32,
     const torch::Tensor& config_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+metal_endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_mse_vjp_direct_atomic_rgb_boundary(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& frame_t_f32,
+    const torch::Tensor& base_offsets_i32,
+    const torch::Tensor& base_record_i32,
+    const torch::Tensor& track_change_offsets_i32,
+    const torch::Tensor& track_chunk_change_offsets_i16,
+    const torch::Tensor& change_frame_i32,
+    const torch::Tensor& change_offsets_i32,
+    const torch::Tensor& change_record_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+metal_endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_p0_mse_vjp_sparse_mobius_rgb_boundary(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& frame_t_f32,
+    const torch::Tensor& base_offsets_i16,
+    const torch::Tensor& base_record_incidence_i32,
+    const torch::Tensor& track_change_offsets_i16,
+    const torch::Tensor& track_chunk_change_offsets_i16,
+    const torch::Tensor& change_frame_i16,
+    const torch::Tensor& change_offsets_i16,
+    const torch::Tensor& change_record_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32);
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32);
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary_launch_only(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    int64_t boundary_count,
+    int64_t track_count,
+    int64_t node_count,
+    int64_t sample_count,
+    int64_t site_count,
+    int64_t word_count,
+    int64_t incidence_count);
+
+torch::Tensor metal_sparse_power_boundary_from_sites_launch_only(
+    const torch::Tensor& boundary_site_pairs_i32,
+    const torch::Tensor& sites_f32,
+    int64_t boundary_count);
+
+torch::Tensor metal_fixed_word_p0_sparse_mobius_lower_launch_only(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& config_i32,
+    int64_t track_count,
+    int64_t incidence_count);
+
+torch::Tensor metal_fixed_word_p0_lie_node_forward_launch_only(
+    const torch::Tensor& mobius_coeff_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    int64_t track_count,
+    int64_t node_count);
+
+std::tuple<
+    std::vector<std::string>,
+    std::vector<std::string>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>>
+metal_kinetic_memory_light_selected_kernel_resource_attestation();
+
+torch::Tensor metal_kinetic_precompiled_length_p0_lie_node_forward_launch_only(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    int64_t track_count,
+    int64_t node_count);
+
+torch::Tensor metal_kinetic_precompiled_length_p0_lie_node_forward_into_launch_only_v1(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& node_chart_out_f32,
+    int64_t track_count,
+    int64_t node_count);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+metal_fixed_word_p0_lie_sample_state_init_launch_only(
+    const torch::Tensor& reference_f32,
+    int64_t track_count,
+    int64_t node_count);
+
+torch::Tensor metal_fixed_word_p0_lie_sample_accumulate_launch_only(
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& loss_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& cone_diagnostic_i32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    int64_t track_count,
+    int64_t sample_count);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+metal_fixed_word_p0_lie_sample_accumulate_loss_only_launch_only(
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& loss_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& cone_diagnostic_i32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    int64_t track_count,
+    int64_t sample_count);
+
+torch::Tensor metal_kinetic_ragged_p0_lie_sample_accumulate_launch_only(
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& sample_row_i32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& loss_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& cone_diagnostic_i32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    int64_t row_count,
+    int64_t node_count,
+    int64_t sample_count);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+metal_kinetic_ragged_p0_lie_sample_accumulate_loss_only_launch_only(
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& sample_row_i32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& loss_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& cone_diagnostic_i32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    int64_t row_count,
+    int64_t node_count,
+    int64_t sample_count);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+metal_fixed_word_p0_lie_world_grad_init_launch_only(
+    const torch::Tensor& reference_f32,
+    int64_t site_count,
+    int64_t incidence_count,
+    int64_t boundary_count);
+
+torch::Tensor metal_fixed_word_p0_lie_material_world_grad_init_launch_only(
+    const torch::Tensor& reference_f32,
+    int64_t site_count);
+
+std::tuple<torch::Tensor, torch::Tensor>
+metal_fixed_word_p0_lie_node_vjp_accumulate_launch_only(
+    const torch::Tensor& mobius_coeff_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_mobius_coeff_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    int64_t track_count,
+    int64_t node_count);
+
+std::tuple<torch::Tensor, torch::Tensor>
+metal_kinetic_precompiled_length_p0_lie_node_vjp_accumulate_launch_only(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    int64_t track_count,
+    int64_t node_count);
+
+torch::Tensor
+metal_kinetic_precompiled_length_p0_lie_material_node_vjp_accumulate_launch_only(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    int64_t track_count,
+    int64_t node_count);
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_kinetic_fused_direct_full_vjp_accumulate_launch_only_v1(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_global_positions0_f32,
+    const torch::Tensor& grad_global_velocities_f32,
+    const torch::Tensor& grad_global_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    int64_t row_count,
+    int64_t node_count);
+
+torch::Tensor
+metal_kinetic_fused_direct_full_vjp_validate_shared_status_launch_only_v1(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_global_positions0_f32,
+    const torch::Tensor& grad_global_velocities_f32,
+    const torch::Tensor& grad_global_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& validation_status_i32,
+    bool validate_shared_global_ledgers,
+    int64_t row_count,
+    int64_t node_count);
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_kinetic_fused_direct_full_vjp_accumulate_shared_status_launch_only_v1(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_global_positions0_f32,
+    const torch::Tensor& grad_global_velocities_f32,
+    const torch::Tensor& grad_global_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& validation_status_i32,
+    int64_t row_count,
+    int64_t node_count);
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_kinetic_fused_direct_full_vjp_finalize_shared_status_launch_only_v1(
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_global_positions0_f32,
+    const torch::Tensor& grad_global_velocities_f32,
+    const torch::Tensor& grad_global_weight_coefficients_f32,
+    const torch::Tensor& validation_status_i32,
+    bool finalize_shared_global_ledgers);
+
+torch::Tensor
+metal_kinetic_fused_union_full_vjp_validate_shared_status_launch_only_v2(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& compact_to_geometry_output_i64,
+    const torch::Tensor& geometry_output_source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_union_positions0_f32,
+    const torch::Tensor& grad_union_velocities_f32,
+    const torch::Tensor& grad_union_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& validation_status_i32,
+    bool validate_shared_union_ledgers,
+    int64_t global_site_count,
+    int64_t union_site_count,
+    int64_t row_count,
+    int64_t node_count);
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_kinetic_fused_union_full_vjp_accumulate_shared_status_launch_only_v2(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& compact_to_geometry_output_i64,
+    const torch::Tensor& geometry_output_source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_union_positions0_f32,
+    const torch::Tensor& grad_union_velocities_f32,
+    const torch::Tensor& grad_union_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& validation_status_i32,
+    int64_t global_site_count,
+    int64_t union_site_count,
+    int64_t row_count,
+    int64_t node_count);
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+metal_kinetic_fused_union_full_vjp_finalize_shared_status_launch_only_v2(
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_union_positions0_f32,
+    const torch::Tensor& grad_union_velocities_f32,
+    const torch::Tensor& grad_union_weight_coefficients_f32,
+    const torch::Tensor& validation_status_i32,
+    bool finalize_shared_union_ledgers,
+    int64_t union_site_count);
+
+torch::Tensor metal_fixed_word_p0_lie_material_node_vjp_accumulate_launch_only(
+    const torch::Tensor& mobius_coeff_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    int64_t track_count,
+    int64_t node_count);
+
+torch::Tensor metal_fixed_word_p0_sparse_mobius_boundary_finalize_launch_only(
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& grad_mobius_coeff_f32,
+    const torch::Tensor& grad_boundary_f32,
+    const torch::Tensor& config_i32,
+    int64_t track_count);
+
+torch::Tensor metal_sparse_power_boundary_vjp_to_sites_launch_only(
+    const torch::Tensor& active_boundary_site_pairs_i32,
+    const torch::Tensor& sites_f32,
+    const torch::Tensor& grad_boundary_f32);
 
 std::tuple<torch::Tensor, torch::Tensor>
 metal_endpoint_record_delta_replace_factorized_frameselect_recompute_mse_vjp_direct_atomic_rgb_only(
@@ -5667,6 +6155,1121 @@ endpoint_record_delta_replace_factorized_packed_framegroup16_recompute_mse_vjp_d
       boundary_f32.device());
 }
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_mse_vjp_direct_atomic_rgb_boundary_dispatch(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& frame_t_f32,
+    const torch::Tensor& base_offsets_i32,
+    const torch::Tensor& base_record_i32,
+    const torch::Tensor& track_change_offsets_i32,
+    const torch::Tensor& track_chunk_change_offsets_i16,
+    const torch::Tensor& change_frame_i32,
+    const torch::Tensor& change_offsets_i32,
+    const torch::Tensor& change_record_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32) {
+#if defined(__APPLE__)
+  if (boundary_f32.device().is_mps()) {
+    return metal_endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_mse_vjp_direct_atomic_rgb_boundary(
+        boundary_f32,
+        track_ray_coeff_f32,
+        frame_t_f32,
+        base_offsets_i32,
+        base_record_i32,
+        track_change_offsets_i32,
+        track_chunk_change_offsets_i16,
+        change_frame_i32,
+        change_offsets_i32,
+        change_record_i32,
+        site_rgba_f32,
+        target_rgb_f32,
+        config_i32,
+        config_f32);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "world_foam_lane2_fused_slab_v0.endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_mse_vjp_direct_atomic_rgb_boundary: no backend available for device ",
+      boundary_f32.device());
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_p0_mse_vjp_sparse_mobius_rgb_boundary_dispatch(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& frame_t_f32,
+    const torch::Tensor& base_offsets_i16,
+    const torch::Tensor& base_record_incidence_i32,
+    const torch::Tensor& track_change_offsets_i16,
+    const torch::Tensor& track_chunk_change_offsets_i16,
+    const torch::Tensor& change_frame_i16,
+    const torch::Tensor& change_offsets_i16,
+    const torch::Tensor& change_record_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32) {
+#if defined(__APPLE__)
+  if (boundary_f32.device().is_mps()) {
+    return metal_endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_p0_mse_vjp_sparse_mobius_rgb_boundary(
+        boundary_f32,
+        track_ray_coeff_f32,
+        frame_t_f32,
+        base_offsets_i16,
+        base_record_incidence_i32,
+        track_change_offsets_i16,
+        track_chunk_change_offsets_i16,
+        change_frame_i16,
+        change_offsets_i16,
+        change_record_incidence_i32,
+        track_incidence_offsets_i32,
+        incidence_boundary_i32,
+        site_rgba_f32,
+        target_rgb_f32,
+        config_i32,
+        config_f32);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "world_foam_lane2_fused_slab_v0.endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_p0_mse_vjp_sparse_mobius_rgb_boundary: no backend available for device ",
+      boundary_f32.device());
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary_dispatch(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32) {
+#if defined(__APPLE__)
+  if (boundary_f32.device().is_mps()) {
+    return metal_fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary(
+        boundary_f32,
+        track_ray_coeff_f32,
+        compiler_node_t_f32,
+        word_offsets_i32,
+        word_owner_i32,
+        word_left_incidence_i32,
+        word_right_incidence_i32,
+        track_incidence_offsets_i32,
+        incidence_boundary_i32,
+        site_rgba_f32,
+        sample_to_node_f32,
+        target_rgb_f32,
+        background_rgb_f32,
+        config_i32,
+        config_f32);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "world_foam_lane2_fused_slab_v0.fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary: no backend available for device ",
+      boundary_f32.device());
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary_launch_only_dispatch(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t boundary_count,
+    const int64_t track_count,
+    const int64_t node_count,
+    const int64_t sample_count,
+    const int64_t site_count,
+    const int64_t word_count,
+    const int64_t incidence_count) {
+#if defined(__APPLE__)
+  if (boundary_f32.device().is_mps()) {
+    return metal_fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary_launch_only(
+        boundary_f32,
+        track_ray_coeff_f32,
+        compiler_node_t_f32,
+        word_offsets_i32,
+        word_owner_i32,
+        word_left_incidence_i32,
+        word_right_incidence_i32,
+        track_incidence_offsets_i32,
+        incidence_boundary_i32,
+        site_rgba_f32,
+        sample_to_node_f32,
+        target_rgb_f32,
+        background_rgb_f32,
+        config_i32,
+        config_f32,
+        boundary_count,
+        track_count,
+        node_count,
+        sample_count,
+        site_count,
+        word_count,
+        incidence_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "world_foam_lane2_fused_slab_v0.fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary_launch_only: no backend available for device ",
+      boundary_f32.device());
+}
+
+torch::Tensor sparse_power_boundary_from_sites_launch_only_dispatch(
+    const torch::Tensor& boundary_site_pairs_i32,
+    const torch::Tensor& sites_f32,
+    const int64_t boundary_count) {
+#if defined(__APPLE__)
+  if (sites_f32.device().is_mps()) {
+    return metal_sparse_power_boundary_from_sites_launch_only(
+        boundary_site_pairs_i32,
+        sites_f32,
+        boundary_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "world_foam_lane2_fused_slab_v0.sparse_power_boundary_from_sites_launch_only: no backend available for device ",
+      sites_f32.device());
+}
+
+torch::Tensor fixed_word_p0_sparse_mobius_lower_launch_only_dispatch(
+    const torch::Tensor& boundary_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& config_i32,
+    const int64_t track_count,
+    const int64_t incidence_count) {
+#if defined(__APPLE__)
+  if (boundary_f32.device().is_mps()) {
+    return metal_fixed_word_p0_sparse_mobius_lower_launch_only(
+        boundary_f32,
+        track_ray_coeff_f32,
+        track_incidence_offsets_i32,
+        incidence_boundary_i32,
+        config_i32,
+        track_count,
+        incidence_count);
+  }
+#endif
+  TORCH_CHECK(false, "fixed_word_p0_sparse_mobius_lower_launch_only: no backend available for device ", boundary_f32.device());
+}
+
+torch::Tensor fixed_word_p0_lie_node_forward_launch_only_dispatch(
+    const torch::Tensor& mobius_coeff_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+#if defined(__APPLE__)
+  if (site_rgba_f32.device().is_mps()) {
+    return metal_fixed_word_p0_lie_node_forward_launch_only(
+        mobius_coeff_f32,
+        track_ray_coeff_f32,
+        compiler_node_t_f32,
+        word_offsets_i32,
+        word_owner_i32,
+        word_left_incidence_i32,
+        word_right_incidence_i32,
+        track_incidence_offsets_i32,
+        site_rgba_f32,
+        config_i32,
+        config_f32,
+        track_count,
+        node_count);
+  }
+#endif
+  TORCH_CHECK(false, "fixed_word_p0_lie_node_forward_launch_only: no backend available for device ", site_rgba_f32.device());
+}
+
+std::tuple<
+    std::vector<std::string>,
+    std::vector<std::string>,
+    std::vector<int64_t>,
+    std::vector<int64_t>,
+    std::vector<int64_t>>
+kinetic_memory_light_selected_kernel_resource_attestation_dispatch(
+    const torch::Tensor& dispatch_anchor) {
+#if defined(__APPLE__)
+  if (dispatch_anchor.device().is_mps()) {
+    return metal_kinetic_memory_light_selected_kernel_resource_attestation();
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_memory_light_selected_kernel_resource_attestation requires an MPS dispatch anchor, got ",
+      dispatch_anchor.device());
+}
+
+torch::Tensor kinetic_precompiled_length_p0_lie_node_forward_launch_only_dispatch(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+#if defined(__APPLE__)
+  if (site_rgba_f32.device().is_mps()) {
+    return metal_kinetic_precompiled_length_p0_lie_node_forward_launch_only(
+        word_offsets_i32,
+        word_owner_i32,
+        node_physical_length_f32,
+        site_rgba_f32,
+        config_i32,
+        config_f32,
+        track_count,
+        node_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_precompiled_length_p0_lie_node_forward_launch_only: no backend available for device ",
+      site_rgba_f32.device());
+}
+
+torch::Tensor kinetic_precompiled_length_p0_lie_node_forward_into_launch_only_v1_dispatch(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& node_chart_out_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+#if defined(__APPLE__)
+  if (site_rgba_f32.device().is_mps()) {
+    return metal_kinetic_precompiled_length_p0_lie_node_forward_into_launch_only_v1(
+        word_offsets_i32,
+        word_owner_i32,
+        node_physical_length_f32,
+        site_rgba_f32,
+        config_i32,
+        config_f32,
+        node_chart_out_f32,
+        track_count,
+        node_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_precompiled_length_p0_lie_node_forward_into_launch_only_v1: no backend available for device ",
+      site_rgba_f32.device());
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+fixed_word_p0_lie_sample_state_init_launch_only_dispatch(
+    const torch::Tensor& reference_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+#if defined(__APPLE__)
+  if (reference_f32.device().is_mps()) {
+    return metal_fixed_word_p0_lie_sample_state_init_launch_only(reference_f32, track_count, node_count);
+  }
+#endif
+  TORCH_CHECK(false, "fixed_word_p0_lie_sample_state_init_launch_only: no backend available for device ", reference_f32.device());
+}
+
+torch::Tensor fixed_word_p0_lie_sample_accumulate_launch_only_dispatch(
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& loss_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& cone_diagnostic_i32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t sample_count) {
+#if defined(__APPLE__)
+  if (node_chart_f32.device().is_mps()) {
+    return metal_fixed_word_p0_lie_sample_accumulate_launch_only(
+        node_chart_f32,
+        sample_to_node_f32,
+        target_rgb_f32,
+        background_rgb_f32,
+        loss_f32,
+        grad_node_chart_f32,
+        cone_diagnostic_i32,
+        config_i32,
+        config_f32,
+        track_count,
+        sample_count);
+  }
+#endif
+  TORCH_CHECK(false, "fixed_word_p0_lie_sample_accumulate_launch_only: no backend available for device ", node_chart_f32.device());
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+fixed_word_p0_lie_sample_accumulate_loss_only_launch_only_dispatch(
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& loss_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& cone_diagnostic_i32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t sample_count) {
+#if defined(__APPLE__)
+  if (node_chart_f32.device().is_mps()) {
+    return metal_fixed_word_p0_lie_sample_accumulate_loss_only_launch_only(
+        node_chart_f32,
+        sample_to_node_f32,
+        target_rgb_f32,
+        background_rgb_f32,
+        loss_f32,
+        grad_node_chart_f32,
+        cone_diagnostic_i32,
+        config_i32,
+        config_f32,
+        track_count,
+        sample_count);
+  }
+#endif
+  TORCH_CHECK(false, "fixed_word_p0_lie_sample_accumulate_loss_only_launch_only: no backend available for device ", node_chart_f32.device());
+}
+
+torch::Tensor kinetic_ragged_p0_lie_sample_accumulate_launch_only_dispatch(
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& sample_row_i32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& loss_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& cone_diagnostic_i32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t row_count,
+    const int64_t node_count,
+    const int64_t sample_count) {
+#if defined(__APPLE__)
+  if (node_chart_f32.device().is_mps()) {
+    return metal_kinetic_ragged_p0_lie_sample_accumulate_launch_only(
+        node_chart_f32,
+        sample_row_i32,
+        sample_to_node_f32,
+        target_rgb_f32,
+        background_rgb_f32,
+        loss_f32,
+        grad_node_chart_f32,
+        cone_diagnostic_i32,
+        config_i32,
+        config_f32,
+        row_count,
+        node_count,
+        sample_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_ragged_p0_lie_sample_accumulate_launch_only: no backend available for device ",
+      node_chart_f32.device());
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+kinetic_ragged_p0_lie_sample_accumulate_loss_only_launch_only_dispatch(
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& sample_row_i32,
+    const torch::Tensor& sample_to_node_f32,
+    const torch::Tensor& target_rgb_f32,
+    const torch::Tensor& background_rgb_f32,
+    const torch::Tensor& loss_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& cone_diagnostic_i32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t row_count,
+    const int64_t node_count,
+    const int64_t sample_count) {
+#if defined(__APPLE__)
+  if (node_chart_f32.device().is_mps()) {
+    return metal_kinetic_ragged_p0_lie_sample_accumulate_loss_only_launch_only(
+        node_chart_f32,
+        sample_row_i32,
+        sample_to_node_f32,
+        target_rgb_f32,
+        background_rgb_f32,
+        loss_f32,
+        grad_node_chart_f32,
+        cone_diagnostic_i32,
+        config_i32,
+        config_f32,
+        row_count,
+        node_count,
+        sample_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_ragged_p0_lie_sample_accumulate_loss_only_launch_only: no backend available for device ",
+      node_chart_f32.device());
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+fixed_word_p0_lie_world_grad_init_launch_only_dispatch(
+    const torch::Tensor& reference_f32,
+    const int64_t site_count,
+    const int64_t incidence_count,
+    const int64_t boundary_count) {
+#if defined(__APPLE__)
+  if (reference_f32.device().is_mps()) {
+    return metal_fixed_word_p0_lie_world_grad_init_launch_only(
+        reference_f32,
+        site_count,
+        incidence_count,
+        boundary_count);
+  }
+#endif
+  TORCH_CHECK(false, "fixed_word_p0_lie_world_grad_init_launch_only: no backend available for device ", reference_f32.device());
+}
+
+torch::Tensor fixed_word_p0_lie_material_world_grad_init_launch_only_dispatch(
+    const torch::Tensor& reference_f32,
+    const int64_t site_count) {
+#if defined(__APPLE__)
+  if (reference_f32.device().is_mps()) {
+    return metal_fixed_word_p0_lie_material_world_grad_init_launch_only(
+        reference_f32,
+        site_count);
+  }
+#endif
+  TORCH_CHECK(false, "fixed_word_p0_lie_material_world_grad_init_launch_only: no backend available for device ", reference_f32.device());
+}
+
+std::tuple<torch::Tensor, torch::Tensor>
+fixed_word_p0_lie_node_vjp_accumulate_launch_only_dispatch(
+    const torch::Tensor& mobius_coeff_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_mobius_coeff_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+#if defined(__APPLE__)
+  if (site_rgba_f32.device().is_mps()) {
+    return metal_fixed_word_p0_lie_node_vjp_accumulate_launch_only(
+        mobius_coeff_f32,
+        track_ray_coeff_f32,
+        compiler_node_t_f32,
+        word_offsets_i32,
+        word_owner_i32,
+        word_left_incidence_i32,
+        word_right_incidence_i32,
+        track_incidence_offsets_i32,
+        site_rgba_f32,
+        node_chart_f32,
+        grad_node_chart_f32,
+        grad_site_rgba_f32,
+        grad_mobius_coeff_f32,
+        config_i32,
+        config_f32,
+        track_count,
+        node_count);
+  }
+#endif
+  TORCH_CHECK(false, "fixed_word_p0_lie_node_vjp_accumulate_launch_only: no backend available for device ", site_rgba_f32.device());
+}
+
+std::tuple<torch::Tensor, torch::Tensor>
+kinetic_precompiled_length_p0_lie_node_vjp_accumulate_launch_only_dispatch(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+#if defined(__APPLE__)
+  if (site_rgba_f32.device().is_mps()) {
+    return metal_kinetic_precompiled_length_p0_lie_node_vjp_accumulate_launch_only(
+        word_offsets_i32,
+        word_owner_i32,
+        node_physical_length_f32,
+        site_rgba_f32,
+        node_chart_f32,
+        grad_node_chart_f32,
+        grad_site_rgba_f32,
+        config_i32,
+        config_f32,
+        track_count,
+        node_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_precompiled_length_p0_lie_node_vjp_accumulate_launch_only: no backend available for device ",
+      site_rgba_f32.device());
+}
+
+torch::Tensor
+kinetic_precompiled_length_p0_lie_material_node_vjp_accumulate_launch_only_dispatch(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+#if defined(__APPLE__)
+  if (site_rgba_f32.device().is_mps()) {
+    return metal_kinetic_precompiled_length_p0_lie_material_node_vjp_accumulate_launch_only(
+        word_offsets_i32,
+        word_owner_i32,
+        node_physical_length_f32,
+        site_rgba_f32,
+        node_chart_f32,
+        grad_node_chart_f32,
+        grad_site_rgba_f32,
+        config_i32,
+        config_f32,
+        track_count,
+        node_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_precompiled_length_p0_lie_material_node_vjp_accumulate_launch_only: no backend available for device ",
+      site_rgba_f32.device());
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+kinetic_fused_direct_full_vjp_accumulate_launch_only_v1_dispatch(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_global_positions0_f32,
+    const torch::Tensor& grad_global_velocities_f32,
+    const torch::Tensor& grad_global_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t row_count,
+    const int64_t node_count) {
+#if defined(__APPLE__)
+  if (site_rgba_f32.device().is_mps()) {
+    return metal_kinetic_fused_direct_full_vjp_accumulate_launch_only_v1(
+        word_offsets_i32,
+        word_owner_i32,
+        source_site_ids_i64,
+        node_physical_length_f32,
+        site_rgba_f32,
+        node_chart_f32,
+        row_node_time_f32,
+        row_near_far_f32,
+        row_ray_coeff_f32,
+        compact_positions0_f32,
+        compact_velocities_f32,
+        compact_weight_coefficients_f32,
+        grad_node_chart_f32,
+        grad_site_rgba_f32,
+        grad_global_positions0_f32,
+        grad_global_velocities_f32,
+        grad_global_weight_coefficients_f32,
+        config_i32,
+        config_f32,
+        row_count,
+        node_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_fused_direct_full_vjp_accumulate_launch_only_v1: no backend available for device ",
+      site_rgba_f32.device());
+}
+
+torch::Tensor
+kinetic_fused_direct_full_vjp_validate_shared_status_launch_only_v1_dispatch(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_global_positions0_f32,
+    const torch::Tensor& grad_global_velocities_f32,
+    const torch::Tensor& grad_global_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& validation_status_i32,
+    const bool validate_shared_global_ledgers,
+    const int64_t row_count,
+    const int64_t node_count) {
+#if defined(__APPLE__)
+  if (site_rgba_f32.device().is_mps()) {
+    return metal_kinetic_fused_direct_full_vjp_validate_shared_status_launch_only_v1(
+        word_offsets_i32,
+        word_owner_i32,
+        source_site_ids_i64,
+        node_physical_length_f32,
+        site_rgba_f32,
+        node_chart_f32,
+        row_node_time_f32,
+        row_near_far_f32,
+        row_ray_coeff_f32,
+        compact_positions0_f32,
+        compact_velocities_f32,
+        compact_weight_coefficients_f32,
+        grad_node_chart_f32,
+        grad_site_rgba_f32,
+        grad_global_positions0_f32,
+        grad_global_velocities_f32,
+        grad_global_weight_coefficients_f32,
+        config_i32,
+        config_f32,
+        validation_status_i32,
+        validate_shared_global_ledgers,
+        row_count,
+        node_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_fused_direct_full_vjp_validate_shared_status_launch_only_v1: no backend available for device ",
+      site_rgba_f32.device());
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+kinetic_fused_direct_full_vjp_accumulate_shared_status_launch_only_v1_dispatch(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_global_positions0_f32,
+    const torch::Tensor& grad_global_velocities_f32,
+    const torch::Tensor& grad_global_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& validation_status_i32,
+    const int64_t row_count,
+    const int64_t node_count) {
+#if defined(__APPLE__)
+  if (site_rgba_f32.device().is_mps()) {
+    return metal_kinetic_fused_direct_full_vjp_accumulate_shared_status_launch_only_v1(
+        word_offsets_i32,
+        word_owner_i32,
+        source_site_ids_i64,
+        node_physical_length_f32,
+        site_rgba_f32,
+        node_chart_f32,
+        row_node_time_f32,
+        row_near_far_f32,
+        row_ray_coeff_f32,
+        compact_positions0_f32,
+        compact_velocities_f32,
+        compact_weight_coefficients_f32,
+        grad_node_chart_f32,
+        grad_site_rgba_f32,
+        grad_global_positions0_f32,
+        grad_global_velocities_f32,
+        grad_global_weight_coefficients_f32,
+        config_i32,
+        config_f32,
+        validation_status_i32,
+        row_count,
+        node_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_fused_direct_full_vjp_accumulate_shared_status_launch_only_v1: no backend available for device ",
+      site_rgba_f32.device());
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+kinetic_fused_direct_full_vjp_finalize_shared_status_launch_only_v1_dispatch(
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_global_positions0_f32,
+    const torch::Tensor& grad_global_velocities_f32,
+    const torch::Tensor& grad_global_weight_coefficients_f32,
+    const torch::Tensor& validation_status_i32,
+    const bool finalize_shared_global_ledgers) {
+#if defined(__APPLE__)
+  if (grad_site_rgba_f32.device().is_mps()) {
+    return metal_kinetic_fused_direct_full_vjp_finalize_shared_status_launch_only_v1(
+        grad_site_rgba_f32,
+        grad_global_positions0_f32,
+        grad_global_velocities_f32,
+        grad_global_weight_coefficients_f32,
+        validation_status_i32,
+        finalize_shared_global_ledgers);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_fused_direct_full_vjp_finalize_shared_status_launch_only_v1: no backend available for device ",
+      grad_site_rgba_f32.device());
+}
+
+torch::Tensor
+kinetic_fused_union_full_vjp_validate_shared_status_launch_only_v2_dispatch(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& compact_to_geometry_output_i64,
+    const torch::Tensor& geometry_output_source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_union_positions0_f32,
+    const torch::Tensor& grad_union_velocities_f32,
+    const torch::Tensor& grad_union_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& validation_status_i32,
+    const bool validate_shared_union_ledgers,
+    const int64_t global_site_count,
+    const int64_t union_site_count,
+    const int64_t row_count,
+    const int64_t node_count) {
+#if defined(__APPLE__)
+  if (site_rgba_f32.device().is_mps()) {
+    return metal_kinetic_fused_union_full_vjp_validate_shared_status_launch_only_v2(
+        word_offsets_i32,
+        word_owner_i32,
+        source_site_ids_i64,
+        compact_to_geometry_output_i64,
+        geometry_output_source_site_ids_i64,
+        node_physical_length_f32,
+        site_rgba_f32,
+        node_chart_f32,
+        row_node_time_f32,
+        row_near_far_f32,
+        row_ray_coeff_f32,
+        compact_positions0_f32,
+        compact_velocities_f32,
+        compact_weight_coefficients_f32,
+        grad_node_chart_f32,
+        grad_site_rgba_f32,
+        grad_union_positions0_f32,
+        grad_union_velocities_f32,
+        grad_union_weight_coefficients_f32,
+        config_i32,
+        config_f32,
+        validation_status_i32,
+        validate_shared_union_ledgers,
+        global_site_count,
+        union_site_count,
+        row_count,
+        node_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_fused_union_full_vjp_validate_shared_status_launch_only_v2: no backend available for device ",
+      site_rgba_f32.device());
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+kinetic_fused_union_full_vjp_accumulate_shared_status_launch_only_v2_dispatch(
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& source_site_ids_i64,
+    const torch::Tensor& compact_to_geometry_output_i64,
+    const torch::Tensor& geometry_output_source_site_ids_i64,
+    const torch::Tensor& node_physical_length_f32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& row_node_time_f32,
+    const torch::Tensor& row_near_far_f32,
+    const torch::Tensor& row_ray_coeff_f32,
+    const torch::Tensor& compact_positions0_f32,
+    const torch::Tensor& compact_velocities_f32,
+    const torch::Tensor& compact_weight_coefficients_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_union_positions0_f32,
+    const torch::Tensor& grad_union_velocities_f32,
+    const torch::Tensor& grad_union_weight_coefficients_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const torch::Tensor& validation_status_i32,
+    const int64_t global_site_count,
+    const int64_t union_site_count,
+    const int64_t row_count,
+    const int64_t node_count) {
+#if defined(__APPLE__)
+  if (site_rgba_f32.device().is_mps()) {
+    return metal_kinetic_fused_union_full_vjp_accumulate_shared_status_launch_only_v2(
+        word_offsets_i32,
+        word_owner_i32,
+        source_site_ids_i64,
+        compact_to_geometry_output_i64,
+        geometry_output_source_site_ids_i64,
+        node_physical_length_f32,
+        site_rgba_f32,
+        node_chart_f32,
+        row_node_time_f32,
+        row_near_far_f32,
+        row_ray_coeff_f32,
+        compact_positions0_f32,
+        compact_velocities_f32,
+        compact_weight_coefficients_f32,
+        grad_node_chart_f32,
+        grad_site_rgba_f32,
+        grad_union_positions0_f32,
+        grad_union_velocities_f32,
+        grad_union_weight_coefficients_f32,
+        config_i32,
+        config_f32,
+        validation_status_i32,
+        global_site_count,
+        union_site_count,
+        row_count,
+        node_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_fused_union_full_vjp_accumulate_shared_status_launch_only_v2: no backend available for device ",
+      site_rgba_f32.device());
+}
+
+std::tuple<
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor,
+    torch::Tensor>
+kinetic_fused_union_full_vjp_finalize_shared_status_launch_only_v2_dispatch(
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& grad_union_positions0_f32,
+    const torch::Tensor& grad_union_velocities_f32,
+    const torch::Tensor& grad_union_weight_coefficients_f32,
+    const torch::Tensor& validation_status_i32,
+    const bool finalize_shared_union_ledgers,
+    const int64_t union_site_count) {
+#if defined(__APPLE__)
+  if (grad_site_rgba_f32.device().is_mps()) {
+    return metal_kinetic_fused_union_full_vjp_finalize_shared_status_launch_only_v2(
+        grad_site_rgba_f32,
+        grad_union_positions0_f32,
+        grad_union_velocities_f32,
+        grad_union_weight_coefficients_f32,
+        validation_status_i32,
+        finalize_shared_union_ledgers,
+        union_site_count);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "kinetic_fused_union_full_vjp_finalize_shared_status_launch_only_v2: no backend available for device ",
+      grad_site_rgba_f32.device());
+}
+
+torch::Tensor fixed_word_p0_lie_material_node_vjp_accumulate_launch_only_dispatch(
+    const torch::Tensor& mobius_coeff_f32,
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& compiler_node_t_f32,
+    const torch::Tensor& word_offsets_i32,
+    const torch::Tensor& word_owner_i32,
+    const torch::Tensor& word_left_incidence_i32,
+    const torch::Tensor& word_right_incidence_i32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& site_rgba_f32,
+    const torch::Tensor& node_chart_f32,
+    const torch::Tensor& grad_node_chart_f32,
+    const torch::Tensor& grad_site_rgba_f32,
+    const torch::Tensor& config_i32,
+    const torch::Tensor& config_f32,
+    const int64_t track_count,
+    const int64_t node_count) {
+#if defined(__APPLE__)
+  if (site_rgba_f32.device().is_mps()) {
+    return metal_fixed_word_p0_lie_material_node_vjp_accumulate_launch_only(
+        mobius_coeff_f32,
+        track_ray_coeff_f32,
+        compiler_node_t_f32,
+        word_offsets_i32,
+        word_owner_i32,
+        word_left_incidence_i32,
+        word_right_incidence_i32,
+        track_incidence_offsets_i32,
+        site_rgba_f32,
+        node_chart_f32,
+        grad_node_chart_f32,
+        grad_site_rgba_f32,
+        config_i32,
+        config_f32,
+        track_count,
+        node_count);
+  }
+#endif
+  TORCH_CHECK(false, "fixed_word_p0_lie_material_node_vjp_accumulate_launch_only: no backend available for device ", site_rgba_f32.device());
+}
+
+torch::Tensor fixed_word_p0_sparse_mobius_boundary_finalize_launch_only_dispatch(
+    const torch::Tensor& track_ray_coeff_f32,
+    const torch::Tensor& track_incidence_offsets_i32,
+    const torch::Tensor& incidence_boundary_i32,
+    const torch::Tensor& grad_mobius_coeff_f32,
+    const torch::Tensor& grad_boundary_f32,
+    const torch::Tensor& config_i32,
+    const int64_t track_count) {
+#if defined(__APPLE__)
+  if (track_ray_coeff_f32.device().is_mps()) {
+    return metal_fixed_word_p0_sparse_mobius_boundary_finalize_launch_only(
+        track_ray_coeff_f32,
+        track_incidence_offsets_i32,
+        incidence_boundary_i32,
+        grad_mobius_coeff_f32,
+        grad_boundary_f32,
+        config_i32,
+        track_count);
+  }
+#endif
+  TORCH_CHECK(false, "fixed_word_p0_sparse_mobius_boundary_finalize_launch_only: no backend available for device ", track_ray_coeff_f32.device());
+}
+
+torch::Tensor sparse_power_boundary_vjp_to_sites_launch_only_dispatch(
+    const torch::Tensor& active_boundary_site_pairs_i32,
+    const torch::Tensor& sites_f32,
+    const torch::Tensor& grad_boundary_f32) {
+#if defined(__APPLE__)
+  if (sites_f32.device().is_mps()) {
+    return metal_sparse_power_boundary_vjp_to_sites_launch_only(
+        active_boundary_site_pairs_i32,
+        sites_f32,
+        grad_boundary_f32);
+  }
+#endif
+  TORCH_CHECK(
+      false,
+      "world_foam_lane2_fused_slab_v0.sparse_power_boundary_vjp_to_sites_launch_only: no backend available for device ",
+      sites_f32.device());
+}
+
 std::tuple<torch::Tensor, torch::Tensor>
 endpoint_record_delta_replace_factorized_frameselect_recompute_mse_vjp_direct_atomic_rgb_only_dispatch(
     const torch::Tensor& boundary_f32,
@@ -6995,6 +8598,66 @@ TORCH_LIBRARY(world_foam_lane2_fused_slab_v0, m) {
   m.def(
       "endpoint_record_delta_replace_factorized_packed_framegroup16_recompute_mse_vjp_direct_atomic_rgb_only(Tensor boundary_f32, Tensor track_ray_coeff_f32, Tensor frame_t_f32, Tensor base_offsets_i16, Tensor base_record_i32, Tensor track_change_offsets_i16, Tensor track_chunk_change_offsets_i16, Tensor change_frame_i16, Tensor change_offsets_i16, Tensor change_record_i32, Tensor site_rgba_f32, Tensor target_rgb_f32, Tensor config_i32, Tensor config_f32) -> (Tensor, Tensor)");
   m.def(
+      "endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_mse_vjp_direct_atomic_rgb_boundary(Tensor boundary_f32, Tensor track_ray_coeff_f32, Tensor frame_t_f32, Tensor base_offsets_i16, Tensor base_record_i32, Tensor track_change_offsets_i16, Tensor track_chunk_change_offsets_i16, Tensor change_frame_i16, Tensor change_offsets_i16, Tensor change_record_i32, Tensor site_rgba_f32, Tensor target_rgb_f32, Tensor config_i32, Tensor config_f32) -> (Tensor, Tensor, Tensor)");
+  m.def(
+      "endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_p0_mse_vjp_sparse_mobius_rgb_boundary(Tensor boundary_f32, Tensor track_ray_coeff_f32, Tensor frame_t_f32, Tensor base_offsets_i16, Tensor base_record_incidence_i32, Tensor track_change_offsets_i16, Tensor track_chunk_change_offsets_i16, Tensor change_frame_i16, Tensor change_offsets_i16, Tensor change_record_incidence_i32, Tensor track_incidence_offsets_i32, Tensor incidence_boundary_i32, Tensor site_rgba_f32, Tensor target_rgb_f32, Tensor config_i32, Tensor config_f32) -> (Tensor, Tensor, Tensor, Tensor)");
+  m.def(
+      "fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary(Tensor boundary_f32, Tensor track_ray_coeff_f32, Tensor compiler_node_t_f32, Tensor word_offsets_i32, Tensor word_owner_i32, Tensor word_left_incidence_i32, Tensor word_right_incidence_i32, Tensor track_incidence_offsets_i32, Tensor incidence_boundary_i32, Tensor site_rgba_f32, Tensor sample_to_node_f32, Tensor target_rgb_f32, Tensor background_rgb_f32, Tensor config_i32, Tensor config_f32) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)");
+  m.def(
+      "fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary_launch_only(Tensor boundary_f32, Tensor track_ray_coeff_f32, Tensor compiler_node_t_f32, Tensor word_offsets_i32, Tensor word_owner_i32, Tensor word_left_incidence_i32, Tensor word_right_incidence_i32, Tensor track_incidence_offsets_i32, Tensor incidence_boundary_i32, Tensor site_rgba_f32, Tensor sample_to_node_f32, Tensor target_rgb_f32, Tensor background_rgb_f32, Tensor config_i32, Tensor config_f32, int boundary_count, int track_count, int node_count, int sample_count, int site_count, int word_count, int incidence_count) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)");
+  m.def(
+      "sparse_power_boundary_from_sites_launch_only(Tensor boundary_site_pairs_i32, Tensor sites_f32, int boundary_count) -> Tensor");
+  m.def(
+      "fixed_word_p0_sparse_mobius_lower_launch_only(Tensor boundary_f32, Tensor track_ray_coeff_f32, Tensor track_incidence_offsets_i32, Tensor incidence_boundary_i32, Tensor config_i32, int track_count, int incidence_count) -> Tensor");
+  m.def(
+      "fixed_word_p0_lie_node_forward_launch_only(Tensor mobius_coeff_f32, Tensor track_ray_coeff_f32, Tensor compiler_node_t_f32, Tensor word_offsets_i32, Tensor word_owner_i32, Tensor word_left_incidence_i32, Tensor word_right_incidence_i32, Tensor track_incidence_offsets_i32, Tensor site_rgba_f32, Tensor config_i32, Tensor config_f32, int track_count, int node_count) -> Tensor");
+  m.def(
+      "kinetic_memory_light_selected_kernel_resource_attestation(Tensor dispatch_anchor) -> (str[], str[], int[], int[], int[])");
+  m.def(
+      "kinetic_precompiled_length_p0_lie_node_forward_launch_only(Tensor word_offsets_i32, Tensor word_owner_i32, Tensor node_physical_length_f32, Tensor site_rgba_f32, Tensor config_i32, Tensor config_f32, int track_count, int node_count) -> Tensor");
+  m.def(
+      "kinetic_precompiled_length_p0_lie_node_forward_into_launch_only_v1(Tensor word_offsets_i32, Tensor word_owner_i32, Tensor node_physical_length_f32, Tensor site_rgba_f32, Tensor config_i32, Tensor config_f32, Tensor(a!) node_chart_out_f32, int track_count, int node_count) -> Tensor(a!)");
+  m.def(
+      "fixed_word_p0_lie_sample_state_init_launch_only(Tensor reference_f32, int track_count, int node_count) -> (Tensor, Tensor, Tensor)");
+  m.def(
+      "fixed_word_p0_lie_sample_accumulate_launch_only(Tensor node_chart_f32, Tensor sample_to_node_f32, Tensor target_rgb_f32, Tensor background_rgb_f32, Tensor(a!) loss_f32, Tensor(b!) grad_node_chart_f32, Tensor(c!) cone_diagnostic_i32, Tensor config_i32, Tensor config_f32, int track_count, int sample_count) -> Tensor");
+  m.def(
+      "fixed_word_p0_lie_sample_accumulate_loss_only_launch_only(Tensor node_chart_f32, Tensor sample_to_node_f32, Tensor target_rgb_f32, Tensor background_rgb_f32, Tensor(a!) loss_f32, Tensor(b!) grad_node_chart_f32, Tensor(c!) cone_diagnostic_i32, Tensor config_i32, Tensor config_f32, int track_count, int sample_count) -> (Tensor(a!), Tensor(b!), Tensor(c!))");
+  m.def(
+      "kinetic_ragged_p0_lie_sample_accumulate_launch_only(Tensor node_chart_f32, Tensor sample_row_i32, Tensor sample_to_node_f32, Tensor target_rgb_f32, Tensor background_rgb_f32, Tensor(a!) loss_f32, Tensor(b!) grad_node_chart_f32, Tensor(c!) cone_diagnostic_i32, Tensor config_i32, Tensor config_f32, int row_count, int node_count, int sample_count) -> Tensor");
+  m.def(
+      "kinetic_ragged_p0_lie_sample_accumulate_loss_only_launch_only(Tensor node_chart_f32, Tensor sample_row_i32, Tensor sample_to_node_f32, Tensor target_rgb_f32, Tensor background_rgb_f32, Tensor(a!) loss_f32, Tensor(b!) grad_node_chart_f32, Tensor(c!) cone_diagnostic_i32, Tensor config_i32, Tensor config_f32, int row_count, int node_count, int sample_count) -> (Tensor(a!), Tensor(b!), Tensor(c!))");
+  m.def(
+      "fixed_word_p0_lie_world_grad_init_launch_only(Tensor reference_f32, int site_count, int incidence_count, int boundary_count) -> (Tensor, Tensor, Tensor)");
+  m.def(
+      "fixed_word_p0_lie_material_world_grad_init_launch_only(Tensor reference_f32, int site_count) -> Tensor");
+  m.def(
+      "fixed_word_p0_lie_node_vjp_accumulate_launch_only(Tensor mobius_coeff_f32, Tensor track_ray_coeff_f32, Tensor compiler_node_t_f32, Tensor word_offsets_i32, Tensor word_owner_i32, Tensor word_left_incidence_i32, Tensor word_right_incidence_i32, Tensor track_incidence_offsets_i32, Tensor site_rgba_f32, Tensor node_chart_f32, Tensor grad_node_chart_f32, Tensor(a!) grad_site_rgba_f32, Tensor(b!) grad_mobius_coeff_f32, Tensor config_i32, Tensor config_f32, int track_count, int node_count) -> (Tensor(a!), Tensor(b!))");
+  m.def(
+      "kinetic_precompiled_length_p0_lie_node_vjp_accumulate_launch_only(Tensor word_offsets_i32, Tensor word_owner_i32, Tensor node_physical_length_f32, Tensor site_rgba_f32, Tensor node_chart_f32, Tensor grad_node_chart_f32, Tensor(a!) grad_site_rgba_f32, Tensor config_i32, Tensor config_f32, int track_count, int node_count) -> (Tensor(a!), Tensor)");
+  m.def(
+      "kinetic_precompiled_length_p0_lie_material_node_vjp_accumulate_launch_only(Tensor word_offsets_i32, Tensor word_owner_i32, Tensor node_physical_length_f32, Tensor site_rgba_f32, Tensor node_chart_f32, Tensor grad_node_chart_f32, Tensor(a!) grad_site_rgba_f32, Tensor config_i32, Tensor config_f32, int track_count, int node_count) -> Tensor(a!)");
+  m.def(
+      "kinetic_fused_direct_full_vjp_accumulate_launch_only_v1(Tensor word_offsets_i32, Tensor word_owner_i32, Tensor source_site_ids_i64, Tensor node_physical_length_f32, Tensor site_rgba_f32, Tensor node_chart_f32, Tensor row_node_time_f32, Tensor row_near_far_f32, Tensor row_ray_coeff_f32, Tensor compact_positions0_f32, Tensor compact_velocities_f32, Tensor compact_weight_coefficients_f32, Tensor grad_node_chart_f32, Tensor(a!) grad_site_rgba_f32, Tensor(b!) grad_global_positions0_f32, Tensor(c!) grad_global_velocities_f32, Tensor(d!) grad_global_weight_coefficients_f32, Tensor config_i32, Tensor config_f32, int row_count, int node_count) -> (Tensor(a!), Tensor(b!), Tensor(c!), Tensor(d!), Tensor)");
+  m.def(
+      "kinetic_fused_direct_full_vjp_validate_shared_status_launch_only_v1(Tensor word_offsets_i32, Tensor word_owner_i32, Tensor source_site_ids_i64, Tensor node_physical_length_f32, Tensor site_rgba_f32, Tensor node_chart_f32, Tensor row_node_time_f32, Tensor row_near_far_f32, Tensor row_ray_coeff_f32, Tensor compact_positions0_f32, Tensor compact_velocities_f32, Tensor compact_weight_coefficients_f32, Tensor grad_node_chart_f32, Tensor grad_site_rgba_f32, Tensor grad_global_positions0_f32, Tensor grad_global_velocities_f32, Tensor grad_global_weight_coefficients_f32, Tensor config_i32, Tensor config_f32, Tensor(e!) validation_status_i32, bool validate_shared_global_ledgers, int row_count, int node_count) -> Tensor(e!)");
+  m.def(
+      "kinetic_fused_direct_full_vjp_accumulate_shared_status_launch_only_v1(Tensor word_offsets_i32, Tensor word_owner_i32, Tensor source_site_ids_i64, Tensor node_physical_length_f32, Tensor site_rgba_f32, Tensor node_chart_f32, Tensor row_node_time_f32, Tensor row_near_far_f32, Tensor row_ray_coeff_f32, Tensor compact_positions0_f32, Tensor compact_velocities_f32, Tensor compact_weight_coefficients_f32, Tensor grad_node_chart_f32, Tensor(a!) grad_site_rgba_f32, Tensor(b!) grad_global_positions0_f32, Tensor(c!) grad_global_velocities_f32, Tensor(d!) grad_global_weight_coefficients_f32, Tensor config_i32, Tensor config_f32, Tensor(e) validation_status_i32, int row_count, int node_count) -> (Tensor(a!), Tensor(b!), Tensor(c!), Tensor(d!), Tensor(e))");
+  m.def(
+      "kinetic_fused_direct_full_vjp_finalize_shared_status_launch_only_v1(Tensor(a) grad_site_rgba_f32, Tensor(b) grad_global_positions0_f32, Tensor(c) grad_global_velocities_f32, Tensor(d) grad_global_weight_coefficients_f32, Tensor(e!) validation_status_i32, bool finalize_shared_global_ledgers) -> (Tensor(a), Tensor(b), Tensor(c), Tensor(d), Tensor(e!))");
+  m.def(
+      "kinetic_fused_union_full_vjp_validate_shared_status_launch_only_v2(Tensor word_offsets_i32, Tensor word_owner_i32, Tensor source_site_ids_i64, Tensor compact_to_geometry_output_i64, Tensor geometry_output_source_site_ids_i64, Tensor node_physical_length_f32, Tensor site_rgba_f32, Tensor node_chart_f32, Tensor row_node_time_f32, Tensor row_near_far_f32, Tensor row_ray_coeff_f32, Tensor compact_positions0_f32, Tensor compact_velocities_f32, Tensor compact_weight_coefficients_f32, Tensor grad_node_chart_f32, Tensor grad_site_rgba_f32, Tensor grad_union_positions0_f32, Tensor grad_union_velocities_f32, Tensor grad_union_weight_coefficients_f32, Tensor config_i32, Tensor config_f32, Tensor(e!) validation_status_i32, bool validate_shared_union_ledgers, int global_site_count, int union_site_count, int row_count, int node_count) -> Tensor(e!)");
+  m.def(
+      "kinetic_fused_union_full_vjp_accumulate_shared_status_launch_only_v2(Tensor word_offsets_i32, Tensor word_owner_i32, Tensor source_site_ids_i64, Tensor compact_to_geometry_output_i64, Tensor geometry_output_source_site_ids_i64, Tensor node_physical_length_f32, Tensor site_rgba_f32, Tensor node_chart_f32, Tensor row_node_time_f32, Tensor row_near_far_f32, Tensor row_ray_coeff_f32, Tensor compact_positions0_f32, Tensor compact_velocities_f32, Tensor compact_weight_coefficients_f32, Tensor grad_node_chart_f32, Tensor(a!) grad_site_rgba_f32, Tensor(b!) grad_union_positions0_f32, Tensor(c!) grad_union_velocities_f32, Tensor(d!) grad_union_weight_coefficients_f32, Tensor config_i32, Tensor config_f32, Tensor(e) validation_status_i32, int global_site_count, int union_site_count, int row_count, int node_count) -> (Tensor(a!), Tensor(b!), Tensor(c!), Tensor(d!), Tensor(e))");
+  m.def(
+      "kinetic_fused_union_full_vjp_finalize_shared_status_launch_only_v2(Tensor(a) grad_site_rgba_f32, Tensor(b) grad_union_positions0_f32, Tensor(c) grad_union_velocities_f32, Tensor(d) grad_union_weight_coefficients_f32, Tensor(e!) validation_status_i32, bool finalize_shared_union_ledgers, int union_site_count) -> (Tensor(a), Tensor(b), Tensor(c), Tensor(d), Tensor(e!))");
+  m.def(
+      "fixed_word_p0_lie_material_node_vjp_accumulate_launch_only(Tensor mobius_coeff_f32, Tensor track_ray_coeff_f32, Tensor compiler_node_t_f32, Tensor word_offsets_i32, Tensor word_owner_i32, Tensor word_left_incidence_i32, Tensor word_right_incidence_i32, Tensor track_incidence_offsets_i32, Tensor site_rgba_f32, Tensor node_chart_f32, Tensor grad_node_chart_f32, Tensor(a!) grad_site_rgba_f32, Tensor config_i32, Tensor config_f32, int track_count, int node_count) -> Tensor(a!)");
+  m.def(
+      "fixed_word_p0_sparse_mobius_boundary_finalize_launch_only(Tensor track_ray_coeff_f32, Tensor track_incidence_offsets_i32, Tensor incidence_boundary_i32, Tensor grad_mobius_coeff_f32, Tensor(a!) grad_boundary_f32, Tensor config_i32, int track_count) -> Tensor(a!)");
+  m.def(
+      "sparse_power_boundary_vjp_to_sites_launch_only(Tensor active_boundary_site_pairs_i32, Tensor sites_f32, Tensor grad_boundary_f32) -> Tensor");
+  m.def(
       "endpoint_record_delta_replace_factorized_frameselect_recompute_mse_vjp_direct_atomic_rgb_only(Tensor boundary_f32, Tensor track_ray_coeff_f32, Tensor frame_t_f32, Tensor base_offsets_i16, Tensor base_record_i32, Tensor frame_change_index_i16, Tensor change_offsets_i16, Tensor change_record_i32, Tensor site_rgba_f32, Tensor target_rgb_f32, Tensor config_i32, Tensor config_f32) -> (Tensor, Tensor)");
   m.def(
       "endpoint_record_delta_replace_factorized_framebitmask_recompute_mse_vjp_direct_atomic_rgb_only(Tensor boundary_f32, Tensor track_ray_coeff_f32, Tensor frame_t_f32, Tensor base_offsets_i32, Tensor base_record_i32, Tensor track_change_offsets_i32, Tensor track_frame_mask_i32, Tensor change_offsets_i32, Tensor change_record_i32, Tensor site_rgba_f32, Tensor target_rgb_f32, Tensor config_i32, Tensor config_f32) -> (Tensor, Tensor)");
@@ -7275,6 +8938,114 @@ TORCH_LIBRARY_IMPL(world_foam_lane2_fused_slab_v0, CompositeExplicitAutograd, m)
       "endpoint_record_delta_replace_factorized_packed_framegroup16_recompute_mse_vjp_direct_atomic_rgb_only",
       world_foam_lane2_fused_slab::
           endpoint_record_delta_replace_factorized_packed_framegroup16_recompute_mse_vjp_direct_atomic_rgb_only_dispatch);
+  m.impl(
+      "endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_mse_vjp_direct_atomic_rgb_boundary",
+      world_foam_lane2_fused_slab::
+          endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_mse_vjp_direct_atomic_rgb_boundary_dispatch);
+  m.impl(
+      "endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_p0_mse_vjp_sparse_mobius_rgb_boundary",
+      world_foam_lane2_fused_slab::
+          endpoint_record_delta_replace_factorized_packed_framegroup16_constant_state_p0_mse_vjp_sparse_mobius_rgb_boundary_dispatch);
+  m.impl(
+      "fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary",
+      world_foam_lane2_fused_slab::
+          fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary_dispatch);
+  m.impl(
+      "fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary_launch_only",
+      world_foam_lane2_fused_slab::
+          fixed_word_p0_compiled_lie_transfer_mse_vjp_sparse_mobius_boundary_launch_only_dispatch);
+  m.impl(
+      "sparse_power_boundary_from_sites_launch_only",
+      world_foam_lane2_fused_slab::sparse_power_boundary_from_sites_launch_only_dispatch);
+  m.impl(
+      "fixed_word_p0_sparse_mobius_lower_launch_only",
+      world_foam_lane2_fused_slab::fixed_word_p0_sparse_mobius_lower_launch_only_dispatch);
+  m.impl(
+      "fixed_word_p0_lie_node_forward_launch_only",
+      world_foam_lane2_fused_slab::fixed_word_p0_lie_node_forward_launch_only_dispatch);
+  m.impl(
+      "kinetic_memory_light_selected_kernel_resource_attestation",
+      world_foam_lane2_fused_slab::
+          kinetic_memory_light_selected_kernel_resource_attestation_dispatch);
+  m.impl(
+      "kinetic_precompiled_length_p0_lie_node_forward_launch_only",
+      world_foam_lane2_fused_slab::
+          kinetic_precompiled_length_p0_lie_node_forward_launch_only_dispatch);
+  m.impl(
+      "kinetic_precompiled_length_p0_lie_node_forward_into_launch_only_v1",
+      world_foam_lane2_fused_slab::
+          kinetic_precompiled_length_p0_lie_node_forward_into_launch_only_v1_dispatch);
+  m.impl(
+      "fixed_word_p0_lie_sample_state_init_launch_only",
+      world_foam_lane2_fused_slab::fixed_word_p0_lie_sample_state_init_launch_only_dispatch);
+  m.impl(
+      "fixed_word_p0_lie_sample_accumulate_launch_only",
+      world_foam_lane2_fused_slab::fixed_word_p0_lie_sample_accumulate_launch_only_dispatch);
+  m.impl(
+      "fixed_word_p0_lie_sample_accumulate_loss_only_launch_only",
+      world_foam_lane2_fused_slab::
+          fixed_word_p0_lie_sample_accumulate_loss_only_launch_only_dispatch);
+  m.impl(
+      "kinetic_ragged_p0_lie_sample_accumulate_launch_only",
+      world_foam_lane2_fused_slab::kinetic_ragged_p0_lie_sample_accumulate_launch_only_dispatch);
+  m.impl(
+      "kinetic_ragged_p0_lie_sample_accumulate_loss_only_launch_only",
+      world_foam_lane2_fused_slab::
+          kinetic_ragged_p0_lie_sample_accumulate_loss_only_launch_only_dispatch);
+  m.impl(
+      "fixed_word_p0_lie_world_grad_init_launch_only",
+      world_foam_lane2_fused_slab::fixed_word_p0_lie_world_grad_init_launch_only_dispatch);
+  m.impl(
+      "fixed_word_p0_lie_material_world_grad_init_launch_only",
+      world_foam_lane2_fused_slab::fixed_word_p0_lie_material_world_grad_init_launch_only_dispatch);
+  m.impl(
+      "fixed_word_p0_lie_node_vjp_accumulate_launch_only",
+      world_foam_lane2_fused_slab::fixed_word_p0_lie_node_vjp_accumulate_launch_only_dispatch);
+  m.impl(
+      "kinetic_precompiled_length_p0_lie_node_vjp_accumulate_launch_only",
+      world_foam_lane2_fused_slab::
+          kinetic_precompiled_length_p0_lie_node_vjp_accumulate_launch_only_dispatch);
+  m.impl(
+      "kinetic_precompiled_length_p0_lie_material_node_vjp_accumulate_launch_only",
+      world_foam_lane2_fused_slab::
+          kinetic_precompiled_length_p0_lie_material_node_vjp_accumulate_launch_only_dispatch);
+  m.impl(
+      "kinetic_fused_direct_full_vjp_accumulate_launch_only_v1",
+      world_foam_lane2_fused_slab::
+          kinetic_fused_direct_full_vjp_accumulate_launch_only_v1_dispatch);
+  m.impl(
+      "kinetic_fused_direct_full_vjp_validate_shared_status_launch_only_v1",
+      world_foam_lane2_fused_slab::
+          kinetic_fused_direct_full_vjp_validate_shared_status_launch_only_v1_dispatch);
+  m.impl(
+      "kinetic_fused_direct_full_vjp_accumulate_shared_status_launch_only_v1",
+      world_foam_lane2_fused_slab::
+          kinetic_fused_direct_full_vjp_accumulate_shared_status_launch_only_v1_dispatch);
+  m.impl(
+      "kinetic_fused_direct_full_vjp_finalize_shared_status_launch_only_v1",
+      world_foam_lane2_fused_slab::
+          kinetic_fused_direct_full_vjp_finalize_shared_status_launch_only_v1_dispatch);
+  m.impl(
+      "kinetic_fused_union_full_vjp_validate_shared_status_launch_only_v2",
+      world_foam_lane2_fused_slab::
+          kinetic_fused_union_full_vjp_validate_shared_status_launch_only_v2_dispatch);
+  m.impl(
+      "kinetic_fused_union_full_vjp_accumulate_shared_status_launch_only_v2",
+      world_foam_lane2_fused_slab::
+          kinetic_fused_union_full_vjp_accumulate_shared_status_launch_only_v2_dispatch);
+  m.impl(
+      "kinetic_fused_union_full_vjp_finalize_shared_status_launch_only_v2",
+      world_foam_lane2_fused_slab::
+          kinetic_fused_union_full_vjp_finalize_shared_status_launch_only_v2_dispatch);
+  m.impl(
+      "fixed_word_p0_lie_material_node_vjp_accumulate_launch_only",
+      world_foam_lane2_fused_slab::fixed_word_p0_lie_material_node_vjp_accumulate_launch_only_dispatch);
+  m.impl(
+      "fixed_word_p0_sparse_mobius_boundary_finalize_launch_only",
+      world_foam_lane2_fused_slab::fixed_word_p0_sparse_mobius_boundary_finalize_launch_only_dispatch);
+  m.impl(
+      "sparse_power_boundary_vjp_to_sites_launch_only",
+      world_foam_lane2_fused_slab::sparse_power_boundary_vjp_to_sites_launch_only_dispatch);
   m.impl(
       "endpoint_record_delta_replace_factorized_frameselect_recompute_mse_vjp_direct_atomic_rgb_only",
       world_foam_lane2_fused_slab::

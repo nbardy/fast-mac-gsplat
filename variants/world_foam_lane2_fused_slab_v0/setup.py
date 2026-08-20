@@ -3,18 +3,30 @@ from pathlib import Path
 from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CppExtension
 
+from native_build_contract import (
+    EXTENSION_NAME,
+    NATIVE_DEPENDENCIES,
+    TRANSLATION_UNITS,
+    validate_source_contract,
+)
+
 
 this_dir = Path(__file__).resolve().parent
+if Path.cwd().resolve() != this_dir:
+    raise RuntimeError(
+        "run this local build from world_foam_lane2_fused_slab_v0; "
+        "use the documented subshell command so parent pyproject metadata cannot leak in"
+    )
+validate_source_contract(this_dir)
 
-sources = [
-    str(this_dir / "csrc" / "bindings.cpp"),
-    str(this_dir / "csrc" / "metal" / "world_foam_lane2_metal.mm"),
-]
+sources = [str(this_dir / relative) for relative in TRANSLATION_UNITS]
+depends = [str(this_dir / relative) for relative in NATIVE_DEPENDENCIES]
 
 ext_modules = [
     CppExtension(
-        name="torch_world_foam_lane2_fused_slab._C",
+        name=EXTENSION_NAME,
         sources=sources,
+        depends=depends,
         include_dirs=[str(this_dir / "csrc")],
         extra_compile_args=["-std=c++17", "-fobjc-arc"],
         extra_link_args=["-framework", "Foundation", "-framework", "Metal"],
