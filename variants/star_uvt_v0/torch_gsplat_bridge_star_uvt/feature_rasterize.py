@@ -9,7 +9,15 @@ try:
     from . import _C  # noqa: F401
 except Exception:
     _C = None
-from .rasterize import UVTRenderConfig, _depth_at, _quadratic, _runtime_validate
+from .rasterize import (
+    _ALPHA_MODE_IDS,
+    UVTRenderConfig,
+    _alpha_mode,
+    _depth_at,
+    _primitive_alpha_and_vjp_terms_unchecked,
+    _quadratic,
+    _runtime_validate,
+)
 
 
 @dataclass(frozen=True)
@@ -185,6 +193,7 @@ def _make_feature_meta(
             0.0,
             1.0e-8,
             float(config.max_alpha),
+            float(_ALPHA_MODE_IDS[_alpha_mode(config)]),
         ],
         device=device,
         dtype=torch.float32,
@@ -199,6 +208,7 @@ def _check_feature_inputs(
     depth_beta: Tensor,
     opacity: Tensor,
     feature: Tensor,
+    config: UVTRenderConfig,
     *,
     require_mps: bool,
 ) -> None:
@@ -232,6 +242,11 @@ def _check_feature_inputs(
             raise ValueError(f"{name} must be contiguous")
     if require_mps and ma.device.type != "mps":
         raise ValueError("Metal STAR-UVT feature render requires MPS tensors")
+    if _alpha_mode(config) == "beer_lambert":
+        if not bool(torch.isfinite(opacity).all().item()):
+            raise ValueError("beer_lambert opacity contains a non-finite optical thickness")
+        if bool(torch.any(opacity < 0.0).item()):
+            raise ValueError("beer_lambert opacity must be a nonnegative optical thickness")
 
 
 def _frame_time(frame: int, frames: int) -> float:
@@ -310,7 +325,7 @@ def brute_force_render_uvt_feature_tubes(
     config: UVTRenderConfig,
 ) -> tuple[Tensor, Tensor]:
     _runtime_validate(config)
-    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, require_mps=False)
+    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, config, require_mps=False)
     device = ma.device
     feature_dim = int(feature.shape[1])
     out = torch.zeros((config.frames, feature_dim, config.height, config.width), dtype=torch.float32, device=device)
@@ -322,7 +337,7 @@ def brute_force_render_uvt_feature_tubes(
                 a = torch.tensor([x + 0.5, y + 0.5, t], dtype=torch.float32, device=device)
                 d = a.unsqueeze(0) - ma
                 qv = _quadratic(q_uvt, d)
-                alpha = torch.clamp(opacity * torch.exp(-0.5 * qv), max=config.max_alpha)
+                alpha, _d_opacity, _d_qv = _primitive_alpha_and_vjp_terms_unchecked(opacity, qv, config)
                 active = torch.nonzero(alpha >= config.alpha_threshold, as_tuple=False).flatten()
                 if active.numel() == 0:
                     continue
@@ -363,7 +378,7 @@ def render_uvt_feature_tubes(
     depth_beta = depth_beta.contiguous()
     opacity = opacity.contiguous()
     feature = feature.contiguous()
-    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, require_mps=True)
+    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, config, require_mps=True)
     meta_i32, meta_f32 = _make_feature_meta(config, ma.device, ma.shape[0], int(feature.shape[1]))
     if return_bins:
         (
@@ -418,7 +433,7 @@ def direct_atomic_feature_backward(
     feature = feature.contiguous()
     grad_feature_image = grad_feature_image.contiguous()
     grad_alpha = grad_alpha.contiguous()
-    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, require_mps=True)
+    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, config, require_mps=True)
     if grad_feature_image.shape != (config.frames, feature.shape[1], config.height, config.width):
         raise ValueError("grad_feature_image must have shape [frames,feature_dim,height,width]")
     if grad_alpha.shape != (config.frames, config.height, config.width):
@@ -483,7 +498,7 @@ def direct_atomic_feature_backward_cached_bins(
     tile_tube_ids = tile_tube_ids.contiguous()
     tile_depths = tile_depths.contiguous()
     tile_unstable = tile_unstable.contiguous()
-    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, require_mps=True)
+    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, config, require_mps=True)
     if grad_feature_image.shape != (config.frames, feature.shape[1], config.height, config.width):
         raise ValueError("grad_feature_image must have shape [frames,feature_dim,height,width]")
     if grad_alpha.shape != (config.frames, config.height, config.width):
@@ -560,7 +575,7 @@ def direct_atomic_feature_sparse_pixels_backward_cached_bins(
     tile_tube_ids = tile_tube_ids.contiguous()
     tile_depths = tile_depths.contiguous()
     tile_unstable = tile_unstable.contiguous()
-    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, require_mps=True)
+    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, config, require_mps=True)
     sparse_count = int(pixel_ids.shape[0])
     if pixel_ids.ndim != 1:
         raise ValueError("pixel_ids must have shape [M]")
@@ -622,7 +637,7 @@ def render_uvt_feature_sparse_pixels_with_bins(
     opacity = opacity.contiguous()
     feature = feature.contiguous()
     pixel_ids = pixel_ids.contiguous()
-    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, require_mps=True)
+    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, config, require_mps=True)
     if pixel_ids.ndim != 1:
         raise ValueError("pixel_ids must have shape [M]")
     if pixel_ids.dtype != torch.int32 or pixel_ids.device != ma.device:
@@ -798,7 +813,7 @@ def direct_linear_sigmoid_mse_backward(
     target_rgb = target_rgb.contiguous()
     color_weight = color_weight.contiguous()
     color_bias = color_bias.contiguous()
-    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, require_mps=True)
+    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, config, require_mps=True)
     feature_dim = int(feature.shape[1])
     if feature_dim > 64:
         raise ValueError("direct_linear_sigmoid_mse_backward requires feature_dim <= 64")
@@ -896,7 +911,7 @@ def direct_hidden_sigmoid_mse_backward(
     hidden_bias = hidden_bias.contiguous()
     output_weight = output_weight.contiguous()
     output_bias = output_bias.contiguous()
-    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, require_mps=True)
+    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, config, require_mps=True)
     feature_dim = int(feature.shape[1])
     hidden_dim = int(hidden_weight.shape[0]) if hidden_weight.dim() == 2 else 0
     if feature_dim > 64:
@@ -1006,7 +1021,7 @@ def direct_hidden_sigmoid_mse_sparse_pixels_backward_cached_bins(
     tile_tube_ids = tile_tube_ids.contiguous()
     tile_depths = tile_depths.contiguous()
     tile_unstable = tile_unstable.contiguous()
-    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, require_mps=True)
+    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, config, require_mps=True)
     feature_dim = int(feature.shape[1])
     hidden_dim = int(hidden_weight.shape[0]) if hidden_weight.dim() == 2 else 0
     sparse_count = int(pixel_ids.shape[0])
@@ -1125,7 +1140,7 @@ def sparse_hidden_sigmoid_target_area_forward_sums_cached_bins(
     tile_tube_ids = tile_tube_ids.contiguous()
     tile_depths = tile_depths.contiguous()
     tile_unstable = tile_unstable.contiguous()
-    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, require_mps=True)
+    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, config, require_mps=True)
     feature_dim = int(feature.shape[1])
     hidden_dim = int(hidden_weight.shape[0]) if hidden_weight.dim() == 2 else 0
     if feature_dim > 64:
@@ -1228,7 +1243,7 @@ def direct_hidden_sigmoid_target_area_backward_cached_bins(
     tile_tube_ids = tile_tube_ids.contiguous()
     tile_depths = tile_depths.contiguous()
     tile_unstable = tile_unstable.contiguous()
-    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, require_mps=True)
+    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, config, require_mps=True)
     feature_dim = int(feature.shape[1])
     hidden_dim = int(hidden_weight.shape[0]) if hidden_weight.dim() == 2 else 0
     if feature_dim > 64:
@@ -1406,7 +1421,7 @@ def direct_logit_handoff_backward(
     grad_logits = grad_logits.contiguous()
     grad_alpha = grad_alpha.contiguous()
     color_weight = color_weight.contiguous()
-    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, require_mps=True)
+    _check_feature_inputs(ma, q_uvt, depth0, depth_beta, opacity, feature, config, require_mps=True)
     feature_dim = int(feature.shape[1])
     if feature_dim > 64:
         raise ValueError("direct_logit_handoff_backward requires feature_dim <= 64")

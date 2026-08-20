@@ -29,9 +29,16 @@ struct ParsedMeta {
   float bg_b;
   float eps;
   float max_alpha;
+  float alpha_mode;
 };
 
 inline ParsedMeta parse_meta(const torch::Tensor& meta_i32, const torch::Tensor& meta_f32) {
+  TORCH_CHECK(meta_i32.scalar_type() == torch::kInt32, "meta_i32 must be int32");
+  TORCH_CHECK(meta_f32.scalar_type() == torch::kFloat32, "meta_f32 must be float32");
+  TORCH_CHECK(meta_i32.numel() >= 14, "meta_i32 must contain at least 14 values");
+  TORCH_CHECK(
+      meta_f32.numel() >= 8,
+      "meta_f32 must contain alpha-mode metadata; rebuild/update the STAR-UVT wrapper");
   auto mi = meta_i32.cpu();
   auto mf = meta_f32.cpu();
   auto* ip = mi.data_ptr<int32_t>();
@@ -60,6 +67,7 @@ inline ParsedMeta parse_meta(const torch::Tensor& meta_i32, const torch::Tensor&
   out.bg_b = fp[4];
   out.eps = fp[5];
   out.max_alpha = fp[6];
+  out.alpha_mode = fp[7];
   return out;
 }
 

@@ -139,6 +139,97 @@ class ProjectiveTraceCellTraceAtlas:
     depth_affine_uv: Tensor | None = None
 
 
+def slice_projective_trace_cell_atlas_frames(
+    atlas: ProjectiveTraceCellTraceAtlas,
+    *,
+    start: int,
+    stop: int,
+) -> ProjectiveTraceCellTraceAtlas:
+    """Return one frame window with compact, strictly active trace tables."""
+
+    if start < 0 or stop <= start:
+        raise ValueError("atlas frame slice must satisfy 0 <= start < stop")
+    clipped_cells = []
+    for cell in atlas.cells:
+        overlap_start = max(int(start), int(cell.start))
+        overlap_stop = min(int(stop), int(cell.stop))
+        if overlap_stop <= overlap_start:
+            continue
+        clipped_cells.append(
+            replace(
+                cell,
+                start=overlap_start - int(start),
+                stop=overlap_stop - int(start),
+            )
+        )
+
+    source_trace_indices = sorted(
+        {
+            int(trace_id)
+            for cell in clipped_cells
+            for trace_id in (*cell.primitive_ids, *cell.ordered_primitive_ids)
+        }
+    )
+    trace_id_map = {
+        source_trace_id: local_trace_id
+        for local_trace_id, source_trace_id in enumerate(source_trace_indices)
+    }
+    cells = [
+        replace(
+            cell,
+            primitive_ids=tuple(
+                trace_id_map[int(value)] for value in cell.primitive_ids
+            ),
+            ordered_primitive_ids=tuple(
+                trace_id_map[int(value)] for value in cell.ordered_primitive_ids
+            ),
+        )
+        for cell in clipped_cells
+    ]
+
+    active_start = []
+    active_stop = []
+    for trace_id in source_trace_indices:
+        overlap_start = max(int(start), int(atlas.active_start[trace_id]))
+        overlap_stop = min(int(stop), int(atlas.active_stop[trace_id]))
+        if overlap_stop <= overlap_start:
+            raise ValueError(
+                "compiled atlas cell references a trace inactive in the frame slice"
+            )
+        active_start.append(overlap_start - int(start))
+        active_stop.append(overlap_stop - int(start))
+
+    index = torch.tensor(
+        source_trace_indices,
+        dtype=torch.long,
+        device=atlas.coeffs.device,
+    )
+
+    def select_optional(value: Tensor | None) -> Tensor | None:
+        return None if value is None else value.index_select(0, index)
+
+    return replace(
+        atlas,
+        coeffs=atlas.coeffs.index_select(0, index),
+        opacity=atlas.opacity.index_select(0, index),
+        color=atlas.color.index_select(0, index),
+        cells=cells,
+        source_window_indices=tuple(
+            int(atlas.source_window_indices[trace_id])
+            for trace_id in source_trace_indices
+        ),
+        source_primitive_ids=tuple(
+            int(atlas.source_primitive_ids[trace_id])
+            for trace_id in source_trace_indices
+        ),
+        active_start=tuple(active_start),
+        active_stop=tuple(active_stop),
+        opacity_time_coeffs=select_optional(atlas.opacity_time_coeffs),
+        spatial_precision_uv=select_optional(atlas.spatial_precision_uv),
+        depth_affine_uv=select_optional(atlas.depth_affine_uv),
+    )
+
+
 @dataclass(frozen=True)
 class ProjectiveTraceCellAtlasCoverageReport:
     stale: bool
@@ -5424,7 +5515,20 @@ def has_projective_trace_cell_interval_backward_metal() -> bool:
     return hasattr(torch.ops.star_uvt_v0, "direct_projective_trace_cell_interval_backward")
 
 
+def _require_peak_splat_projective_alpha(config) -> None:
+    """Reject an alpha contract that the projective CPU oracles cannot mirror."""
+
+    alpha_mode = getattr(config, "alpha_mode", "peak_splat")
+    if alpha_mode != "peak_splat":
+        raise ValueError(
+            "projective-atlas rendering currently supports only alpha_mode='peak_splat'; "
+            "use the validated core STAR-UVT q-UVT RGB direct_atomic path "
+            "for beer_lambert"
+        )
+
+
 def _make_projective_interval_meta(config, device: torch.device, trace_count: int) -> tuple[Tensor, Tensor]:
+    _require_peak_splat_projective_alpha(config)
     if int(config.height) <= 0 or int(config.width) <= 0 or int(config.frames) <= 0:
         raise ValueError("height, width, and frames must be positive")
     if int(config.tile_x) not in (8, 16):
@@ -5465,6 +5569,11 @@ def _make_projective_interval_meta(config, device: torch.device, trace_count: in
             float(config.background[2]),
             1.0e-8,
             float(config.max_alpha),
+            float(
+                {"peak_splat": 0, "beer_lambert": 1}[
+                    getattr(config, "alpha_mode", "peak_splat")
+                ]
+            ),
         ],
         device=device,
         dtype=torch.float32,
@@ -5505,6 +5614,7 @@ def render_projective_trace_tile_time_atlas_metal(
     """Render packed projective/rational atlas cells with the native Metal kernel."""
 
     _check_projective_trace_render_inputs(coeffs, times, colors, opacities)
+    _require_peak_splat_projective_alpha(config)
     if coeffs.device.type != "mps":
         raise ValueError("projective atlas Metal render requires MPS tensors")
     if colors.shape[1] != 3:
@@ -5566,6 +5676,7 @@ def render_projective_trace_cell_atlas_metal(
     """Render packed cell-local polynomial traces with the native Metal kernel."""
 
     _check_projective_trace_render_inputs(atlas.coeffs, times, atlas.color, atlas.opacity)
+    _require_peak_splat_projective_alpha(config)
     _require_no_temporal_opacity_for_cell_metal(atlas)
     if atlas.coeffs.device.type != "mps":
         raise ValueError("projective cell atlas Metal render requires MPS tensors")
@@ -5991,6 +6102,7 @@ def direct_backward_projective_trace_tile_time_atlas_metal(
     """
 
     _check_projective_trace_render_inputs(coeffs, times, colors, opacities)
+    _require_peak_splat_projective_alpha(config)
     if coeffs.device.type != "mps":
         raise ValueError("projective atlas Metal backward requires MPS tensors")
     if colors.shape[1] != 3:

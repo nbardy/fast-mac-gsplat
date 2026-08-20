@@ -122,8 +122,16 @@ def _screen_precision(batch: WorldTubeBatch, points: Tensor, K: Tensor, w2c: Ten
 
 def _local_lambda_t(batch_lambda_t: Tensor, frame_count: int, config: UVTRenderConfig) -> Tensor:
     half_width = max(0.5, 0.5 * float(frame_count))
-    threshold = max(float(config.alpha_threshold), 1.0e-12)
-    segment_lambda = 2.0 * math.log(1.0 / threshold) / (half_width * half_width)
+    if config.alpha_mode == "peak_splat":
+        support_numerator = float(config.alpha_threshold)
+    elif config.alpha_mode == "beer_lambert":
+        support_numerator = -math.log1p(-float(config.alpha_threshold))
+    else:
+        raise ValueError("alpha_mode must be one of: peak_splat, beer_lambert")
+    support_numerator = max(support_numerator, 1.0e-12)
+    segment_lambda = (
+        2.0 * math.log(1.0 / support_numerator) / (half_width * half_width)
+    )
     return batch_lambda_t.clamp_min(float(segment_lambda))
 
 

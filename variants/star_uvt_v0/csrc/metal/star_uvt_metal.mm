@@ -256,6 +256,9 @@ void check_meta(const ParsedMeta& meta, int64_t n, const ShaderConfig& sc) {
   TORCH_CHECK(meta.tiles_y == (meta.height + meta.tile_y - 1) / meta.tile_y, "tiles_y mismatch");
   TORCH_CHECK(meta.tiles_t == (meta.frames + meta.tile_t - 1) / meta.tile_t, "tiles_t mismatch");
   TORCH_CHECK(meta.tile_count == meta.tiles_x * meta.tiles_y * meta.tiles_t, "tile_count mismatch");
+  TORCH_CHECK(
+      meta.alpha_mode == 0.0f || meta.alpha_mode == 1.0f,
+      "alpha_mode metadata must be 0 (peak_splat) or 1 (beer_lambert)");
 }
 
 void check_projective_interval_meta(const ParsedMeta& meta, int64_t n, const ShaderConfig& sc) {
@@ -269,6 +272,9 @@ void check_projective_interval_meta(const ParsedMeta& meta, int64_t n, const Sha
   TORCH_CHECK(meta.tiles_t == 1, "projective interval renderer expects one spatial tile layer");
   TORCH_CHECK(meta.tile_t == meta.frames, "projective interval renderer expects tile_t == frames");
   TORCH_CHECK(meta.tile_count == meta.tiles_x * meta.tiles_y, "projective interval tile_count mismatch");
+  TORCH_CHECK(
+      meta.alpha_mode == 0.0f || meta.alpha_mode == 1.0f,
+      "alpha_mode metadata must be 0 (peak_splat) or 1 (beer_lambert)");
 }
 
 void check_feature_meta(const ParsedMeta& meta, int64_t n, const ShaderConfig& sc, int64_t feature_dim) {

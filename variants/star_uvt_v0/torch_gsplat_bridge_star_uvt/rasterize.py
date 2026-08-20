@@ -15,9 +15,23 @@ except Exception:
     _C = None
 
 
+AlphaMode = Literal["peak_splat", "beer_lambert"]
+AmplitudeConvention = Literal["fiber_integrated", "peak_density"]
+_ALPHA_MODE_IDS: dict[str, int] = {
+    "peak_splat": 0,
+    "beer_lambert": 1,
+}
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     return int(default) if raw is None or raw == "" else int(raw)
+
+
+def _alpha_mode(config: UVTRenderConfig) -> str:
+    # Some older projective research wrappers pass config-like namespaces.
+    # Missing metadata means the historical contract, never Beer-Lambert.
+    return str(getattr(config, "alpha_mode", "peak_splat"))
 
 
 @dataclass(frozen=True)
@@ -33,6 +47,25 @@ class UVTRenderConfig:
     transmittance_threshold: float = 1.0e-4
     background: tuple[float, float, float] = (0.0, 0.0, 0.0)
     max_alpha: float = 0.99
+    alpha_mode: AlphaMode = "peak_splat"
+    amplitude_convention: AmplitudeConvention = "fiber_integrated"
+    retained_depth_samples: int = 48
+    retained_sigma_extent: float = 6.0
+    order_certificate_sigma: float = 6.0
+    order_certificate_min_gap: float = 0.0
+
+    @property
+    def opacity_semantics(self) -> str:
+        """Human-readable metadata for the meaning of the opacity tensor."""
+
+        if self.alpha_mode == "peak_splat":
+            return "peak_alpha_amplitude"
+        if self.alpha_mode == "beer_lambert":
+            if self.amplitude_convention == "fiber_integrated":
+                return "nonnegative_fiber_integrated_peak_optical_thickness"
+            if self.amplitude_convention == "peak_density":
+                return "nonnegative_world_peak_extinction_density"
+        raise ValueError(f"unknown alpha_mode {self.alpha_mode!r}")
 
 
 @dataclass(frozen=True)
@@ -80,6 +113,37 @@ def _runtime_validate(config: UVTRenderConfig) -> None:
         raise ValueError("config.tile_t must match STAR_UVT_TILE_T")
     if config.tile_capacity != _env_int("STAR_UVT_TILE_CAPACITY", 128):
         raise ValueError("config.tile_capacity must match STAR_UVT_TILE_CAPACITY")
+    alpha_mode = _alpha_mode(config)
+    if alpha_mode not in _ALPHA_MODE_IDS:
+        choices = ", ".join(sorted(_ALPHA_MODE_IDS))
+        raise ValueError(f"alpha_mode must be one of: {choices}")
+    if config.amplitude_convention not in {"fiber_integrated", "peak_density"}:
+        raise ValueError(
+            "amplitude_convention must be one of: fiber_integrated, peak_density"
+        )
+    if alpha_mode == "peak_splat" and config.amplitude_convention != "fiber_integrated":
+        raise ValueError("peak_splat requires amplitude_convention=fiber_integrated")
+    if not (0.0 <= config.alpha_threshold < 1.0):
+        raise ValueError("alpha_threshold must lie in [0, 1)")
+    if not (config.alpha_threshold <= config.max_alpha <= 1.0):
+        raise ValueError("max_alpha must lie in [alpha_threshold, 1]")
+    if not 1 <= int(config.retained_depth_samples) <= 64:
+        raise ValueError("retained_depth_samples must lie in [1,64]")
+    if not math.isfinite(config.retained_sigma_extent) or config.retained_sigma_extent <= 0.0:
+        raise ValueError("retained_sigma_extent must be finite and positive")
+    if (
+        not math.isfinite(config.order_certificate_sigma)
+        or config.order_certificate_sigma < config.retained_sigma_extent
+    ):
+        raise ValueError(
+            "order_certificate_sigma must be finite and at least "
+            "retained_sigma_extent"
+        )
+    if (
+        not math.isfinite(config.order_certificate_min_gap)
+        or config.order_certificate_min_gap < 0.0
+    ):
+        raise ValueError("order_certificate_min_gap must be finite and nonnegative")
 
 
 def _check_inputs(
@@ -89,6 +153,7 @@ def _check_inputs(
     depth_beta: Tensor,
     opacity: Tensor,
     color: Tensor,
+    config: UVTRenderConfig,
     *,
     require_mps: bool,
 ) -> None:
@@ -120,6 +185,11 @@ def _check_inputs(
             raise ValueError(f"{name} must be contiguous")
     if require_mps and ma.device.type != "mps":
         raise ValueError("Metal STAR-UVT render requires MPS tensors")
+    if _alpha_mode(config) == "beer_lambert":
+        if not bool(torch.isfinite(opacity).all().item()):
+            raise ValueError("beer_lambert opacity contains a non-finite optical thickness")
+        if bool(torch.any(opacity < 0.0).item()):
+            raise ValueError("beer_lambert opacity must be a nonnegative optical thickness")
 
 
 def _check_active_intervals(
@@ -183,6 +253,7 @@ def _make_meta(config: UVTRenderConfig, device: torch.device, tube_count: int) -
             float(config.background[2]),
             1.0e-8,
             float(config.max_alpha),
+            float(_ALPHA_MODE_IDS[_alpha_mode(config)]),
         ],
         device=device,
         dtype=torch.float32,
@@ -209,6 +280,65 @@ def _depth_at(ma: Tensor, depth0: Tensor, depth_beta: Tensor, a: Tensor) -> Tens
     return depth0 + ((a.unsqueeze(0) - ma) * depth_beta).sum(dim=-1)
 
 
+def primitive_alpha_and_vjp_terms(
+    opacity: Tensor,
+    qv: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor]:
+    """Return alpha, d(alpha)/d(opacity), and d(alpha)/d(qv).
+
+    ``peak_splat`` retains the historical STAR/3DGS rule
+    ``alpha_raw = opacity * exp(-qv / 2)``. ``beer_lambert`` interprets
+    ``opacity`` as nonnegative peak optical thickness and evaluates
+    ``alpha_raw = 1 - exp(-opacity * exp(-qv / 2))``. Both modes retain the
+    existing hard ``max_alpha`` cap; its VJP is zero on the capped branch.
+    """
+
+    _runtime_validate(config)
+    if _alpha_mode(config) == "beer_lambert":
+        if not bool(torch.isfinite(opacity).all().item()):
+            raise ValueError("beer_lambert opacity contains a non-finite optical thickness")
+        if bool(torch.any(opacity < 0.0).item()):
+            raise ValueError("beer_lambert opacity must be a nonnegative optical thickness")
+    return _primitive_alpha_and_vjp_terms_unchecked(opacity, qv, config)
+
+
+def _primitive_alpha_and_vjp_terms_unchecked(
+    opacity: Tensor,
+    qv: Tensor,
+    config: UVTRenderConfig,
+) -> tuple[Tensor, Tensor, Tensor]:
+    density = torch.exp(-0.5 * qv)
+    alpha_mode = _alpha_mode(config)
+    if alpha_mode == "peak_splat":
+        alpha_raw = opacity * density
+        d_opacity = density
+        d_qv = -0.5 * alpha_raw
+    elif alpha_mode == "beer_lambert":
+        optical_thickness = opacity * density
+        survival = torch.exp(-optical_thickness)
+        alpha_raw = -torch.expm1(-optical_thickness)
+        d_opacity = survival * density
+        d_qv = -0.5 * optical_thickness * survival
+    else:  # pragma: no cover - guarded by _runtime_validate.
+        raise AssertionError(f"unhandled alpha_mode {alpha_mode!r}")
+    differentiable = alpha_raw < config.max_alpha
+    alpha = torch.clamp(alpha_raw, max=config.max_alpha)
+    zeros = torch.zeros((), dtype=alpha.dtype, device=alpha.device)
+    return (
+        alpha,
+        torch.where(differentiable, d_opacity, zeros),
+        torch.where(differentiable, d_qv, zeros),
+    )
+
+
+def primitive_alpha(opacity: Tensor, qv: Tensor, config: UVTRenderConfig) -> Tensor:
+    """Evaluate the configured per-primitive alpha transfer."""
+
+    alpha, _d_opacity, _d_qv = primitive_alpha_and_vjp_terms(opacity, qv, config)
+    return alpha
+
+
 def brute_force_render_uvt_tubes(
     ma: Tensor,
     q_uvt: Tensor,
@@ -222,7 +352,7 @@ def brute_force_render_uvt_tubes(
     active_stop: Tensor | None = None,
 ) -> Tensor:
     _runtime_validate(config)
-    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=False)
+    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, config, require_mps=False)
     if (active_start is None) != (active_stop is None):
         raise ValueError("active_start and active_stop must be provided together")
     if active_start is not None and active_stop is not None:
@@ -244,7 +374,7 @@ def brute_force_render_uvt_tubes(
                 a = torch.tensor([x + 0.5, y + 0.5, t], dtype=torch.float32, device=device)
                 d = a.unsqueeze(0) - ma
                 qv = _quadratic(q_uvt, d)
-                alpha = torch.clamp(opacity * torch.exp(-0.5 * qv), max=config.max_alpha)
+                alpha, _d_opacity, _d_qv = _primitive_alpha_and_vjp_terms_unchecked(opacity, qv, config)
                 if active_start is not None and active_stop is not None:
                     active_window = (active_start <= f) & (f < active_stop)
                     alpha = torch.where(active_window, alpha, torch.zeros_like(alpha))
@@ -268,12 +398,20 @@ def brute_force_render_uvt_tubes(
 
 
 def _support_tau(opacity_value: float, config: UVTRenderConfig) -> float | None:
-    if opacity_value <= config.alpha_threshold:
+    alpha_mode = _alpha_mode(config)
+    if alpha_mode == "peak_splat":
+        minimum_density_numerator = config.alpha_threshold
+    elif alpha_mode == "beer_lambert":
+        minimum_density_numerator = -math.log1p(-config.alpha_threshold)
+    else:  # pragma: no cover - guarded by _runtime_validate.
+        raise AssertionError(f"unhandled alpha_mode {alpha_mode!r}")
+    if opacity_value <= minimum_density_numerator:
         return None
-    return -2.0 * math.log(max(config.alpha_threshold / max(opacity_value, 1.0e-8), 1.0e-8))
+    return -2.0 * math.log(max(minimum_density_numerator / max(opacity_value, 1.0e-8), 1.0e-8))
 
 
 def sliced_per_frame_pair_count(ma: Tensor, q_uvt: Tensor, opacity: Tensor, config: UVTRenderConfig) -> int:
+    _runtime_validate(config)
     ma_cpu = ma.detach().cpu()
     q_cpu = q_uvt.detach().cpu()
     op_cpu = opacity.detach().cpu()
@@ -380,7 +518,7 @@ def render_uvt_tubes(
     depth_beta = depth_beta.contiguous()
     opacity = opacity.contiguous()
     color = color.contiguous()
-    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=True)
+    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, config, require_mps=True)
     if not hasattr(torch.ops, "star_uvt_v0"):
         raise RuntimeError("star_uvt_v0 custom ops not found. Build the extension first.")
     meta_i32, meta_f32 = _make_meta(config, ma.device, ma.shape[0])
@@ -443,7 +581,7 @@ def render_uvt_tubes_gated(
     color = color.contiguous()
     active_start = active_start.contiguous()
     active_stop = active_stop.contiguous()
-    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=True)
+    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, config, require_mps=True)
     _check_active_intervals(
         active_start,
         active_stop,
@@ -488,7 +626,7 @@ def simple_backward_samples(
     grad_image = grad_image.contiguous()
     dummy_depth0 = torch.zeros((ma.shape[0],), dtype=torch.float32, device=ma.device)
     dummy_depth_beta = torch.zeros((ma.shape[0], 3), dtype=torch.float32, device=ma.device)
-    _check_inputs(ma, q_uvt, dummy_depth0, dummy_depth_beta, opacity, color, require_mps=True)
+    _check_inputs(ma, q_uvt, dummy_depth0, dummy_depth_beta, opacity, color, config, require_mps=True)
     if grad_image.shape != (config.frames, config.height, config.width, 3):
         raise ValueError("grad_image must have shape [frames,height,width,3]")
     if grad_image.dtype != torch.float32 or grad_image.device != ma.device:
@@ -515,7 +653,7 @@ def stable_backward_samples(
     opacity = opacity.contiguous()
     color = color.contiguous()
     grad_image = grad_image.contiguous()
-    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=True)
+    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, config, require_mps=True)
     if grad_image.shape != (config.frames, config.height, config.width, 3):
         raise ValueError("grad_image must have shape [frames,height,width,3]")
     if grad_image.dtype != torch.float32 or grad_image.device != ma.device:
@@ -555,7 +693,7 @@ def stable_backward_samples_with_keys(
     opacity = opacity.contiguous()
     color = color.contiguous()
     grad_image = grad_image.contiguous()
-    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=True)
+    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, config, require_mps=True)
     if grad_image.shape != (config.frames, config.height, config.width, 3):
         raise ValueError("grad_image must have shape [frames,height,width,3]")
     if grad_image.dtype != torch.float32 or grad_image.device != ma.device:
@@ -599,7 +737,7 @@ def _tile_pair_backward_samples_op(
     opacity = opacity.contiguous()
     color = color.contiguous()
     grad_image = grad_image.contiguous()
-    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=True)
+    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, config, require_mps=True)
     if grad_image.shape != (config.frames, config.height, config.width, 3):
         raise ValueError("grad_image must have shape [frames,height,width,3]")
     if grad_image.dtype != torch.float32 or grad_image.device != ma.device:
@@ -825,7 +963,7 @@ def _direct_backward_op(
     opacity = opacity.contiguous()
     color = color.contiguous()
     grad_image = grad_image.contiguous()
-    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=True)
+    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, config, require_mps=True)
     if grad_image.shape != (config.frames, config.height, config.width, 3):
         raise ValueError("grad_image must have shape [frames,height,width,3]")
     if grad_image.dtype != torch.float32 or grad_image.device != ma.device:
@@ -884,7 +1022,7 @@ def direct_atomic_backward_gated(
     grad_image = grad_image.contiguous()
     active_start = active_start.contiguous()
     active_stop = active_stop.contiguous()
-    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, require_mps=True)
+    _check_inputs(ma, q_uvt, depth0, depth_beta, opacity, color, config, require_mps=True)
     _check_active_intervals(
         active_start,
         active_stop,

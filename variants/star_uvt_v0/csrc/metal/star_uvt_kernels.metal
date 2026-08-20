@@ -68,6 +68,8 @@ struct MetaF32 {
   float bg_b;
   float eps;
   float max_alpha;
+  // 0: historical peak-splat alpha; 1: Beer-Lambert optical thickness.
+  float alpha_mode;
 };
 
 struct ReduceMeta {
@@ -133,6 +135,42 @@ inline float quadratic_q(const device float* q, uint i, float3 d) {
   float q22 = q[b + 5u];
   return q00 * d.x * d.x + 2.0f * q01 * d.x * d.y + 2.0f * q02 * d.x * d.z +
          q11 * d.y * d.y + 2.0f * q12 * d.y * d.z + q22 * d.z * d.z;
+}
+
+inline bool beer_lambert_alpha(constant MetaF32& mf) {
+  return mf.alpha_mode > 0.5f;
+}
+
+inline float primitive_alpha_raw(
+    float opacity_or_optical_thickness,
+    float gaussian_density,
+    constant MetaF32& mf) {
+  float optical_depth = opacity_or_optical_thickness * gaussian_density;
+  return beer_lambert_alpha(mf) ? 1.0f - exp(-optical_depth) : optical_depth;
+}
+
+inline float primitive_alpha_d_opacity(
+    float opacity_or_optical_thickness,
+    float gaussian_density,
+    constant MetaF32& mf) {
+  if (!beer_lambert_alpha(mf)) return gaussian_density;
+  float optical_depth = opacity_or_optical_thickness * gaussian_density;
+  return exp(-optical_depth) * gaussian_density;
+}
+
+inline float primitive_alpha_d_qv(
+    float opacity_or_optical_thickness,
+    float gaussian_density,
+    constant MetaF32& mf) {
+  float optical_depth = opacity_or_optical_thickness * gaussian_density;
+  if (!beer_lambert_alpha(mf)) return -0.5f * optical_depth;
+  return -0.5f * optical_depth * exp(-optical_depth);
+}
+
+inline float primitive_support_numerator(constant MetaF32& mf) {
+  return beer_lambert_alpha(mf)
+      ? -log(max(1.0f - mf.alpha_threshold, mf.eps))
+      : mf.alpha_threshold;
 }
 
 inline void atomic_add3(device atomic_float* ptr, uint base, float3 value) {
@@ -414,7 +452,8 @@ inline void composite_projective_trace(
   if (!eval_projective_trace_point(coeffs, tube_id, t, mf.eps, u, v, depth)) return;
   float2 d = pixel_center - float2(u, v);
   float inv_sigma2 = 1.0f / max(sigma_px * sigma_px, mf.eps);
-  float alpha = min(mf.max_alpha, opacity[tube_id] * exp(-0.5f * dot(d, d) * inv_sigma2));
+  float density = exp(-0.5f * dot(d, d) * inv_sigma2);
+  float alpha = min(mf.max_alpha, primitive_alpha_raw(opacity[tube_id], density, mf));
   if (!(alpha >= mf.alpha_threshold)) return;
   float w = transmittance * alpha;
   accum += w * load3(color, tube_id);
@@ -508,7 +547,8 @@ inline void composite_projective_cell_trace(
   if (!eval_projective_cell_trace_point(coeffs, trace_id, t, u, v, depth)) return;
   float2 d = pixel_center - float2(u, v);
   float inv_sigma2 = 1.0f / max(sigma_px * sigma_px, mf.eps);
-  float alpha = min(mf.max_alpha, opacity[trace_id] * exp(-0.5f * dot(d, d) * inv_sigma2));
+  float density = exp(-0.5f * dot(d, d) * inv_sigma2);
+  float alpha = min(mf.max_alpha, primitive_alpha_raw(opacity[trace_id], density, mf));
   if (!(alpha >= mf.alpha_threshold)) return;
   float w = transmittance * alpha;
   accum += w * load3(color, trace_id);
@@ -566,7 +606,8 @@ inline void composite_projective_cell_trace_with_time_opacity(
   float2 d = pixel_center - float2(u, v);
   float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, trace_id, t);
   float radius2 = projective_cell_precision_radius2(spatial_precision_uv, trace_id, d);
-  float alpha = min(mf.max_alpha, opacity[trace_id] * time_scale * exp(-0.5f * radius2));
+  float density = time_scale * exp(-0.5f * radius2);
+  float alpha = min(mf.max_alpha, primitive_alpha_raw(opacity[trace_id], density, mf));
   if (!(alpha >= mf.alpha_threshold)) return;
   float w = transmittance * alpha;
   accum += w * load3(color, trace_id);
@@ -723,7 +764,8 @@ inline void composite_projective_family_cell_trace_with_time_opacity(
   float2 d = pixel_center - float2(u, v);
   float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, base_trace_id, t);
   float radius2 = projective_cell_precision_radius2(spatial_precision_uv, base_trace_id, d);
-  float alpha = min(mf.max_alpha, opacity[base_trace_id] * time_scale * exp(-0.5f * radius2));
+  float density = time_scale * exp(-0.5f * radius2);
+  float alpha = min(mf.max_alpha, primitive_alpha_raw(opacity[base_trace_id], density, mf));
   if (!(alpha >= mf.alpha_threshold)) return;
   float w = transmittance * alpha;
   accum += w * load3(color, base_trace_id);
@@ -807,8 +849,9 @@ inline Bounds3i tube_bounds(
   out.x0 = 1; out.x1 = 0; out.y0 = 1; out.y1 = 0; out.f0 = 1; out.f1 = 0;
 
   float op = opacity[tube_id];
-  if (!(op > mf.alpha_threshold)) return out;
-  float tau = -2.0f * log(max(mf.alpha_threshold / max(op, mf.eps), mf.eps));
+  float support_numerator = primitive_support_numerator(mf);
+  if (!(op > support_numerator)) return out;
+  float tau = -2.0f * log(max(support_numerator / max(op, mf.eps), mf.eps));
   if (!isfinite(tau) || tau <= 0.0f) return out;
 
   float3 inv_diag;
@@ -1508,7 +1551,8 @@ inline void composite_tube(
   float3 d = sample_a - load3(ma, tube_id);
   float qv = quadratic_q(q, tube_id, d);
   if (!isfinite(qv)) return;
-  float alpha = min(mf.max_alpha, opacity[tube_id] * exp(-0.5f * qv));
+  float density = exp(-0.5f * qv);
+  float alpha = min(mf.max_alpha, primitive_alpha_raw(opacity[tube_id], density, mf));
   if (!(alpha >= mf.alpha_threshold)) return;
   float w = transmittance * alpha;
   accum += w * load3(color, tube_id);
@@ -2466,7 +2510,7 @@ kernel void direct_atomic_projective_cell_interval_backward(
     float radius2 = projective_cell_precision_radius2(spatial_precision_uv, trace_id, d);
     float exp_term = exp(-0.5f * radius2);
     float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, trace_id, t);
-    float alpha_raw = opacity[trace_id] * time_scale * exp_term;
+    float alpha_raw = primitive_alpha_raw(opacity[trace_id], time_scale * exp_term, mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
     t_before[i] = T;
@@ -2505,11 +2549,13 @@ kernel void direct_atomic_projective_cell_interval_backward(
     float radius2 = projective_cell_precision_radius2(spatial_precision_uv, trace_id, d);
     float exp_term = exp(-0.5f * radius2);
     float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, trace_id, t);
+    float density = time_scale * exp_term;
+    float alpha_shape_scale = -2.0f * d_alpha * primitive_alpha_d_qv(opacity[trace_id], density, mf);
     float2 center_grad = projective_cell_precision_center_grad(spatial_precision_uv, trace_id, d);
-    float grad_u = d_alpha * alpha * center_grad.x;
-    float grad_v = d_alpha * alpha * center_grad.y;
-    float grad_time = -0.5f * d_alpha * alpha;
-    float grad_precision_scale = d_alpha * alpha;
+    float grad_u = alpha_shape_scale * center_grad.x;
+    float grad_v = alpha_shape_scale * center_grad.y;
+    float grad_time = -0.5f * alpha_shape_scale;
+    float grad_precision_scale = alpha_shape_scale;
 
     atomic_fetch_add_explicit(&grad_coeffs[coeff_base + 0u], grad_u * basis0, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_coeffs[coeff_base + 1u], grad_u * basis1, memory_order_relaxed);
@@ -2517,7 +2563,10 @@ kernel void direct_atomic_projective_cell_interval_backward(
     atomic_fetch_add_explicit(&grad_coeffs[coeff_base + 3u], grad_v * basis0, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_coeffs[coeff_base + 4u], grad_v * basis1, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_coeffs[coeff_base + 5u], grad_v * basis2, memory_order_relaxed);
-    atomic_fetch_add_explicit(&grad_opacity[trace_id], d_alpha * time_scale * exp_term, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+        &grad_opacity[trace_id],
+        d_alpha * primitive_alpha_d_opacity(opacity[trace_id], density, mf),
+        memory_order_relaxed);
     uint time_coeff_base = trace_id * 3u;
     atomic_fetch_add_explicit(&grad_opacity_time_coeffs[time_coeff_base + 0u], grad_time * basis0, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_opacity_time_coeffs[time_coeff_base + 1u], grad_time * basis1, memory_order_relaxed);
@@ -2632,7 +2681,7 @@ kernel void direct_atomic_projective_family_cell_interval_backward(
     float radius2 = projective_cell_precision_radius2(spatial_precision_uv, base_trace_id, d);
     float exp_term = exp(-0.5f * radius2);
     float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, base_trace_id, t);
-    float alpha_raw = opacity[base_trace_id] * time_scale * exp_term;
+    float alpha_raw = primitive_alpha_raw(opacity[base_trace_id], time_scale * exp_term, mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
     t_before[i] = T;
@@ -2678,11 +2727,13 @@ kernel void direct_atomic_projective_family_cell_interval_backward(
     float radius2 = projective_cell_precision_radius2(spatial_precision_uv, base_trace_id, d);
     float exp_term = exp(-0.5f * radius2);
     float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, base_trace_id, t);
+    float density = time_scale * exp_term;
+    float alpha_shape_scale = -2.0f * d_alpha * primitive_alpha_d_qv(opacity[base_trace_id], density, mf);
     float2 center_grad = projective_cell_precision_center_grad(spatial_precision_uv, base_trace_id, d);
-    float grad_u = d_alpha * alpha * center_grad.x;
-    float grad_v = d_alpha * alpha * center_grad.y;
-    float grad_time = -0.5f * d_alpha * alpha;
-    float grad_precision_scale = d_alpha * alpha;
+    float grad_u = alpha_shape_scale * center_grad.x;
+    float grad_v = alpha_shape_scale * center_grad.y;
+    float grad_time = -0.5f * alpha_shape_scale;
+    float grad_precision_scale = alpha_shape_scale;
 
     float grad_coeff[6];
     grad_coeff[0] = grad_u * basis0;
@@ -2705,7 +2756,10 @@ kernel void direct_atomic_projective_family_cell_interval_backward(
       atomic_fetch_add_explicit(&grad_q_basis[q_base + b], grad_qb, memory_order_relaxed);
     }
 
-    atomic_fetch_add_explicit(&grad_opacity[base_trace_id], d_alpha * time_scale * exp_term, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+        &grad_opacity[base_trace_id],
+        d_alpha * primitive_alpha_d_opacity(opacity[base_trace_id], density, mf),
+        memory_order_relaxed);
     uint time_coeff_base = base_trace_id * 3u;
     atomic_fetch_add_explicit(&grad_opacity_time_coeffs[time_coeff_base + 0u], grad_time * basis0, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_opacity_time_coeffs[time_coeff_base + 1u], grad_time * basis1, memory_order_relaxed);
@@ -2810,7 +2864,7 @@ kernel void direct_atomic_projective_trace_backward(
     if (!eval_projective_trace_point(coeffs, tube_id, t, mf.eps, u, v, depth)) continue;
     float2 d = pixel_center - float2(u, v);
     float exp_term = exp(-0.5f * dot(d, d) * inv_sigma2);
-    float alpha_raw = opacity[tube_id] * exp_term;
+    float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp_term, mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
     t_before[i] = T;
@@ -2851,8 +2905,9 @@ kernel void direct_atomic_projective_trace_backward(
     float v = hv * inv_hz;
     float2 d = pixel_center - float2(u, v);
     float exp_term = exp(-0.5f * dot(d, d) * inv_sigma2);
-    float grad_u = d_alpha * alpha * d.x * inv_sigma2;
-    float grad_v = d_alpha * alpha * d.y * inv_sigma2;
+    float alpha_shape_scale = -2.0f * d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
+    float grad_u = alpha_shape_scale * d.x * inv_sigma2;
+    float grad_v = alpha_shape_scale * d.y * inv_sigma2;
     float grad_hu = grad_u * inv_hz;
     float grad_hv = grad_v * inv_hz;
     float grad_hz = -(grad_u * hu + grad_v * hv) * inv_hz * inv_hz;
@@ -2866,7 +2921,10 @@ kernel void direct_atomic_projective_trace_backward(
     atomic_fetch_add_explicit(&grad_coeffs[coeff_base + 6u], grad_hz * basis0, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_coeffs[coeff_base + 7u], grad_hz * basis1, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_coeffs[coeff_base + 8u], grad_hz * basis2, memory_order_relaxed);
-    atomic_fetch_add_explicit(&grad_opacity[tube_id], d_alpha * exp_term, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+        &grad_opacity[tube_id],
+        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf),
+        memory_order_relaxed);
   }
 }
 
@@ -2938,7 +2996,7 @@ kernel void render_uvt_feature_tiles(
       float3 d = sample_a - load3(ma, tube_id);
       float qv = quadratic_q(q_uvt, tube_id, d);
       if (!isfinite(qv)) continue;
-      float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+      float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
       float alpha = min(mf.max_alpha, alpha_raw);
       if (!(alpha >= mf.alpha_threshold)) continue;
       float w = T * alpha;
@@ -2959,7 +3017,7 @@ kernel void render_uvt_feature_tiles(
       float3 d = sample_a - load3(ma, tube_id);
       float qv = quadratic_q(q_uvt, tube_id, d);
       if (isfinite(qv)) {
-        float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+        float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
         float alpha = min(mf.max_alpha, alpha_raw);
         if (alpha >= mf.alpha_threshold) {
           float w = T * alpha;
@@ -3043,7 +3101,7 @@ kernel void render_uvt_feature_sparse_pixels(
       float3 d = sample_a - load3(ma, tube_id);
       float qv = quadratic_q(q_uvt, tube_id, d);
       if (!isfinite(qv)) continue;
-      float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+      float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
       float alpha = min(mf.max_alpha, alpha_raw);
       if (!(alpha >= mf.alpha_threshold)) continue;
       float w = T * alpha;
@@ -3065,7 +3123,7 @@ kernel void render_uvt_feature_sparse_pixels(
       float3 d = sample_a - load3(ma, tube_id);
       float qv = quadratic_q(q_uvt, tube_id, d);
       if (isfinite(qv)) {
-        float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+        float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
         float alpha = min(mf.max_alpha, alpha_raw);
         if (alpha >= mf.alpha_threshold) {
           float w = T * alpha;
@@ -3112,7 +3170,7 @@ kernel void simple_backward_samples(
   float3 d = sample_a - load3(ma, tube_id);
   float qv = quadratic_q(q_uvt, tube_id, d);
   float exp_term = exp(-0.5f * qv);
-  float alpha_unclamped = opacity[tube_id] * exp_term;
+  float alpha_unclamped = primitive_alpha_raw(opacity[tube_id], exp_term, mf);
   bool active = isfinite(qv) && alpha_unclamped < mf.max_alpha;
   float alpha = active ? alpha_unclamped : mf.max_alpha;
 
@@ -3120,7 +3178,9 @@ kernel void simple_backward_samples(
   float3 grad_rgb = float3(grad_image[image_base + 0u], grad_image[image_base + 1u], grad_image[image_base + 2u]);
   float3 c = load3(color, tube_id);
   float grad_alpha = active ? dot(grad_rgb, c) : 0.0f;
-  float grad_qv = -0.5f * alpha * grad_alpha;
+  float grad_qv = active
+      ? grad_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf)
+      : 0.0f;
   float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
   float3 grad_m = -2.0f * grad_qv * qd;
 
@@ -3136,7 +3196,9 @@ kernel void simple_backward_samples(
   grad_q_samples[q_base + 3u] = grad_qv * d.y * d.y;
   grad_q_samples[q_base + 4u] = grad_qv * 2.0f * d.y * d.z;
   grad_q_samples[q_base + 5u] = grad_qv * d.z * d.z;
-  grad_opacity_samples[idx] = active ? grad_alpha * exp_term : 0.0f;
+  grad_opacity_samples[idx] = active
+      ? grad_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf)
+      : 0.0f;
 
   uint color_base = idx * 3u;
   grad_color_samples[color_base + 0u] = grad_rgb.x * alpha;
@@ -3241,7 +3303,7 @@ kernel void stable_backward_samples(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     if (!isfinite(qv)) continue;
-    float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+    float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
     t_before[i] = T;
@@ -3293,7 +3355,7 @@ kernel void stable_backward_samples(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     float exp_term = exp(-0.5f * qv);
-    float grad_qv = -0.5f * alpha * d_alpha;
+    float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
     float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
     float3 grad_m = -2.0f * grad_qv * qd;
     grad_ma_samples[ma_base + 0u] = grad_m.x;
@@ -3305,7 +3367,8 @@ kernel void stable_backward_samples(
     grad_q_samples[q_base + 3u] = grad_qv * d.y * d.y;
     grad_q_samples[q_base + 4u] = grad_qv * 2.0f * d.y * d.z;
     grad_q_samples[q_base + 5u] = grad_qv * d.z * d.z;
-    grad_opacity_samples[entry] = d_alpha * exp_term;
+    grad_opacity_samples[entry] =
+        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf);
   }
 }
 
@@ -3402,7 +3465,7 @@ kernel void direct_atomic_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     if (!isfinite(qv)) continue;
-    float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+    float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
     t_before[i] = T;
@@ -3435,7 +3498,7 @@ kernel void direct_atomic_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     float exp_term = exp(-0.5f * qv);
-    float grad_qv = -0.5f * alpha * d_alpha;
+    float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
     float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
     float3 grad_m = -2.0f * grad_qv * qd;
     uint ma_base = tube_id * 3u;
@@ -3447,7 +3510,10 @@ kernel void direct_atomic_backward(
     atomic_fetch_add_explicit(&grad_q[q_base + 3u], grad_qv * d.y * d.y, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 4u], grad_qv * 2.0f * d.y * d.z, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 5u], grad_qv * d.z * d.z, memory_order_relaxed);
-    atomic_fetch_add_explicit(&grad_opacity[tube_id], d_alpha * exp_term, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+        &grad_opacity[tube_id],
+        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf),
+        memory_order_relaxed);
   }
 }
 
@@ -3548,7 +3614,7 @@ kernel void direct_atomic_backward_gated(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     if (!isfinite(qv)) continue;
-    float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+    float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
     t_before[i] = T;
@@ -3581,7 +3647,7 @@ kernel void direct_atomic_backward_gated(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     float exp_term = exp(-0.5f * qv);
-    float grad_qv = -0.5f * alpha * d_alpha;
+    float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
     float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
     float3 grad_m = -2.0f * grad_qv * qd;
     uint ma_base = tube_id * 3u;
@@ -3593,7 +3659,10 @@ kernel void direct_atomic_backward_gated(
     atomic_fetch_add_explicit(&grad_q[q_base + 3u], grad_qv * d.y * d.y, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 4u], grad_qv * 2.0f * d.y * d.z, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 5u], grad_qv * d.z * d.z, memory_order_relaxed);
-    atomic_fetch_add_explicit(&grad_opacity[tube_id], d_alpha * exp_term, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+        &grad_opacity[tube_id],
+        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf),
+        memory_order_relaxed);
   }
 }
 
@@ -3704,7 +3773,7 @@ kernel void direct_atomic_feature_backward(
       float3 d = sample_a - load3(ma, tube_id);
       float qv = quadratic_q(q_uvt, tube_id, d);
       if (!isfinite(qv)) continue;
-      float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+      float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
       float alpha = min(mf.max_alpha, alpha_raw);
       if (!(alpha >= mf.alpha_threshold)) continue;
       t_before[i] = T;
@@ -3815,7 +3884,7 @@ kernel void direct_atomic_feature_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     float exp_term = exp(-0.5f * qv);
-    float grad_qv = -0.5f * alpha * d_alpha;
+    float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
     float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
     float3 grad_m = -2.0f * grad_qv * qd;
     uint ma_base = tube_id * 3u;
@@ -3827,7 +3896,10 @@ kernel void direct_atomic_feature_backward(
     atomic_fetch_add_explicit(&grad_q[q_base + 3u], grad_qv * d.y * d.y, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 4u], grad_qv * 2.0f * d.y * d.z, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 5u], grad_qv * d.z * d.z, memory_order_relaxed);
-    atomic_fetch_add_explicit(&grad_opacity[tube_id], d_alpha * exp_term, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+        &grad_opacity[tube_id],
+        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf),
+        memory_order_relaxed);
   }
 }
 
@@ -3924,7 +3996,7 @@ kernel void direct_atomic_feature_sparse_pixels_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     if (!isfinite(qv)) continue;
-    float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+    float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
     t_before[i] = T;
@@ -3965,7 +4037,7 @@ kernel void direct_atomic_feature_sparse_pixels_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     float exp_term = exp(-0.5f * qv);
-    float grad_qv = -0.5f * alpha * d_alpha;
+    float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
     float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
     float3 grad_m = -2.0f * grad_qv * qd;
     uint ma_base = tube_id * 3u;
@@ -3977,7 +4049,10 @@ kernel void direct_atomic_feature_sparse_pixels_backward(
     atomic_fetch_add_explicit(&grad_q[q_base + 3u], grad_qv * d.y * d.y, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 4u], grad_qv * 2.0f * d.y * d.z, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 5u], grad_qv * d.z * d.z, memory_order_relaxed);
-    atomic_fetch_add_explicit(&grad_opacity[tube_id], d_alpha * exp_term, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+        &grad_opacity[tube_id],
+        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf),
+        memory_order_relaxed);
   }
 }
 
@@ -4112,7 +4187,7 @@ kernel void direct_atomic_feature_sparse_hidden_sigmoid_mse_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     if (!isfinite(qv)) continue;
-    float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+    float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
     t_before[i] = T;
@@ -4201,7 +4276,7 @@ kernel void direct_atomic_feature_sparse_hidden_sigmoid_mse_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     float exp_term = exp(-0.5f * qv);
-    float grad_qv = -0.5f * alpha * d_alpha;
+    float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
     float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
     float3 grad_m = -2.0f * grad_qv * qd;
     uint ma_base = tube_id * 3u;
@@ -4213,7 +4288,10 @@ kernel void direct_atomic_feature_sparse_hidden_sigmoid_mse_backward(
     atomic_fetch_add_explicit(&grad_q[q_base + 3u], grad_qv * d.y * d.y, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 4u], grad_qv * 2.0f * d.y * d.z, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 5u], grad_qv * d.z * d.z, memory_order_relaxed);
-    atomic_fetch_add_explicit(&grad_opacity[tube_id], d_alpha * exp_term, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+        &grad_opacity[tube_id],
+        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf),
+        memory_order_relaxed);
   }
 }
 
@@ -4310,7 +4388,7 @@ kernel void sparse_hidden_sigmoid_target_area_forward_sums(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     if (!isfinite(qv)) continue;
-    float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+    float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
     uint tube_feature_base = tube_id * fdim;
@@ -4476,7 +4554,7 @@ kernel void direct_atomic_feature_sparse_hidden_target_area_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     if (!isfinite(qv)) continue;
-    float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+    float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
     t_before[i] = T;
@@ -4645,7 +4723,7 @@ kernel void direct_atomic_feature_sparse_hidden_target_area_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     float exp_term = exp(-0.5f * qv);
-    float grad_qv = -0.5f * alpha * d_alpha;
+    float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
     float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
     float3 grad_m = -2.0f * grad_qv * qd;
     uint ma_base = tube_id * 3u;
@@ -4657,7 +4735,10 @@ kernel void direct_atomic_feature_sparse_hidden_target_area_backward(
     atomic_fetch_add_explicit(&grad_q[q_base + 3u], grad_qv * d.y * d.y, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 4u], grad_qv * 2.0f * d.y * d.z, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 5u], grad_qv * d.z * d.z, memory_order_relaxed);
-    atomic_fetch_add_explicit(&grad_opacity[tube_id], d_alpha * exp_term, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+        &grad_opacity[tube_id],
+        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf),
+        memory_order_relaxed);
   }
 }
 
@@ -4782,7 +4863,7 @@ kernel void direct_atomic_feature_linear_sigmoid_mse_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     if (!isfinite(qv)) continue;
-    float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+    float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
     t_before[i] = T;
@@ -4858,7 +4939,7 @@ kernel void direct_atomic_feature_linear_sigmoid_mse_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     float exp_term = exp(-0.5f * qv);
-    float grad_qv = -0.5f * alpha * d_alpha;
+    float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
     float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
     float3 grad_m = -2.0f * grad_qv * qd;
     uint ma_base = tube_id * 3u;
@@ -4870,7 +4951,10 @@ kernel void direct_atomic_feature_linear_sigmoid_mse_backward(
     atomic_fetch_add_explicit(&grad_q[q_base + 3u], grad_qv * d.y * d.y, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 4u], grad_qv * 2.0f * d.y * d.z, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 5u], grad_qv * d.z * d.z, memory_order_relaxed);
-    atomic_fetch_add_explicit(&grad_opacity[tube_id], d_alpha * exp_term, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+        &grad_opacity[tube_id],
+        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf),
+        memory_order_relaxed);
   }
 }
 
@@ -5038,7 +5122,7 @@ kernel void direct_atomic_feature_hidden_sigmoid_mse_backward(
       float3 d = sample_a - load3(ma, tube_id);
       float qv = quadratic_q(q_uvt, tube_id, d);
       if (!isfinite(qv)) continue;
-      float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+      float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
       float alpha = min(mf.max_alpha, alpha_raw);
       if (!(alpha >= mf.alpha_threshold)) continue;
       t_before[i] = T;
@@ -5150,7 +5234,7 @@ kernel void direct_atomic_feature_hidden_sigmoid_mse_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     float exp_term = exp(-0.5f * qv);
-    float grad_qv = -0.5f * alpha * d_alpha;
+    float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
     float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
     float3 grad_m = -2.0f * grad_qv * qd;
     uint ma_base = tube_id * 3u;
@@ -5162,7 +5246,10 @@ kernel void direct_atomic_feature_hidden_sigmoid_mse_backward(
     atomic_fetch_add_explicit(&grad_q[q_base + 3u], grad_qv * d.y * d.y, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 4u], grad_qv * 2.0f * d.y * d.z, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 5u], grad_qv * d.z * d.z, memory_order_relaxed);
-    atomic_fetch_add_explicit(&grad_opacity[tube_id], d_alpha * exp_term, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+        &grad_opacity[tube_id],
+        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf),
+        memory_order_relaxed);
   }
 }
 
@@ -5283,7 +5370,7 @@ kernel void direct_atomic_feature_logit_handoff_backward(
       float3 d = sample_a - load3(ma, tube_id);
       float qv = quadratic_q(q_uvt, tube_id, d);
       if (!isfinite(qv)) continue;
-      float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+      float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
       float alpha = min(mf.max_alpha, alpha_raw);
       if (!(alpha >= mf.alpha_threshold)) continue;
       t_before[i] = T;
@@ -5347,7 +5434,7 @@ kernel void direct_atomic_feature_logit_handoff_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     float exp_term = exp(-0.5f * qv);
-    float grad_qv = -0.5f * alpha * d_alpha;
+    float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
     float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
     float3 grad_m = -2.0f * grad_qv * qd;
     uint ma_base = tube_id * 3u;
@@ -5359,7 +5446,10 @@ kernel void direct_atomic_feature_logit_handoff_backward(
     atomic_fetch_add_explicit(&grad_q[q_base + 3u], grad_qv * d.y * d.y, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 4u], grad_qv * 2.0f * d.y * d.z, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_q[q_base + 5u], grad_qv * d.z * d.z, memory_order_relaxed);
-    atomic_fetch_add_explicit(&grad_opacity[tube_id], d_alpha * exp_term, memory_order_relaxed);
+    atomic_fetch_add_explicit(
+        &grad_opacity[tube_id],
+        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf),
+        memory_order_relaxed);
   }
 }
 
@@ -5456,7 +5546,7 @@ kernel void direct_fixedpoint_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     if (!isfinite(qv)) continue;
-    float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+    float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
     t_before[i] = T;
@@ -5489,7 +5579,7 @@ kernel void direct_fixedpoint_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     float exp_term = exp(-0.5f * qv);
-    float grad_qv = -0.5f * alpha * d_alpha;
+    float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
     float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
     float3 grad_m = -2.0f * grad_qv * qd;
     uint ma_base = tube_id * 3u;
@@ -5501,7 +5591,10 @@ kernel void direct_fixedpoint_backward(
     atomic_add_fixedpoint(grad_q, q_base + 3u, grad_qv * d.y * d.y);
     atomic_add_fixedpoint(grad_q, q_base + 4u, grad_qv * 2.0f * d.y * d.z);
     atomic_add_fixedpoint(grad_q, q_base + 5u, grad_qv * d.z * d.z);
-    atomic_add_fixedpoint(grad_opacity, tube_id, d_alpha * exp_term);
+    atomic_add_fixedpoint(
+        grad_opacity,
+        tube_id,
+        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf));
   }
 }
 
@@ -5602,7 +5695,7 @@ kernel void direct_split_fixedpoint_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     if (!isfinite(qv)) continue;
-    float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+    float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
     t_before[i] = T;
@@ -5635,7 +5728,7 @@ kernel void direct_split_fixedpoint_backward(
     float3 d = sample_a - load3(ma, tube_id);
     float qv = quadratic_q(q_uvt, tube_id, d);
     float exp_term = exp(-0.5f * qv);
-    float grad_qv = -0.5f * alpha * d_alpha;
+    float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
     float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
     float3 grad_m = -2.0f * grad_qv * qd;
     uint ma_base = tube_id * 3u;
@@ -5647,7 +5740,11 @@ kernel void direct_split_fixedpoint_backward(
     atomic_add_split_fixedpoint(grad_q_coarse, grad_q_fine, q_base + 3u, grad_qv * d.y * d.y);
     atomic_add_split_fixedpoint(grad_q_coarse, grad_q_fine, q_base + 4u, grad_qv * 2.0f * d.y * d.z);
     atomic_add_split_fixedpoint(grad_q_coarse, grad_q_fine, q_base + 5u, grad_qv * d.z * d.z);
-    atomic_add_split_fixedpoint(grad_opacity_coarse, grad_opacity_fine, tube_id, d_alpha * exp_term);
+    atomic_add_split_fixedpoint(
+        grad_opacity_coarse,
+        grad_opacity_fine,
+        tube_id,
+        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf));
   }
 }
 
@@ -5772,7 +5869,7 @@ kernel void direct_serial_backward(
                   float3 d = sample_a - load3(ma, ordered_tube);
                   float qv = quadratic_q(q_uvt, ordered_tube, d);
                   if (!isfinite(qv)) continue;
-                  float alpha_raw = opacity[ordered_tube] * exp(-0.5f * qv);
+                  float alpha_raw = primitive_alpha_raw(opacity[ordered_tube], exp(-0.5f * qv), mf);
                   float alpha = min(mf.max_alpha, alpha_raw);
                   if (!(alpha >= mf.alpha_threshold)) continue;
                   t_before[i] = T;
@@ -5804,7 +5901,7 @@ kernel void direct_serial_backward(
                     float3 d = sample_a - load3(ma, tube_id);
                     float qv = quadratic_q(q_uvt, tube_id, d);
                     float exp_term = exp(-0.5f * qv);
-                    float grad_qv = -0.5f * alpha * d_alpha;
+                    float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
                     float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
                     grad_m_sum += -2.0f * grad_qv * qd;
                     q_sum0 += grad_qv * d.x * d.x;
@@ -5813,7 +5910,8 @@ kernel void direct_serial_backward(
                     q_sum3 += grad_qv * d.y * d.y;
                     q_sum4 += grad_qv * 2.0f * d.y * d.z;
                     q_sum5 += grad_qv * d.z * d.z;
-                    opacity_sum += d_alpha * exp_term;
+                    opacity_sum +=
+                        d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf);
                   }
                   break;
                 }
@@ -5990,7 +6088,7 @@ inline void tile_pair_backward_samples_impl(
             float3 d = sample_a - load3(ma, tube_id);
             float qv = quadratic_q(q_uvt, tube_id, d);
             if (!isfinite(qv)) continue;
-            float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+            float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
             float alpha = min(mf.max_alpha, alpha_raw);
             if (!(alpha >= mf.alpha_threshold)) continue;
             if (tube_id == target_id) {
@@ -6016,7 +6114,7 @@ inline void tile_pair_backward_samples_impl(
               float3 d = sample_a - load3(ma, tube_id);
               float qv = quadratic_q(q_uvt, tube_id, d);
               if (!isfinite(qv)) continue;
-              float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+              float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
               float alpha = min(mf.max_alpha, alpha_raw);
               if (!(alpha >= mf.alpha_threshold)) continue;
               float w = suffix_T * alpha;
@@ -6041,7 +6139,8 @@ inline void tile_pair_backward_samples_impl(
             float3 d = sample_a - load3(ma, target_id);
             float qv = quadratic_q(q_uvt, target_id, d);
             float exp_term = exp(-0.5f * qv);
-            float grad_qv = -0.5f * target_alpha * d_alpha;
+            float grad_qv =
+                d_alpha * primitive_alpha_d_qv(opacity[target_id], exp_term, mf);
             float3 qd = load_q_row0(q_uvt, target_id) * d.x + load_q_row1(q_uvt, target_id) * d.y + load_q_row2(q_uvt, target_id) * d.z;
             float3 grad_m_value = -2.0f * grad_qv * qd;
             float q_value0 = grad_qv * d.x * d.x;
@@ -6050,7 +6149,8 @@ inline void tile_pair_backward_samples_impl(
             float q_value3 = grad_qv * d.y * d.y;
             float q_value4 = grad_qv * 2.0f * d.y * d.z;
             float q_value5 = grad_qv * d.z * d.z;
-            float opacity_value = d_alpha * exp_term;
+            float opacity_value =
+                d_alpha * primitive_alpha_d_opacity(opacity[target_id], exp_term, mf);
             if (compensated_sums) {
               KAHAN_ADD(grad_m_sum, grad_m_comp, grad_m_value);
               KAHAN_ADD(q_sum0, q_comp0, q_value0);
@@ -6086,7 +6186,7 @@ inline void tile_pair_backward_samples_impl(
           float3 d = sample_a - load3(ma, tube_id);
           float qv = quadratic_q(q_uvt, tube_id, d);
           if (!isfinite(qv)) continue;
-          float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+          float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
           float alpha = min(mf.max_alpha, alpha_raw);
           if (!(alpha >= mf.alpha_threshold)) continue;
           t_before[i] = T;
@@ -6122,7 +6222,7 @@ inline void tile_pair_backward_samples_impl(
           float3 d = sample_a - load3(ma, tube_id);
           float qv = quadratic_q(q_uvt, tube_id, d);
           float exp_term = exp(-0.5f * qv);
-          float grad_qv = -0.5f * alpha * d_alpha;
+          float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
           float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
           float3 grad_m_value = -2.0f * grad_qv * qd;
           float q_value0 = grad_qv * d.x * d.x;
@@ -6131,7 +6231,8 @@ inline void tile_pair_backward_samples_impl(
           float q_value3 = grad_qv * d.y * d.y;
           float q_value4 = grad_qv * 2.0f * d.y * d.z;
           float q_value5 = grad_qv * d.z * d.z;
-          float opacity_value = d_alpha * exp_term;
+          float opacity_value =
+              d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf);
           if (compensated_sums) {
             KAHAN_ADD(grad_m_sum, grad_m_comp, grad_m_value);
             KAHAN_ADD(q_sum0, q_comp0, q_value0);
@@ -6317,7 +6418,7 @@ kernel void tile_pair_parallel_backward_samples(
       float3 d = sample_a - load3(ma, tube_id);
       float qv = quadratic_q(q_uvt, tube_id, d);
       if (!isfinite(qv)) continue;
-      float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+      float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
       float alpha = min(mf.max_alpha, alpha_raw);
       if (!(alpha >= mf.alpha_threshold)) continue;
       t_before[i] = T;
@@ -6349,7 +6450,7 @@ kernel void tile_pair_parallel_backward_samples(
       float3 d = sample_a - load3(ma, tube_id);
       float qv = quadratic_q(q_uvt, tube_id, d);
       float exp_term = exp(-0.5f * qv);
-      float grad_qv = -0.5f * alpha * d_alpha;
+      float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
       float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
       grad_m_sum += -2.0f * grad_qv * qd;
       q_sum0 += grad_qv * d.x * d.x;
@@ -6358,7 +6459,7 @@ kernel void tile_pair_parallel_backward_samples(
       q_sum3 += grad_qv * d.y * d.y;
       q_sum4 += grad_qv * 2.0f * d.y * d.z;
       q_sum5 += grad_qv * d.z * d.z;
-      opacity_sum += d_alpha * exp_term;
+      opacity_sum += d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf);
       break;
     }
   }
@@ -6510,7 +6611,7 @@ kernel void tile_pair_atomic_backward(
           float3 d = sample_a - load3(ma, tube_id);
           float qv = quadratic_q(q_uvt, tube_id, d);
           if (!isfinite(qv)) continue;
-          float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+          float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
           float alpha = min(mf.max_alpha, alpha_raw);
           if (!(alpha >= mf.alpha_threshold)) continue;
           t_before[i] = T;
@@ -6542,7 +6643,7 @@ kernel void tile_pair_atomic_backward(
           float3 d = sample_a - load3(ma, tube_id);
           float qv = quadratic_q(q_uvt, tube_id, d);
           float exp_term = exp(-0.5f * qv);
-          float grad_qv = -0.5f * alpha * d_alpha;
+          float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
           float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
           grad_m_sum += -2.0f * grad_qv * qd;
           q_sum0 += grad_qv * d.x * d.x;
@@ -6551,7 +6652,7 @@ kernel void tile_pair_atomic_backward(
           q_sum3 += grad_qv * d.y * d.y;
           q_sum4 += grad_qv * 2.0f * d.y * d.z;
           q_sum5 += grad_qv * d.z * d.z;
-          opacity_sum += d_alpha * exp_term;
+          opacity_sum += d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf);
           break;
         }
       }
@@ -6684,7 +6785,7 @@ kernel void tile_pair_fixedpoint_backward(
           float3 d = sample_a - load3(ma, tube_id);
           float qv = quadratic_q(q_uvt, tube_id, d);
           if (!isfinite(qv)) continue;
-          float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+          float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
           float alpha = min(mf.max_alpha, alpha_raw);
           if (!(alpha >= mf.alpha_threshold)) continue;
           t_before[i] = T;
@@ -6716,7 +6817,7 @@ kernel void tile_pair_fixedpoint_backward(
           float3 d = sample_a - load3(ma, tube_id);
           float qv = quadratic_q(q_uvt, tube_id, d);
           float exp_term = exp(-0.5f * qv);
-          float grad_qv = -0.5f * alpha * d_alpha;
+          float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
           float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
           grad_m_sum += -2.0f * grad_qv * qd;
           q_sum0 += grad_qv * d.x * d.x;
@@ -6725,7 +6826,7 @@ kernel void tile_pair_fixedpoint_backward(
           q_sum3 += grad_qv * d.y * d.y;
           q_sum4 += grad_qv * 2.0f * d.y * d.z;
           q_sum5 += grad_qv * d.z * d.z;
-          opacity_sum += d_alpha * exp_term;
+          opacity_sum += d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf);
           break;
         }
       }
@@ -6891,7 +6992,7 @@ kernel void tile_pair_grouped_backward_samples(
         float3 d = sample_a - load3(ma, tube_id);
         float qv = quadratic_q(q_uvt, tube_id, d);
         if (!isfinite(qv)) continue;
-        float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+        float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
         float alpha = min(mf.max_alpha, alpha_raw);
         if (!(alpha >= mf.alpha_threshold)) continue;
         t_before[i] = T;
@@ -6923,7 +7024,7 @@ kernel void tile_pair_grouped_backward_samples(
         float3 d = sample_a - load3(ma, tube_id);
         float qv = quadratic_q(q_uvt, tube_id, d);
         float exp_term = exp(-0.5f * qv);
-        float grad_qv = -0.5f * alpha * d_alpha;
+        float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
         float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
         grad_m_sum += -2.0f * grad_qv * qd;
         q_sum0 += grad_qv * d.x * d.x;
@@ -6932,7 +7033,7 @@ kernel void tile_pair_grouped_backward_samples(
         q_sum3 += grad_qv * d.y * d.y;
         q_sum4 += grad_qv * 2.0f * d.y * d.z;
         q_sum5 += grad_qv * d.z * d.z;
-        opacity_sum += d_alpha * exp_term;
+        opacity_sum += d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf);
         break;
       }
     }
@@ -7119,7 +7220,7 @@ kernel void tile_pair_sharedsort_backward_samples(
             float3 d = sample_a - load3(ma, tube_id);
             float qv = quadratic_q(q_uvt, tube_id, d);
             if (!isfinite(qv)) continue;
-            float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+            float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
             float alpha = min(mf.max_alpha, alpha_raw);
             if (!(alpha >= mf.alpha_threshold)) continue;
             t_before[i] = T;
@@ -7151,7 +7252,7 @@ kernel void tile_pair_sharedsort_backward_samples(
             float3 d = sample_a - load3(ma, tube_id);
             float qv = quadratic_q(q_uvt, tube_id, d);
             float exp_term = exp(-0.5f * qv);
-            float grad_qv = -0.5f * alpha * d_alpha;
+            float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
             float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
             grad_m_sum += -2.0f * grad_qv * qd;
             q_sum0 += grad_qv * d.x * d.x;
@@ -7160,7 +7261,7 @@ kernel void tile_pair_sharedsort_backward_samples(
             q_sum3 += grad_qv * d.y * d.y;
             q_sum4 += grad_qv * 2.0f * d.y * d.z;
             q_sum5 += grad_qv * d.z * d.z;
-            opacity_sum += d_alpha * exp_term;
+            opacity_sum += d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf);
             break;
           }
         }
@@ -7324,7 +7425,7 @@ kernel void tile_pair_scanline_backward_samples(
       float3 d = sample_a - load3(ma, tube_id);
       float qv = quadratic_q(q_uvt, tube_id, d);
       if (!isfinite(qv)) continue;
-      float alpha_raw = opacity[tube_id] * exp(-0.5f * qv);
+      float alpha_raw = primitive_alpha_raw(opacity[tube_id], exp(-0.5f * qv), mf);
       float alpha = min(mf.max_alpha, alpha_raw);
       if (!(alpha >= mf.alpha_threshold)) continue;
       t_before[i] = T;
@@ -7356,7 +7457,7 @@ kernel void tile_pair_scanline_backward_samples(
       float3 d = sample_a - load3(ma, tube_id);
       float qv = quadratic_q(q_uvt, tube_id, d);
       float exp_term = exp(-0.5f * qv);
-      float grad_qv = -0.5f * alpha * d_alpha;
+      float grad_qv = d_alpha * primitive_alpha_d_qv(opacity[tube_id], exp_term, mf);
       float3 qd = load_q_row0(q_uvt, tube_id) * d.x + load_q_row1(q_uvt, tube_id) * d.y + load_q_row2(q_uvt, tube_id) * d.z;
       float3 grad_m_value = -2.0f * grad_qv * qd;
       grad_m_sum += grad_m_value;
@@ -7366,7 +7467,7 @@ kernel void tile_pair_scanline_backward_samples(
       q_sum3 += grad_qv * d.y * d.y;
       q_sum4 += grad_qv * 2.0f * d.y * d.z;
       q_sum5 += grad_qv * d.z * d.z;
-      opacity_sum += d_alpha * exp_term;
+      opacity_sum += d_alpha * primitive_alpha_d_opacity(opacity[tube_id], exp_term, mf);
       break;
     }
   }

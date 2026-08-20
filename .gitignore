@@ -9,6 +9,7 @@ uv.lock
 # Benchmark payloads are reproducible local evidence. Keep benchmark code and
 # curated summaries in Git, but do not archive every image/video/sweep row.
 variants/*/research_project/benchmarks/results/
+variants/star_uvt_v0/artifacts/
 
 # Superseded WorldFoam forks remain available in the local research checkout.
 # The fused-slab variant is the sole preserved implementation surface.

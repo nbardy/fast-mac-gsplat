@@ -4,7 +4,7 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from torch_gsplat_bridge_star_uvt import UVTRenderConfig
+from torch_gsplat_bridge_star_uvt import UVTRenderConfig, primitive_alpha
 
 
 def _logit(value: Tensor) -> Tensor:
@@ -397,7 +397,7 @@ def dense_differentiable_render_uvt_tubes(
     grid = make_uvt_grid(config, ma.device)
     delta = grid.unsqueeze(3) - ma.view(1, 1, 1, -1, 3)
     qv = _quadratic(q_uvt.view(1, 1, 1, -1, 6), delta)
-    alpha = torch.clamp(opacity.view(1, 1, 1, -1) * torch.exp(-0.5 * qv), max=config.max_alpha)
+    alpha = primitive_alpha(opacity.view(1, 1, 1, -1), qv, config)
     order = torch.argsort(depth0.detach(), stable=True).detach().cpu().tolist()
 
     background = torch.tensor(config.background, dtype=torch.float32, device=ma.device).view(1, 1, 1, 3)

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import json
 import math
 import os
+import statistics
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -30,23 +32,34 @@ def find_dynaworld_root() -> Path:
 DYNAWORLD_ROOT = find_dynaworld_root()
 TRAIN_SRC = DYNAWORLD_ROOT / "src" / "train"
 GAUGE_EXPERIMENTS = DYNAWORLD_ROOT / "research_experiments" / "gauge_fields"
-for path in (TRAIN_SRC, GAUGE_EXPERIMENTS):
+for path in (DYNAWORLD_ROOT, TRAIN_SRC, GAUGE_EXPERIMENTS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from torch_gsplat_bridge_star_uvt import UVTRenderConfig, render_uvt_tubes  # noqa: E402
+from torch_gsplat_bridge_star_uvt import (  # noqa: E402
+    UVTRenderConfig,
+    render_uvt_tubes,
+    slice_projective_trace_cell_atlas_frames,
+    uvt_tubes_to_projective_trace_cell_atlas,
+)
 from camera import CameraSpec  # noqa: E402
 from config_utils import load_config_file, serialize_config_value  # noqa: E402
 from common import prefix_metrics, robust_l1, save_preview_strip, save_side_by_side_mp4, video_metrics, write_json  # noqa: E402
-from device_memory import DeviceMemorySampler  # noqa: E402
+from device_memory import DeviceMemorySampler, device_memory_stats  # noqa: E402
 from multicam_video_data import load_multicam_video_bundle  # noqa: E402
 from paper_training_protocol import (  # noqa: E402
     PaperCostTracker,
     PaperPhaseTimer,
+    PaperRGBMetricAccumulator,
+    PaperSampleScheduleDigest,
     SpacetimeEpochSampler,
     apply_paper_dataset_contract,
     normalize_image_size,
     normalize_paper_stages,
+    paper_dataset_bundle_identity,
+    paper_evaluator_contract,
+    paper_native_module_identity,
+    paper_runtime_identity,
     paper_stage_for_step,
     resize_video_frames,
     scale_intrinsics,
@@ -64,11 +77,34 @@ from train_splat_baseline import (  # noqa: E402
     select_K_for_view_time,
     select_w2c_for_view_time,
 )
+from research_experiments.spd4_world_tubes.hybrid_transfer import (  # noqa: E402
+    render_variance_certified_hybrid_metal,
+)
+from research_experiments.spd4_world_tubes.retained_fiber_metal import (  # noqa: E402
+    render_retained_fiber_metal,
+)
+from research_experiments.paper_runner_suite.frozen_atlas_storage import (  # noqa: E402
+    LOGICAL_PAYLOAD_DEFINITION,
+    REPLAY_STORAGE_REASON,
+    RETAINED_STORAGE_DEFINITION,
+    ROUTE_MEMORY_DEFINITION,
+    ROUTE_MEMORY_MEASUREMENT_SOURCE,
+    TENSOR_NAMES as FROZEN_ATLAS_TENSOR_NAMES,
+    write_retained_storage_artifact,
+)
 
 try:
     from research_project.trainer_harness.model import dense_differentiable_render_uvt_tubes
+    from research_project.trainer_harness.spd4_world_atom import (
+        SPD4WorldAtomBatch,
+        SPD4WorldAtomModel,
+        project_spd4_world_atoms_from_pixel_jacobian,
+        project_spd4_world_atoms_pinhole,
+        project_spd4_world_atoms_pinhole_motion,
+    )
     from research_project.trainer_harness.tile_metal_autograd import (
         BACKWARD_POLICY_NAMES,
+        ProjectiveCellIntervalTrainerState,
         render_uvt_tubes_metal_tile_backward,
         resolve_backward_policy,
     )
@@ -87,7 +123,19 @@ except ImportError:  # pragma: no cover - direct script execution fallback.
     if str(HARNESS) not in sys.path:
         sys.path.insert(0, str(HARNESS))
     from model import dense_differentiable_render_uvt_tubes
-    from tile_metal_autograd import BACKWARD_POLICY_NAMES, render_uvt_tubes_metal_tile_backward, resolve_backward_policy
+    from spd4_world_atom import (
+        SPD4WorldAtomBatch,
+        SPD4WorldAtomModel,
+        project_spd4_world_atoms_from_pixel_jacobian,
+        project_spd4_world_atoms_pinhole,
+        project_spd4_world_atoms_pinhole_motion,
+    )
+    from tile_metal_autograd import (
+        BACKWARD_POLICY_NAMES,
+        ProjectiveCellIntervalTrainerState,
+        render_uvt_tubes_metal_tile_backward,
+        resolve_backward_policy,
+    )
     from variable_camera_segments import project_piecewise_camera_time_segments
     from world_tube import (
         PinholeCamera,
@@ -115,6 +163,192 @@ TRAIN_SCHEDULE_CHOICES = (
     "view_shuffled_cycle",
     "epoch_view_shuffled_cycle",
 )
+UVT_RENDER_BACKENDS = (
+    "dense",
+    "metal_tile",
+    "retained_fiber_metal",
+    "hybrid_retained_fiber",
+)
+UVT_FAST_METAL_BACKENDS = {"metal_tile", "hybrid_retained_fiber"}
+UVT_NATIVE_METAL_BACKENDS = {
+    "metal_tile",
+    "retained_fiber_metal",
+    "hybrid_retained_fiber",
+}
+FROZEN_WORLD_ACCEPTANCE = {
+    "image_max_abs_error": 1.0e-5,
+    "loss_absolute_delta": 1.0e-5,
+    "gradient_global_normalized_l2_error": 1.0e-5,
+    "gradient_max_parameter_normalized_l2_error": 1.0e-5,
+    "min_world_vjp_l2_norm": 1.0e-12,
+    "fallback_fraction": 0.20,
+}
+FROZEN_WORLD_CANONICAL_FRAME_COUNTS = (4, 8, 16, 32, 64, 128)
+FROZEN_WORLD_MIN_TIMING_WARMUPS = 1
+FROZEN_WORLD_MIN_TIMING_REPEATS = 3
+FROZEN_WORLD_MAX_FRAME_COUNT_REQUESTS = 16
+FROZEN_WORLD_MAX_TIMING_WARMUPS = 10
+FROZEN_WORLD_MAX_TIMING_REPEATS = 20
+PAPER_DYNAMIC_FAST_MAC_OPTIONS = {
+    "rgb_variant": "v5",
+    "background": [0.0, 0.0, 0.0],
+}
+
+
+def parse_frozen_world_frame_counts(value: str | None) -> tuple[int, ...] | None:
+    if value is None:
+        return None
+    tokens = value.split(",")
+    if not tokens or any(not token.strip() for token in tokens):
+        raise ValueError(
+            "--frozen-world-frame-counts must be a comma-separated list of "
+            "nonnegative integers"
+        )
+    try:
+        counts = tuple(int(token.strip()) for token in tokens)
+    except ValueError as error:
+        raise ValueError(
+            "--frozen-world-frame-counts must contain only base-10 integers"
+        ) from error
+    if any(count < 0 for count in counts):
+        raise ValueError("--frozen-world-frame-counts must be nonnegative")
+    if len(counts) > FROZEN_WORLD_MAX_FRAME_COUNT_REQUESTS:
+        raise ValueError(
+            "--frozen-world-frame-counts has too many entries; maximum is "
+            f"{FROZEN_WORLD_MAX_FRAME_COUNT_REQUESTS}"
+        )
+    return counts
+
+
+def validate_frozen_world_timing_controls(
+    *,
+    warmups: int,
+    repeats: int,
+) -> None:
+    if warmups < 0 or warmups > FROZEN_WORLD_MAX_TIMING_WARMUPS:
+        raise ValueError(
+            "frozen-world timing warmups must be in "
+            f"[0, {FROZEN_WORLD_MAX_TIMING_WARMUPS}]"
+        )
+    if repeats < 1 or repeats > FROZEN_WORLD_MAX_TIMING_REPEATS:
+        raise ValueError(
+            "frozen-world timing repeats must be in "
+            f"[1, {FROZEN_WORLD_MAX_TIMING_REPEATS}]"
+        )
+
+
+def resolve_frozen_world_frame_counts(
+    *,
+    full_frames: int,
+    primary_max_frames: int,
+    requested_frame_counts: tuple[int, ...] | None,
+) -> tuple[int, ...]:
+    if full_frames < 1:
+        raise ValueError("frozen-world full frame count must be positive")
+    if len(requested_frame_counts or ()) > FROZEN_WORLD_MAX_FRAME_COUNT_REQUESTS:
+        raise ValueError("frozen-world frame-count request is too large")
+    candidates = (int(primary_max_frames), *(requested_frame_counts or ()))
+    resolved: list[int] = []
+    for requested in candidates:
+        if requested < 0:
+            raise ValueError("frozen-world frame counts must be nonnegative")
+        frame_count = full_frames if requested == 0 else min(requested, full_frames)
+        if frame_count not in resolved:
+            resolved.append(frame_count)
+    if full_frames > 1 and 1 in resolved:
+        raise ValueError(
+            "frozen-world full-interval sampling requires at least two frames"
+        )
+    return tuple(sorted(resolved))
+
+
+def frozen_world_full_interval_frame_indices(
+    full_frames: int,
+    frame_count: int,
+) -> tuple[int, ...]:
+    if full_frames < 1 or frame_count < 1 or frame_count > full_frames:
+        raise ValueError(
+            "frozen-world sampled frame count must be in [1, full_frames]"
+        )
+    if frame_count == 1:
+        if full_frames > 1:
+            raise ValueError(
+                "frozen-world full-interval sampling requires at least two frames"
+            )
+        return (full_frames // 2,)
+    denominator = frame_count - 1
+    indices = tuple(
+        (
+            sample * (full_frames - 1) + denominator // 2
+        )
+        // denominator
+        for sample in range(frame_count)
+    )
+    if len(set(indices)) != frame_count:
+        raise RuntimeError("frozen-world full-interval time grid is not unique")
+    return indices
+
+
+def frozen_world_sequence_sha256(values: tuple[int | float, ...]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            list(values),
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def frozen_world_sweep_publication_eligible(
+    *,
+    requested_frame_counts: tuple[int, ...] | None,
+    full_frames: int,
+    timing_warmups: int,
+    timing_repeats: int,
+    selected_time_slice_parity_accepted: bool,
+    all_rows_storage_publication_ready: bool,
+    all_rows_route_memory_publication_ready: bool,
+) -> bool:
+    requested = set(requested_frame_counts or ())
+    return (
+        full_frames >= max(FROZEN_WORLD_CANONICAL_FRAME_COUNTS)
+        and (0 in requested or full_frames in requested)
+        and set(FROZEN_WORLD_CANONICAL_FRAME_COUNTS).issubset(requested)
+        and timing_warmups >= FROZEN_WORLD_MIN_TIMING_WARMUPS
+        and timing_repeats >= FROZEN_WORLD_MIN_TIMING_REPEATS
+        and selected_time_slice_parity_accepted
+        and all_rows_storage_publication_ready
+        and all_rows_route_memory_publication_ready
+    )
+
+
+def _timing_quantile(sorted_samples: list[float], probability: float) -> float:
+    if not sorted_samples:
+        raise ValueError("timing samples must be nonempty")
+    position = float(len(sorted_samples) - 1) * probability
+    lower = int(math.floor(position))
+    upper = int(math.ceil(position))
+    if lower == upper:
+        return sorted_samples[lower]
+    fraction = position - float(lower)
+    return (
+        sorted_samples[lower] * (1.0 - fraction)
+        + sorted_samples[upper] * fraction
+    )
+
+
+def frozen_world_timing_summary(samples: list[float]) -> dict[str, float | int]:
+    if not samples or any(not math.isfinite(value) or value < 0.0 for value in samples):
+        raise ValueError("timing samples must be finite and nonnegative")
+    ordered = sorted(float(value) for value in samples)
+    return {
+        "count": len(ordered),
+        "min": ordered[0],
+        "p25": _timing_quantile(ordered, 0.25),
+        "median": statistics.median(ordered),
+        "p75": _timing_quantile(ordered, 0.75),
+        "max": ordered[-1],
+        "mean": math.fsum(ordered) / float(len(ordered)),
+    }
 
 
 def resolve_dynaworld_path(path: str | Path) -> Path:
@@ -129,6 +363,57 @@ def resolve_variant_path(path: str | Path) -> Path:
     if value.is_absolute():
         return value
     return ROOT / value
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def star_uvt_native_extension_identity() -> dict[str, Any]:
+    native = paper_native_module_identity(
+        "torch_gsplat_bridge_star_uvt._C",
+        runtime_source_root=ROOT / "csrc" / "metal",
+    )
+    source_files = sorted(
+        (
+            *(
+                candidate
+                for candidate in (ROOT / "csrc").rglob("*")
+                if candidate.is_file()
+            ),
+            ROOT / "setup.py",
+        )
+    )
+    source_digest = hashlib.sha256()
+    for source_path in source_files:
+        relative = source_path.relative_to(ROOT)
+        source_digest.update(str(relative).encode("utf-8"))
+        source_digest.update(file_sha256(source_path).encode("ascii"))
+    return {
+        **native,
+        "source_tree_sha256": source_digest.hexdigest(),
+        "source_file_count": len(source_files),
+    }
+
+
+def fast_mac_v5_native_extension_identity() -> dict[str, Any]:
+    variant = (
+        DYNAWORLD_ROOT
+        / "third_party"
+        / "fast-mac-gsplat"
+        / "variants"
+        / "v5"
+    )
+    if str(variant) not in sys.path:
+        sys.path.insert(0, str(variant))
+    return paper_native_module_identity(
+        "torch_gsplat_bridge_v5._C",
+        runtime_source_root=variant / "csrc" / "metal",
+    )
 
 
 def resolve_device(value: str) -> torch.device:
@@ -173,38 +458,8 @@ def render_time_metrics(train_times: list[float], heldout_times: list[float]) ->
     }
 
 
-@dataclass
-class VideoMetricAccumulator:
-    absolute_error_sum: float = 0.0
-    squared_error_sum: float = 0.0
-    element_count: int = 0
-    ssim_sum: float = 0.0
-    frame_count: int = 0
-
-    def update(self, rendered: Tensor, target: Tensor) -> None:
-        if rendered.shape != target.shape or rendered.ndim != 4:
-            raise ValueError(
-                f"streamed video metrics require matching [T,H,W,C], got {tuple(rendered.shape)} and {tuple(target.shape)}"
-            )
-        diff = rendered.float() - target.float()
-        self.absolute_error_sum += float(diff.abs().sum().detach().cpu())
-        self.squared_error_sum += float(diff.square().sum().detach().cpu())
-        self.element_count += int(diff.numel())
-        chunk_frames = int(rendered.shape[0])
-        self.ssim_sum += video_metrics(rendered, target)["eval_ssim"] * chunk_frames
-        self.frame_count += chunk_frames
-
-    def metrics(self) -> dict[str, float]:
-        if self.element_count < 1 or self.frame_count < 1:
-            raise ValueError("streamed video metrics require at least one frame")
-        l1 = self.absolute_error_sum / float(self.element_count)
-        mse = self.squared_error_sum / float(self.element_count)
-        return {
-            "eval_l1": l1,
-            "eval_mse": mse,
-            "eval_psnr": -10.0 * math.log10(max(mse, 1.0e-12)),
-            "eval_ssim": self.ssim_sum / float(self.frame_count),
-        }
+class VideoMetricAccumulator(PaperRGBMetricAccumulator):
+    """Backward-compatible name for the canonical paper evaluator."""
 
 
 def media_frame_positions(frame_count: int, max_frames: int) -> set[int]:
@@ -293,7 +548,10 @@ def crop_robust_l1(rendered: Tensor, target: Tensor, crop_size: int, crop_index:
 
 
 def snapshot_world_tube_state(model: nn.Module) -> dict[str, Tensor]:
-    return {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+    return {
+        key: value.detach().cpu().contiguous().clone()
+        for key, value in model.state_dict().items()
+    }
 
 
 def tensor_scalar_or_none(value: Tensor) -> float | None:
@@ -387,7 +645,7 @@ def splat_camera_for_view_time(
 
 
 def project_world_tubes_dataset_lens(
-    batch: WorldTubeBatch,
+    batch: WorldTubeBatch | SPD4WorldAtomBatch,
     K: Tensor,
     w2c: Tensor,
     config: UVTRenderConfig,
@@ -409,14 +667,40 @@ def project_world_tubes_dataset_lens(
         distortion=distortion,
     )
     pixels, _depths, pixel_jacobian, _front_mask = project_points_camera(center_cam, camera)
-    ma, q_uvt, depth0, depth_beta, opacity, color = project_world_tubes_from_pixel_jacobian(
-        batch,
-        world_to_camera,
-        pixels,
-        pixel_jacobian,
-        config,
+    if isinstance(batch, SPD4WorldAtomBatch):
+        projected = project_spd4_world_atoms_from_pixel_jacobian(
+            batch,
+            world_to_camera,
+            pixels,
+            pixel_jacobian,
+        )
+        return ProjectedTubeSequence(
+            ma=projected.ma,
+            q_uvt=projected.q_uvt,
+            depth0=projected.depth0,
+            depth_beta=projected.depth_beta,
+            opacity=projected.opacity,
+            color=projected.color,
+            depth_variance=projected.depth_variance,
+            peak_to_fiber_scale=projected.peak_to_fiber_scale,
+        )
+    ma, q_uvt, depth0, depth_beta, opacity, color = (
+        project_world_tubes_from_pixel_jacobian(
+            batch,
+            world_to_camera,
+            pixels,
+            pixel_jacobian,
+            config,
+        )
     )
-    return ProjectedTubeSequence(ma=ma, q_uvt=q_uvt, depth0=depth0, depth_beta=depth_beta, opacity=opacity, color=color)
+    return ProjectedTubeSequence(
+        ma=ma,
+        q_uvt=q_uvt,
+        depth0=depth0,
+        depth_beta=depth_beta,
+        opacity=opacity,
+        color=color,
+    )
 
 
 def select_view_K(K: Tensor, view: int) -> Tensor:
@@ -517,7 +801,7 @@ def global_to_local_time(global_t: float, *, full_frames: int, config: UVTRender
 
 def project_world_tube_sequence_dynamic_first_order(
     *,
-    model: WorldTubeModel,
+    model: WorldTubeModel | SPD4WorldAtomModel,
     K_seq: Tensor,
     w2c_seq: Tensor,
     config: UVTRenderConfig,
@@ -540,23 +824,69 @@ def project_world_tube_sequence_dynamic_first_order(
     K_mid = K_seq[mid_index]
     chart_global_t = local_frame_time(window_mid_frame, int(full_frames))
     camera = PinholeCameraMotion(
-        fx=float(K_mid[0, 0].detach().cpu()),
-        fy=float(K_mid[1, 1].detach().cpu()),
-        cx=float(K_mid[0, 2].detach().cpu()),
-        cy=float(K_mid[1, 2].detach().cpu()),
-        fx_dot=float(K_dot[0, 0].detach().cpu()),
-        fy_dot=float(K_dot[1, 1].detach().cpu()),
-        cx_dot=float(K_dot[0, 2].detach().cpu()),
-        cy_dot=float(K_dot[1, 2].detach().cpu()),
+        fx=K_mid[0, 0],
+        fy=K_mid[1, 1],
+        cx=K_mid[0, 2],
+        cy=K_mid[1, 2],
+        fx_dot=K_dot[0, 0],
+        fy_dot=K_dot[1, 1],
+        cx_dot=K_dot[0, 2],
+        cy_dot=K_dot[1, 2],
         world_to_camera=w2c_seq[mid_index].to(dtype=torch.float32),
         world_to_camera_dot=w2c_dot.to(dtype=torch.float32),
         chart_time=chart_global_t,
     )
-    projector = project_world_tubes_pinhole_projective_motion if projective_gauge else project_world_tubes_pinhole_motion
-    ma, q_uvt, depth0, depth_beta, opacity, color = projector(model.batch(), camera, config)
+    batch = model.batch()
+    if isinstance(batch, SPD4WorldAtomBatch):
+        spd4_projected = project_spd4_world_atoms_pinhole_motion(batch, camera)
+        projected = ProjectedTubeSequence(
+            ma=spd4_projected.ma,
+            q_uvt=spd4_projected.q_uvt,
+            depth0=spd4_projected.depth0,
+            depth_beta=spd4_projected.depth_beta,
+            opacity=spd4_projected.opacity,
+            color=spd4_projected.color,
+            depth_variance=spd4_projected.depth_variance,
+            peak_to_fiber_scale=spd4_projected.peak_to_fiber_scale,
+        )
+    else:
+        projector = (
+            project_world_tubes_pinhole_projective_motion
+            if projective_gauge
+            else project_world_tubes_pinhole_motion
+        )
+        ma, q_uvt, depth0, depth_beta, opacity, color = projector(
+            batch,
+            camera,
+            config,
+        )
+        projected = ProjectedTubeSequence(
+            ma=ma,
+            q_uvt=q_uvt,
+            depth0=depth0,
+            depth_beta=depth_beta,
+            opacity=opacity,
+            color=color,
+        )
     local_t = global_to_local_time(chart_global_t, full_frames=int(full_frames), config=config, frame_start=frame_start)
-    ma = torch.cat((ma[:, :2], torch.full_like(ma[:, 2:3], local_t)), dim=-1).contiguous()
-    return ProjectedTubeSequence(ma=ma, q_uvt=q_uvt, depth0=depth0, depth_beta=depth_beta, opacity=opacity, color=color)
+    local_ma = torch.cat(
+        (
+            projected.ma[:, :2],
+            projected.ma[:, 2:3]
+            - projected.ma.new_tensor(chart_global_t - local_t),
+        ),
+        dim=-1,
+    ).contiguous()
+    return ProjectedTubeSequence(
+        ma=local_ma,
+        q_uvt=projected.q_uvt,
+        depth0=projected.depth0,
+        depth_beta=projected.depth_beta,
+        opacity=projected.opacity,
+        color=projected.color,
+        depth_variance=projected.depth_variance,
+        peak_to_fiber_scale=projected.peak_to_fiber_scale,
+    )
 
 
 def project_world_tube_sequence_segmented_camera(
@@ -590,7 +920,7 @@ def project_world_tube_sequence_segmented_camera(
 
 def project_world_tube_sequence_camera_mode(
     *,
-    model: WorldTubeModel,
+    model: WorldTubeModel | SPD4WorldAtomModel,
     K_seq: Tensor,
     w2c_seq: Tensor,
     config: UVTRenderConfig,
@@ -628,6 +958,11 @@ def project_world_tube_sequence_camera_mode(
             projective_gauge=True,
         )
     if camera_sequence_mode == "segmented":
+        if isinstance(model, SPD4WorldAtomModel):
+            raise ValueError(
+                "full_spd4 segmented compilation is not implemented; use one "
+                "of static_view, dynamic_first_order, or projective_first_order"
+            )
         return project_world_tube_sequence_segmented_camera(
             model=model,
             K_seq=K_seq,
@@ -650,6 +985,76 @@ def _inv_softplus(value: Tensor) -> Tensor:
 def _logit(value: Tensor) -> Tensor:
     clamped = value.clamp(1.0e-5, 1.0 - 1.0e-5)
     return torch.log(clamped) - torch.log1p(-clamped)
+
+
+def opacity_semantics(
+    alpha_mode: str,
+    amplitude_convention: str = "fiber_integrated",
+) -> str:
+    if alpha_mode == "peak_splat":
+        return "peak_alpha_amplitude"
+    if alpha_mode == "beer_lambert":
+        if amplitude_convention == "fiber_integrated":
+            return "nonnegative_fiber_integrated_peak_optical_thickness"
+        if amplitude_convention == "peak_density":
+            return "nonnegative_world_peak_extinction_density"
+    raise ValueError("alpha_mode must be one of: peak_splat, beer_lambert")
+
+
+def max_alpha_for_mode(alpha_mode: str) -> float:
+    """Return the compositing cap appropriate to the opacity parameterization."""
+
+    if alpha_mode == "peak_splat":
+        return 0.99
+    if alpha_mode == "beer_lambert":
+        # Beer-Lambert opacity is 1-exp(-tau), so 1.0 removes the historical
+        # peak-splat cap without limiting the trainable optical thickness tau.
+        return 1.0
+    raise ValueError("alpha_mode must be one of: peak_splat, beer_lambert")
+
+
+def initial_raw_opacity(
+    init_source_amplitude: float,
+    *,
+    alpha_mode: str,
+    amplitude_convention: str = "fiber_integrated",
+    count: int,
+    reference: Tensor,
+) -> Tensor:
+    if amplitude_convention == "peak_density":
+        if alpha_mode != "beer_lambert":
+            raise ValueError("peak_density initialization requires beer_lambert")
+        if not float(init_source_amplitude) > 0.0:
+            raise ValueError("peak-density init_opacity must be positive")
+        peak_density = torch.full(
+            (count,),
+            float(init_source_amplitude),
+            dtype=reference.dtype,
+            device=reference.device,
+        )
+        return _inv_softplus(peak_density)
+    if not 0.0 < float(init_source_amplitude) < 0.99:
+        raise ValueError("init_opacity must be an initial center alpha in (0, 0.99)")
+    center_alpha = torch.full(
+        (count,),
+        float(init_source_amplitude),
+        dtype=reference.dtype,
+        device=reference.device,
+    )
+    if alpha_mode == "peak_splat":
+        return _logit(center_alpha / 0.99)
+    if alpha_mode == "beer_lambert":
+        peak_optical_thickness = -torch.log1p(-center_alpha)
+        return _inv_softplus(peak_optical_thickness)
+    raise ValueError("alpha_mode must be one of: peak_splat, beer_lambert")
+
+
+def opacity_from_raw(raw_opacity: Tensor, *, alpha_mode: str) -> Tensor:
+    if alpha_mode == "peak_splat":
+        return torch.sigmoid(raw_opacity) * 0.99
+    if alpha_mode == "beer_lambert":
+        return F.softplus(raw_opacity)
+    raise ValueError("alpha_mode must be one of: peak_splat, beer_lambert")
 
 
 def sample_init_pixels(
@@ -888,6 +1293,10 @@ def initialize_world_tubes_with_static_fraction(
 
 
 class WorldTubeModel(nn.Module):
+    representation_name = "legacy_tube"
+    geometry_dof_per_atom = 10
+    total_dof_per_atom = 14
+
     def __init__(
         self,
         *,
@@ -903,6 +1312,8 @@ class WorldTubeModel(nn.Module):
         velocity_reg_weight: float,
         depth_velocity_reg_weight: float,
         position_reg_weight: float,
+        alpha_mode: str = "peak_splat",
+        amplitude_convention: str = "fiber_integrated",
         static_tube_count: int = 0,
         static_velocity_reg_weight: float = 0.0,
     ) -> None:
@@ -915,6 +1326,16 @@ class WorldTubeModel(nn.Module):
         self.velocity_reg_weight = float(velocity_reg_weight)
         self.depth_velocity_reg_weight = float(depth_velocity_reg_weight)
         self.position_reg_weight = float(position_reg_weight)
+        self.alpha_mode = str(alpha_mode)
+        self.amplitude_convention = str(amplitude_convention)
+        if self.amplitude_convention != "fiber_integrated":
+            raise ValueError(
+                "legacy_tube supports only amplitude_convention=fiber_integrated"
+            )
+        self.opacity_semantics = opacity_semantics(
+            self.alpha_mode,
+            self.amplitude_convention,
+        )
         self.static_tube_count = int(static_tube_count)
         self.static_velocity_reg_weight = float(static_velocity_reg_weight)
         self.active_tube_count = tube_count
@@ -933,10 +1354,17 @@ class WorldTubeModel(nn.Module):
             lambda_t = torch.full((tube_count,), float(init_lambda_t), dtype=torch.float32, device=init_x0.device)
         if bool((lambda_t <= self.min_lambda_t).any().item()):
             raise ValueError("init_lambda_t values must be greater than min_lambda_t")
-        opacity = torch.full((tube_count,), float(init_opacity), dtype=torch.float32, device=init_x0.device)
         self.raw_precision_xy = nn.Parameter(_inv_softplus(precision - self.min_precision_xy))
         self.raw_lambda_t = nn.Parameter(_inv_softplus(lambda_t - self.min_lambda_t))
-        self.raw_opacity = nn.Parameter(_logit(opacity / 0.99))
+        self.raw_opacity = nn.Parameter(
+            initial_raw_opacity(
+                init_opacity,
+                alpha_mode=self.alpha_mode,
+                amplitude_convention=self.amplitude_convention,
+                count=tube_count,
+                reference=init_x0,
+            )
+        )
         self.raw_color = nn.Parameter(_logit(init_color))
         self.t0 = nn.Parameter(init_t0)
 
@@ -953,7 +1381,10 @@ class WorldTubeModel(nn.Module):
             t0=self.t0[active],
             precision_xy=F.softplus(self.raw_precision_xy[active]) + self.min_precision_xy,
             lambda_t=F.softplus(self.raw_lambda_t[active]) + self.min_lambda_t,
-            opacity=torch.sigmoid(self.raw_opacity[active]) * 0.99,
+            opacity=opacity_from_raw(
+                self.raw_opacity[active],
+                alpha_mode=self.alpha_mode,
+            ),
             color=torch.sigmoid(self.raw_color[active]),
         )
 
@@ -973,11 +1404,27 @@ class WorldTubeModel(nn.Module):
                 ].square().mean()
         return reg
 
+    def representation_metadata(self) -> dict[str, int | str]:
+        return {
+            "world_representation": self.representation_name,
+            "geometry_dof_per_atom": self.geometry_dof_per_atom,
+            "total_dof_per_atom": self.total_dof_per_atom,
+            "motion_parameterization": "explicit_velocity",
+            "spatial_covariance_parameterization": "axis_aligned_xy_precision",
+            "alpha_mode": self.alpha_mode,
+            "amplitude_convention": self.amplitude_convention,
+            "opacity_semantics": self.opacity_semantics,
+        }
+
 
 @dataclass(frozen=True)
 class RenderedSequence:
     rgb: Tensor
     alpha: Tensor
+    fallback_tiles: Tensor | None = None
+    fallback_reason_bits: Tensor | None = None
+    fallback_active_counts: Tensor | None = None
+    minimum_pair_separation: Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -988,10 +1435,32 @@ class ProjectedTubeSequence:
     depth_beta: Tensor
     opacity: Tensor
     color: Tensor
+    depth_variance: Tensor | None = None
+    peak_to_fiber_scale: Tensor | None = None
+
+
+def compiled_projected_opacity(
+    projected: ProjectedTubeSequence,
+    config: UVTRenderConfig,
+) -> Tensor:
+    if config.amplitude_convention == "fiber_integrated":
+        return projected.opacity
+    if config.amplitude_convention != "peak_density":
+        raise ValueError(
+            "amplitude_convention must be one of: fiber_integrated, peak_density"
+        )
+    if config.alpha_mode != "beer_lambert":
+        raise ValueError("peak_density amplitude requires alpha_mode=beer_lambert")
+    if projected.peak_to_fiber_scale is None:
+        raise ValueError(
+            "peak_density amplitude requires full_spd4 gauge measure and "
+            "conditional depth variance"
+        )
+    return (projected.opacity * projected.peak_to_fiber_scale).contiguous()
 
 
 def project_world_tube_sequence(
-    model: WorldTubeModel,
+    model: WorldTubeModel | SPD4WorldAtomModel,
     K: Tensor,
     w2c: Tensor,
     config: UVTRenderConfig,
@@ -1004,8 +1473,31 @@ def project_world_tube_sequence(
 ) -> ProjectedTubeSequence:
     if camera_projection == "legacy_pinhole":
         camera = make_pinhole_camera(K, w2c)
-        ma, q_uvt, depth0, depth_beta, opacity, color = project_world_tubes_pinhole(model.batch(), camera, config)
-        projected = ProjectedTubeSequence(ma=ma, q_uvt=q_uvt, depth0=depth0, depth_beta=depth_beta, opacity=opacity, color=color)
+        batch = model.batch()
+        if isinstance(batch, SPD4WorldAtomBatch):
+            spd4_projected = project_spd4_world_atoms_pinhole(batch, camera)
+            projected = ProjectedTubeSequence(
+                ma=spd4_projected.ma,
+                q_uvt=spd4_projected.q_uvt,
+                depth0=spd4_projected.depth0,
+                depth_beta=spd4_projected.depth_beta,
+                opacity=spd4_projected.opacity,
+                color=spd4_projected.color,
+                depth_variance=spd4_projected.depth_variance,
+                peak_to_fiber_scale=spd4_projected.peak_to_fiber_scale,
+            )
+        else:
+            ma, q_uvt, depth0, depth_beta, opacity, color = project_world_tubes_pinhole(
+                batch, camera, config
+            )
+            projected = ProjectedTubeSequence(
+                ma=ma,
+                q_uvt=q_uvt,
+                depth0=depth0,
+                depth_beta=depth_beta,
+                opacity=opacity,
+                color=color,
+            )
     elif camera_projection == "dataset_lens":
         projected = project_world_tubes_dataset_lens(
             model.batch(),
@@ -1031,6 +1523,8 @@ def project_world_tube_sequence(
             depth_beta=projected.depth_beta,
             opacity=projected.opacity,
             color=projected.color,
+            depth_variance=projected.depth_variance,
+            peak_to_fiber_scale=projected.peak_to_fiber_scale,
         )
     return projected
 
@@ -1043,13 +1537,28 @@ def render_projected_sequence(
     reduction_mode: str = "index_add",
     sample_emission_mode: str = "atomic_append",
 ) -> RenderedSequence:
+    render_opacity = compiled_projected_opacity(projected, config)
+    if (
+        backend in {"metal_tile", "hybrid_retained_fiber"}
+        and config.alpha_mode == "beer_lambert"
+        and torch.is_grad_enabled()
+        and (reduction_mode != "index_add" or sample_emission_mode != "direct_atomic")
+    ):
+        raise ValueError(
+            "Beer-Lambert Metal training is validated only for the q-UVT "
+            "direct_atomic+index_add backward path"
+        )
+    fallback_tiles = None
+    fallback_reason_bits = None
+    fallback_active_counts = None
+    minimum_pair_separation = None
     if backend == "dense":
         rgb = dense_differentiable_render_uvt_tubes(
             projected.ma,
             projected.q_uvt,
             projected.depth0,
             projected.depth_beta,
-            projected.opacity,
+            render_opacity,
             projected.color,
             config,
         )
@@ -1059,16 +1568,112 @@ def render_projected_sequence(
             projected.q_uvt,
             projected.depth0,
             projected.depth_beta,
-            projected.opacity,
+            render_opacity,
             projected.color,
             config,
             reduction_mode=reduction_mode,
             sample_emission_mode=sample_emission_mode,
         )
+    elif backend in {"retained_fiber_metal", "hybrid_retained_fiber"}:
+        if projected.depth_variance is None:
+            raise ValueError(
+                f"{backend} requires native full_spd4 conditional depth variance"
+            )
+        if config.alpha_mode != "beer_lambert":
+            raise ValueError(f"{backend} requires alpha_mode=beer_lambert")
+        if config.max_alpha != 1.0:
+            raise ValueError(f"{backend} requires max_alpha=1.0")
+        if projected.ma.device.type != "mps":
+            raise ValueError(f"{backend} requires MPS tensors")
+        times = (
+            torch.arange(
+                config.frames,
+                dtype=torch.float32,
+                device=projected.ma.device,
+            )
+            - 0.5 * float(config.frames - 1)
+        ).contiguous()
+        if backend == "retained_fiber_metal":
+            rgb = render_retained_fiber_metal(
+                projected.ma,
+                projected.q_uvt,
+                projected.depth0,
+                projected.depth_beta,
+                projected.depth_variance,
+                render_opacity,
+                projected.color,
+                times,
+                height=config.height,
+                width=config.width,
+                depth_samples=config.retained_depth_samples,
+                sigma_extent=config.retained_sigma_extent,
+                background=config.background,
+                alpha_threshold=config.alpha_threshold,
+            )
+            tile_shape = (
+                (config.frames + config.tile_t - 1) // config.tile_t,
+                (config.height + config.tile_y - 1) // config.tile_y,
+                (config.width + config.tile_x - 1) // config.tile_x,
+            )
+            fallback_tiles = torch.ones(
+                tile_shape,
+                dtype=torch.int32,
+                device=projected.ma.device,
+            )
+        else:
+            fast_rgb = render_uvt_tubes_metal_tile_backward(
+                projected.ma,
+                projected.q_uvt,
+                projected.depth0,
+                projected.depth_beta,
+                render_opacity,
+                projected.color,
+                config,
+                reduction_mode=reduction_mode,
+                sample_emission_mode=sample_emission_mode,
+            ).contiguous()
+            hybrid = render_variance_certified_hybrid_metal(
+                fast_rgb=fast_rgb,
+                ma=projected.ma,
+                q_uvt=projected.q_uvt,
+                depth0=projected.depth0,
+                depth_beta=projected.depth_beta,
+                depth_variance=projected.depth_variance,
+                optical_thickness=render_opacity,
+                color=projected.color,
+                times=times,
+                height=config.height,
+                width=config.width,
+                tile_x=config.tile_x,
+                tile_y=config.tile_y,
+                tile_t=config.tile_t,
+                alpha_threshold=config.alpha_threshold,
+                max_alpha=config.max_alpha,
+                depth_samples=config.retained_depth_samples,
+                sigma_extent=config.retained_sigma_extent,
+                certificate_sigma=config.order_certificate_sigma,
+                required_gap=config.order_certificate_min_gap,
+                background=config.background,
+            )
+            rgb = hybrid.rgb
+            fallback_tiles = hybrid.certificate.fallback_tiles
+            fallback_reason_bits = hybrid.certificate.reason_bits
+            fallback_active_counts = hybrid.certificate.active_counts
+            minimum_pair_separation = hybrid.certificate.minimum_pair_separation
     else:
-        raise ValueError("backend must be one of: dense, metal_tile")
+        raise ValueError(
+            "backend must be one of: dense, metal_tile, "
+            "retained_fiber_metal, hybrid_retained_fiber"
+        )
     alpha = torch.ones((config.frames, config.height, config.width), dtype=rgb.dtype, device=rgb.device)
-    return RenderedSequence(rgb=rgb, alpha=alpha)
+    return RenderedSequence(
+        rgb=rgb,
+        alpha=alpha,
+        fallback_tiles=fallback_tiles,
+        fallback_reason_bits=fallback_reason_bits,
+        fallback_active_counts=fallback_active_counts,
+        minimum_pair_separation=minimum_pair_separation,
+    )
 
 
 def _projected_uvt_inv_diag(q_uvt: Tensor) -> Tensor:
@@ -1089,9 +1694,20 @@ def _projected_uvt_inv_diag(q_uvt: Tensor) -> Tensor:
 
 def projected_tile_load_proxy(ma: Tensor, q_uvt: Tensor, opacity: Tensor, config: UVTRenderConfig) -> Tensor:
     del ma
-    opacity_safe = opacity.clamp_min(float(config.alpha_threshold) * 1.0001)
-    tau = -2.0 * torch.log((float(config.alpha_threshold) / opacity_safe).clamp_min(1.0e-8))
-    half_extent = torch.sqrt((tau.unsqueeze(-1) * _projected_uvt_inv_diag(q_uvt)).clamp_min(0.0))
+    if config.alpha_mode == "peak_splat":
+        support_numerator = float(config.alpha_threshold)
+    elif config.alpha_mode == "beer_lambert":
+        support_numerator = -math.log1p(-float(config.alpha_threshold))
+    else:
+        raise ValueError("alpha_mode must be one of: peak_splat, beer_lambert")
+    support_numerator = max(support_numerator, 1.0e-12)
+    opacity_safe = opacity.clamp_min(support_numerator * 1.0001)
+    support_qv = -2.0 * torch.log(
+        (support_numerator / opacity_safe).clamp_min(1.0e-8)
+    )
+    half_extent = torch.sqrt(
+        (support_qv.unsqueeze(-1) * _projected_uvt_inv_diag(q_uvt)).clamp_min(0.0)
+    )
     span_x = 1.0 + 2.0 * half_extent[:, 0] / float(config.tile_x)
     span_y = 1.0 + 2.0 * half_extent[:, 1] / float(config.tile_y)
     span_t = 1.0 + 2.0 * half_extent[:, 2] / float(config.tile_t)
@@ -1142,12 +1758,18 @@ def projected_regularization(
     depth_margin_weight: float,
     depth_margin: float,
 ) -> tuple[Tensor, dict[str, Tensor]]:
-    tile_proxy = projected_tile_load_proxy(projected.ma, projected.q_uvt, projected.opacity, config)
+    compiled_opacity = compiled_projected_opacity(projected, config)
+    tile_proxy = projected_tile_load_proxy(
+        projected.ma,
+        projected.q_uvt,
+        compiled_opacity,
+        config,
+    )
     slope_proxy = projected_depth_slope_proxy(projected.depth_beta, config)
     margin_proxy = projected_depth_margin_proxy(
         projected.ma,
         projected.depth0,
-        projected.opacity,
+        compiled_opacity,
         config,
         margin=depth_margin,
     )
@@ -1171,7 +1793,7 @@ def projected_regularization(
 
 
 def render_world_tube_sequence(
-    model: WorldTubeModel,
+    model: WorldTubeModel | SPD4WorldAtomModel,
     K: Tensor,
     w2c: Tensor,
     config: UVTRenderConfig,
@@ -1406,11 +2028,28 @@ def train_world_tubes(
     static_init_lambda_t: float = 0.02,
     static_velocity_reg_weight: float = 0.0,
     paper_protocol: dict[str, Any] | None = None,
-) -> tuple[WorldTubeModel, dict[str, Any], list[dict[str, Any]]]:
+    world_representation: str = "legacy_tube",
+    spd4_min_spatial_scale: float = 1.0e-4,
+    spd4_init_precision_z: float | None = None,
+) -> tuple[WorldTubeModel | SPD4WorldAtomModel, dict[str, Any], list[dict[str, Any]]]:
     if loss_scope not in {"sampled_frame", "view_sequence", "temporal_window", "paper_batch"}:
         raise ValueError("loss_scope must be one of: sampled_frame, view_sequence, temporal_window, paper_batch")
-    if backend != "metal_tile" and (reduction_mode != "index_add" or sample_emission_mode != "atomic_append"):
-        raise ValueError("custom reduction/sample emission modes require backend=metal_tile")
+    if backend not in UVT_RENDER_BACKENDS:
+        raise ValueError(f"backend must be one of: {', '.join(UVT_RENDER_BACKENDS)}")
+    if backend not in UVT_FAST_METAL_BACKENDS and (
+        reduction_mode != "index_add" or sample_emission_mode != "atomic_append"
+    ):
+        raise ValueError(
+            "custom reduction/sample emission modes require backend=metal_tile "
+            "or backend=hybrid_retained_fiber"
+        )
+    if backend in {"retained_fiber_metal", "hybrid_retained_fiber"}:
+        if world_representation != "full_spd4":
+            raise ValueError(f"{backend} requires world_representation=full_spd4")
+        if render_config.alpha_mode != "beer_lambert":
+            raise ValueError(f"{backend} requires alpha_mode=beer_lambert")
+        if bundle.train_K.device.type != "mps":
+            raise ValueError(f"{backend} requires MPS")
     if reduction_mode in (
         "key_sort_scan_metal",
         "key_sort_compensated_scan_metal",
@@ -1471,6 +2110,21 @@ def train_world_tubes(
         raise ValueError(
             "camera_sequence_mode must be one of: static_view, dynamic_first_order, projective_first_order, segmented"
         )
+    if world_representation not in {"legacy_tube", "full_spd4"}:
+        raise ValueError("world_representation must be one of: legacy_tube, full_spd4")
+    if (
+        world_representation == "full_spd4"
+        and camera_sequence_mode
+        not in {"static_view", "dynamic_first_order", "projective_first_order"}
+    ):
+        raise ValueError(
+            "full_spd4 supports static_view, dynamic_first_order, and "
+            "projective_first_order; segmented compilation is not implemented"
+        )
+    if spd4_min_spatial_scale <= 0.0:
+        raise ValueError("spd4_min_spatial_scale must be positive")
+    if spd4_init_precision_z is not None and spd4_init_precision_z <= 0.0:
+        raise ValueError("spd4_init_precision_z must be positive when provided")
     if segment_frames < 1:
         raise ValueError("segment_frames must be positive")
     synthetic_camera_active = any(
@@ -1553,39 +2207,56 @@ def train_world_tubes(
         static_tube_fraction=static_tube_fraction,
         static_init_lambda_t=static_init_lambda_t,
     )
-    model = WorldTubeModel(
-        init_x0=init_x0,
-        init_color=init_color,
-        init_t0=init_t0,
-        frames=frames,
-        init_precision_xy=init_precision_xy,
-        init_lambda_t=init_lambda_t_values,
-        init_opacity=init_opacity,
-        min_precision_xy=min_precision_xy,
-        min_lambda_t=min_lambda_t,
-        velocity_reg_weight=velocity_reg_weight,
-        depth_velocity_reg_weight=depth_velocity_reg_weight,
-        position_reg_weight=position_reg_weight,
-        static_tube_count=int(init_metadata["static_tube_count"]),
-        static_velocity_reg_weight=static_velocity_reg_weight,
-    ).to(device)
+    if world_representation == "legacy_tube":
+        model: WorldTubeModel | SPD4WorldAtomModel = WorldTubeModel(
+            init_x0=init_x0,
+            init_color=init_color,
+            init_t0=init_t0,
+            frames=frames,
+            init_precision_xy=init_precision_xy,
+            init_lambda_t=init_lambda_t_values,
+            init_opacity=init_opacity,
+            min_precision_xy=min_precision_xy,
+            min_lambda_t=min_lambda_t,
+            velocity_reg_weight=velocity_reg_weight,
+            depth_velocity_reg_weight=depth_velocity_reg_weight,
+            position_reg_weight=position_reg_weight,
+            alpha_mode=render_config.alpha_mode,
+            amplitude_convention=render_config.amplitude_convention,
+            static_tube_count=int(init_metadata["static_tube_count"]),
+            static_velocity_reg_weight=static_velocity_reg_weight,
+        ).to(device)
+    else:
+        model = SPD4WorldAtomModel(
+            init_x0=init_x0,
+            init_color=init_color,
+            init_t0=init_t0,
+            frames=frames,
+            init_precision_xy=init_precision_xy,
+            init_precision_z=spd4_init_precision_z,
+            init_lambda_t=init_lambda_t_values,
+            init_opacity=init_opacity,
+            min_spatial_scale=spd4_min_spatial_scale,
+            min_lambda_t=min_lambda_t,
+            tilt_reg_weight=velocity_reg_weight,
+            depth_tilt_reg_weight=depth_velocity_reg_weight,
+            position_reg_weight=position_reg_weight,
+            alpha_mode=render_config.alpha_mode,
+            amplitude_convention=render_config.amplitude_convention,
+            static_tube_count=int(init_metadata["static_tube_count"]),
+            static_tilt_reg_weight=static_velocity_reg_weight,
+        ).to(device)
     full_config = render_config
     if full_config.height != height or full_config.width != width or full_config.frames != frames:
         raise ValueError("render_config dimensions must match bundle train frames")
-    window_config = UVTRenderConfig(
+    window_config = replace(
+        full_config,
         height=height,
         width=width,
         frames=window_frames if loss_scope == "temporal_window" else frames,
-        tile_x=full_config.tile_x,
-        tile_y=full_config.tile_y,
-        tile_t=full_config.tile_t,
-        tile_capacity=full_config.tile_capacity,
-        alpha_threshold=full_config.alpha_threshold,
-        transmittance_threshold=full_config.transmittance_threshold,
-        background=full_config.background,
-        max_alpha=full_config.max_alpha,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    paper_sampler_seed = seed + int(paper_values.get("sampler_seed_offset", 7001))
     paper_sampler = (
         SpacetimeEpochSampler(
             view_count=len(active_train_views),
@@ -1594,8 +2265,13 @@ def train_world_tubes(
             same_time_count=int(paper_values.get("same_time_count", 1)),
             local_time_count=int(paper_values.get("local_time_count", 0)),
             local_time_radius=int(paper_values.get("local_time_radius", 0)),
-            seed=seed + int(paper_values.get("sampler_seed_offset", 7001)),
+            seed=paper_sampler_seed,
         )
+        if paper_enabled
+        else None
+    )
+    paper_sample_schedule = (
+        PaperSampleScheduleDigest(sampler_seed=paper_sampler_seed)
         if paper_enabled
         else None
     )
@@ -1610,18 +2286,11 @@ def train_world_tubes(
         if cached is not None:
             return cached
         stage_K = scale_intrinsics(bundle.train_K, source=source_image_size, target=stage.image_size)
-        stage_config = UVTRenderConfig(
+        stage_config = replace(
+            full_config,
             height=stage.image_size.height,
             width=stage.image_size.width,
             frames=frames,
-            tile_x=full_config.tile_x,
-            tile_y=full_config.tile_y,
-            tile_t=full_config.tile_t,
-            tile_capacity=full_config.tile_capacity,
-            alpha_threshold=full_config.alpha_threshold,
-            transmittance_threshold=full_config.transmittance_threshold,
-            background=full_config.background,
-            max_alpha=full_config.max_alpha,
         )
         cached = (stage_K, stage_config)
         paper_stage_cache[stage.label] = cached
@@ -1633,6 +2302,13 @@ def train_world_tubes(
     last_finite_step = 0
     stopped_reason: str | None = None
     stopped_step: int | None = None
+    fallback_tile_sums: list[Tensor] = []
+    ambiguous_tile_sums: list[Tensor] = []
+    invalid_tile_sums: list[Tensor] = []
+    overflow_tile_sums: list[Tensor] = []
+    active_atom_sums: list[Tensor] = []
+    physical_tile_count = 0
+    physical_render_calls = 0
 
     def project_for_view(
         *,
@@ -1680,6 +2356,34 @@ def train_world_tubes(
             camera_sequence_mode=camera_sequence_mode,
             segment_frames=segment_frames,
         )
+
+    def render_for_training(
+        projected: ProjectedTubeSequence,
+        render_cfg: UVTRenderConfig,
+    ) -> RenderedSequence:
+        nonlocal physical_tile_count, physical_render_calls
+        rendered = render_projected_sequence(
+            projected,
+            render_cfg,
+            backend=backend,
+            reduction_mode=reduction_mode,
+            sample_emission_mode=sample_emission_mode,
+        )
+        if rendered.fallback_tiles is not None:
+            detached_fallback = rendered.fallback_tiles.detach()
+            fallback_tile_sums.append(detached_fallback.sum())
+            physical_tile_count += int(detached_fallback.numel())
+            physical_render_calls += 1
+            if rendered.fallback_reason_bits is not None:
+                reasons = rendered.fallback_reason_bits.detach()
+                overflow_tile_sums.append(((reasons & 1) != 0).sum())
+                invalid_tile_sums.append(((reasons & 2) != 0).sum())
+                ambiguous_tile_sums.append(((reasons & 4) != 0).sum())
+            if rendered.fallback_active_counts is not None:
+                active_atom_sums.append(
+                    rendered.fallback_active_counts.detach().sum()
+                )
+        return rendered
 
     def append_train_log(
         *,
@@ -1737,6 +2441,12 @@ def train_world_tubes(
         frame_override: int | None = None
         window_start_override: int | None = None
         paper_batch = paper_sampler.next_batch(paper_stage.frames_per_step) if paper_sampler is not None else None
+        if paper_batch is not None:
+            paper_sample_schedule.record(
+                step=step,
+                stage=paper_stage,
+                batch=paper_batch,
+            )
         if paper_batch is not None:
             view = paper_batch.samples[0].view_index
         elif train_schedule in {
@@ -1818,18 +2528,9 @@ def train_world_tubes(
             predictions = []
             targets = []
             projected_sequences = []
-            selected_frame_config = UVTRenderConfig(
-                height=step_full_config.height,
-                width=step_full_config.width,
+            selected_frame_config = replace(
+                step_full_config,
                 frames=1,
-                tile_x=step_full_config.tile_x,
-                tile_y=step_full_config.tile_y,
-                tile_t=step_full_config.tile_t,
-                tile_capacity=step_full_config.tile_capacity,
-                alpha_threshold=step_full_config.alpha_threshold,
-                transmittance_threshold=step_full_config.transmittance_threshold,
-                background=step_full_config.background,
-                max_alpha=step_full_config.max_alpha,
             )
             for sample in paper_batch.samples:
                 batch_lens, batch_distortion = select_lens(
@@ -1847,13 +2548,7 @@ def train_world_tubes(
                     K_value=step_K,
                 )
                 projected_sequences.append(projected)
-                rendered = render_projected_sequence(
-                    projected,
-                    selected_frame_config,
-                    backend=backend,
-                    reduction_mode=reduction_mode,
-                    sample_emission_mode=sample_emission_mode,
-                )
+                rendered = render_for_training(projected, selected_frame_config)
                 predictions.append(rendered.rgb[0])
                 targets.append(train_frames[sample.view_index, sample.frame_index])
             rendered_active = torch.stack(predictions)
@@ -1889,13 +2584,7 @@ def train_world_tubes(
                 lens_model_value=lens_model,
                 distortion_value=distortion,
             )
-            rendered = render_projected_sequence(
-                projected,
-                full_config,
-                backend=backend,
-                reduction_mode=reduction_mode,
-                sample_emission_mode=sample_emission_mode,
-            )
+            rendered = render_for_training(projected, full_config)
             target = train_frames[view, frame].permute(1, 2, 0)
             recon_loss = robust_l1(rendered.rgb[frame] - target)
             multiscale_loss = (
@@ -1919,13 +2608,7 @@ def train_world_tubes(
                 lens_model_value=lens_model,
                 distortion_value=distortion,
             )
-            rendered = render_projected_sequence(
-                projected,
-                full_config,
-                backend=backend,
-                reduction_mode=reduction_mode,
-                sample_emission_mode=sample_emission_mode,
-            )
+            rendered = render_for_training(projected, full_config)
             target = train_frames[view].permute(0, 2, 3, 1).contiguous()
             rendered_active = rendered.rgb.index_select(0, active_train_frame_tensor)
             target_active = target.index_select(0, active_train_frame_tensor)
@@ -1965,13 +2648,7 @@ def train_world_tubes(
                 lens_model_value=lens_model,
                 distortion_value=distortion,
             )
-            rendered = render_projected_sequence(
-                projected,
-                window_config,
-                backend=backend,
-                reduction_mode=reduction_mode,
-                sample_emission_mode=sample_emission_mode,
-            )
+            rendered = render_for_training(projected, window_config)
             target = train_frames[view, frame_start : frame_start + window_frames].permute(0, 2, 3, 1).contiguous()
             recon_loss = robust_l1(rendered.rgb - target)
             multiscale_loss = (
@@ -1995,18 +2672,9 @@ def train_world_tubes(
         )
         if consistency_due:
             if consistency_window_frames > 0 and consistency_window_frames < frames:
-                consistency_config = UVTRenderConfig(
-                    height=step_full_config.height,
-                    width=step_full_config.width,
+                consistency_config = replace(
+                    step_full_config,
                     frames=consistency_window_frames,
-                    tile_x=step_full_config.tile_x,
-                    tile_y=step_full_config.tile_y,
-                    tile_t=step_full_config.tile_t,
-                    tile_capacity=step_full_config.tile_capacity,
-                    alpha_threshold=step_full_config.alpha_threshold,
-                    transmittance_threshold=step_full_config.transmittance_threshold,
-                    background=step_full_config.background,
-                    max_alpha=step_full_config.max_alpha,
                 )
                 if train_schedule in {"random", "cycle"}:
                     consistency_start = select_train_window_start(
@@ -2047,12 +2715,9 @@ def train_world_tubes(
                 distortion_value=distortion,
                 K_value=step_K,
             )
-            sequence_rendered = render_projected_sequence(
+            sequence_rendered = render_for_training(
                 sequence_projected,
                 consistency_config,
-                backend=backend,
-                reduction_mode=reduction_mode,
-                sample_emission_mode=sample_emission_mode,
             )
             if consistency_config.frames == frames:
                 sequence_target = (
@@ -2193,6 +2858,55 @@ def train_world_tubes(
         step += 1
     train_elapsed = time.perf_counter() - started_at
     paper_memory_sampler.stop()
+    fallback_tile_count = (
+        int(torch.stack(fallback_tile_sums).sum().detach().cpu())
+        if fallback_tile_sums
+        else 0
+    )
+    ambiguous_tile_count = (
+        int(torch.stack(ambiguous_tile_sums).sum().detach().cpu())
+        if ambiguous_tile_sums
+        else 0
+    )
+    invalid_tile_count = (
+        int(torch.stack(invalid_tile_sums).sum().detach().cpu())
+        if invalid_tile_sums
+        else 0
+    )
+    active_atom_total = (
+        int(torch.stack(active_atom_sums).sum().detach().cpu())
+        if active_atom_sums
+        else 0
+    )
+    certificate_overflow_tile_count = (
+        int(torch.stack(overflow_tile_sums).sum().detach().cpu())
+        if overflow_tile_sums
+        else 0
+    )
+    physical_visibility_stats = {
+        "backend": backend,
+        "render_calls": physical_render_calls,
+        "tile_count": physical_tile_count,
+        "fallback_tile_count": fallback_tile_count,
+        "fallback_fraction": (
+            float(fallback_tile_count / physical_tile_count)
+            if physical_tile_count
+            else None
+        ),
+        "ambiguous_tile_count": ambiguous_tile_count,
+        "invalid_tile_count": invalid_tile_count,
+        "certificate_overflow_tile_count": certificate_overflow_tile_count,
+        "mean_active_atoms_per_tile": (
+            float(active_atom_total / physical_tile_count)
+            if physical_tile_count and active_atom_sums
+            else None
+        ),
+        "retained_depth_samples": full_config.retained_depth_samples,
+        "retained_sigma_extent": full_config.retained_sigma_extent,
+        "order_certificate_sigma": full_config.order_certificate_sigma,
+        "order_certificate_min_gap": full_config.order_certificate_min_gap,
+        "bound_derivatives": "detached_compiler_decision",
+    }
     model.set_active_tube_count(tube_count)
     if checkpoint_every_steps > 0 and (not checkpoints or checkpoints[-1]["step"] != step):
         checkpoints.append({"step": step, "elapsed_s": train_elapsed, "state": snapshot_world_tube_state(model)})
@@ -2209,6 +2923,30 @@ def train_world_tubes(
             "validation_frame_offset": validation_frame_offset,
             **init_metadata,
             "static_velocity_reg": static_velocity_reg_weight,
+            **model.representation_metadata(),
+            "init_source_amplitude": init_opacity,
+            "init_center_alpha": (
+                init_opacity
+                if render_config.amplitude_convention == "fiber_integrated"
+                else None
+            ),
+            "init_peak_density": (
+                init_opacity
+                if render_config.amplitude_convention == "peak_density"
+                else None
+            ),
+            "spd4_min_spatial_scale": (
+                spd4_min_spatial_scale if world_representation == "full_spd4" else None
+            ),
+            "spd4_init_precision_z": (
+                (
+                    init_precision_xy
+                    if spd4_init_precision_z is None
+                    else spd4_init_precision_z
+                )
+                if world_representation == "full_spd4"
+                else None
+            ),
             "sequence_consistency_every_steps": sequence_consistency_every_steps,
             "sequence_consistency_frames": sequence_consistency_frames,
             "sequence_consistency_weight": sequence_consistency_weight,
@@ -2220,6 +2958,9 @@ def train_world_tubes(
             "stopped_step": stopped_step,
             "paper_protocol": {
                 "enabled": paper_enabled,
+                "alpha_mode": full_config.alpha_mode,
+                "amplitude_convention": full_config.amplitude_convention,
+                "opacity_semantics": full_config.opacity_semantics,
                 "kernel": MetalKernelSpec(
                     representation="world_tubes",
                     family="star_uvt",
@@ -2234,6 +2975,11 @@ def train_world_tubes(
                     "local_time_count": int(paper_values.get("local_time_count", 0)),
                     "local_time_radius": int(paper_values.get("local_time_radius", 0)),
                 },
+                "sample_schedule": (
+                    paper_sample_schedule.snapshot()
+                    if paper_sample_schedule is not None
+                    else None
+                ),
                 "stages": [stage.as_dict() for stage in paper_stages],
                 "cost": paper_costs.snapshot(
                     model=model,
@@ -2244,6 +2990,7 @@ def train_world_tubes(
                 "timing": paper_phase_timer.snapshot(train_wall_s=train_elapsed),
             },
             "logs": logs,
+            "physical_visibility": physical_visibility_stats,
         },
         checkpoints,
     )
@@ -2309,8 +3056,12 @@ def train_free_splats(
         alpha_threshold=1.0 / 255.0,
         near_plane=1.0e-3,
         camera_projection="camera_model" if camera_projection == "dataset_lens" else "legacy_pinhole",
+        fast_mac_options=(
+            dict(PAPER_DYNAMIC_FAST_MAC_OPTIONS) if paper_enabled else None
+        ),
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    paper_sampler_seed = seed + int(paper_values.get("sampler_seed_offset", 7001))
     paper_sampler = (
         SpacetimeEpochSampler(
             view_count=view_count,
@@ -2319,8 +3070,13 @@ def train_free_splats(
             same_time_count=int(paper_values.get("same_time_count", 1)),
             local_time_count=int(paper_values.get("local_time_count", 0)),
             local_time_radius=int(paper_values.get("local_time_radius", 0)),
-            seed=seed + int(paper_values.get("sampler_seed_offset", 7001)),
+            seed=paper_sampler_seed,
         )
+        if paper_enabled
+        else None
+    )
+    paper_sample_schedule = (
+        PaperSampleScheduleDigest(sampler_seed=paper_sampler_seed)
         if paper_enabled
         else None
     )
@@ -2344,6 +3100,9 @@ def train_free_splats(
             alpha_threshold=1.0 / 255.0,
             near_plane=1.0e-3,
             camera_projection="camera_model" if camera_projection == "dataset_lens" else "legacy_pinhole",
+            fast_mac_options=(
+                dict(PAPER_DYNAMIC_FAST_MAC_OPTIONS) if paper_enabled else None
+            ),
         )
         cached = (stage_K, stage_render_cfg)
         paper_stage_cache[stage.label] = cached
@@ -2361,6 +3120,12 @@ def train_free_splats(
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr * paper_stage.lr_multiplier
         paper_batch = paper_sampler.next_batch(paper_stage.frames_per_step) if paper_sampler is not None else None
+        if paper_batch is not None:
+            paper_sample_schedule.record(
+                step=step,
+                stage=paper_stage,
+                batch=paper_batch,
+            )
         if paper_batch is None:
             sample_pairs = [
                 (
@@ -2401,6 +3166,7 @@ def train_free_splats(
                     bound_scale=stage_render_cfg.bound_scale,
                     alpha_threshold=stage_render_cfg.alpha_threshold,
                     near_plane=stage_render_cfg.near_plane,
+                    fast_mac_options=stage_render_cfg.fast_mac_options,
                     camera_projection=stage_render_cfg.camera_projection,
                 ).permute(1, 2, 0)
             )
@@ -2451,7 +3217,11 @@ def train_free_splats(
             "kernel": MetalKernelSpec(
                 representation="dynamic_3dgs",
                 family="fast_mac",
-                forward=renderer,
+                forward=(
+                    "fast_mac_v5_black"
+                    if paper_enabled and renderer == "fast_mac"
+                    else renderer
+                ),
                 backward="fast_mac_autograd",
                 deterministic=False,
                 implementation="third_party/fast-mac-gsplat",
@@ -2462,6 +3232,11 @@ def train_free_splats(
                 "local_time_count": int(paper_values.get("local_time_count", 0)),
                 "local_time_radius": int(paper_values.get("local_time_radius", 0)),
             },
+            "sample_schedule": (
+                paper_sample_schedule.snapshot()
+                if paper_sample_schedule is not None
+                else None
+            ),
             "stages": [stage.as_dict() for stage in paper_stages],
             "cost": paper_costs.snapshot(
                 model=model,
@@ -2531,18 +3306,9 @@ def eval_world_tubes(
         frame_start: int,
         frame_stop: int,
     ) -> RenderedSequence:
-        chunk_config = UVTRenderConfig(
-            height=config.height,
-            width=config.width,
+        chunk_config = replace(
+            config,
             frames=frame_stop - frame_start,
-            tile_x=config.tile_x,
-            tile_y=config.tile_y,
-            tile_t=config.tile_t,
-            tile_capacity=config.tile_capacity,
-            alpha_threshold=config.alpha_threshold,
-            transmittance_threshold=config.transmittance_threshold,
-            background=config.background,
-            max_alpha=config.max_alpha,
         )
         if camera_sequence_mode == "static_view" and not synthetic_camera_active:
             return render_world_tube_sequence(
@@ -2594,10 +3360,19 @@ def eval_world_tubes(
         lens_models: list[str] | None,
         distortions: Tensor | None,
         split_metrics: dict[str, list[int]] | None = None,
-    ) -> tuple[list, list, list, dict[str, list[dict[str, float]]]]:
+    ) -> tuple[
+        list,
+        list,
+        list,
+        dict[str, list[dict[str, float]]],
+        dict[str, float],
+    ]:
         rows = []
         metrics_rows = []
         render_times = []
+        global_accumulator = VideoMetricAccumulator()
+        global_lpips_sum = 0.0
+        global_lpips_count = 0
         selected = media_frame_positions(frames, media_max_frames)
         split_rows: dict[str, list[dict[str, float]]] = {
             name: [] for name, indices in (split_metrics or {}).items() if indices
@@ -2639,6 +3414,7 @@ def eval_world_tubes(
                     alpha=rendered.alpha.detach().cpu(),
                 )
                 accumulator.update(rendered.rgb, target)
+                global_accumulator.update(rendered.rgb, target)
                 for name in frame_accumulators:
                     indices = split_metrics[name]
                     local_positions = [index - start for index in indices if start <= index < stop]
@@ -2650,8 +3426,11 @@ def eval_world_tubes(
                         )
                 if split == "heldout":
                     count = stop - start
-                    lpips_sum += video_lpips(rendered.rgb, target) * count
+                    chunk_lpips = video_lpips(rendered.rgb, target)
+                    lpips_sum += chunk_lpips * count
                     lpips_count += count
+                    global_lpips_sum += chunk_lpips * count
+                    global_lpips_count += count
                 append_chunk_media(
                     start=start,
                     stop=stop,
@@ -2680,9 +3459,20 @@ def eval_world_tubes(
                     ),
                 )
             )
-        return rows, metrics_rows, render_times, split_rows
+        global_metrics = global_accumulator.metrics()
+        if split == "heldout":
+            global_metrics["eval_lpips"] = (
+                global_lpips_sum / float(global_lpips_count)
+            )
+        return rows, metrics_rows, render_times, split_rows, global_metrics
 
-    train_rows, train_metrics, train_render_times, train_frame_split_metrics = eval_split(
+    (
+        train_rows,
+        train_metrics,
+        train_render_times,
+        train_frame_split_metrics,
+        train_global_metrics,
+    ) = eval_split(
         split="train",
         frames_tensor=bundle.train_frames,
         K_all=bundle.train_K,
@@ -2695,7 +3485,13 @@ def eval_world_tubes(
     heldout_metrics: list = []
     heldout_render_times: list = []
     if bundle.heldout_frames is not None and bundle.heldout_K is not None and bundle.heldout_w2c is not None:
-        heldout_rows, heldout_metrics, heldout_render_times, _ = eval_split(
+        (
+            heldout_rows,
+            heldout_metrics,
+            heldout_render_times,
+            _,
+            heldout_global_metrics,
+        ) = eval_split(
             split="heldout",
             frames_tensor=bundle.heldout_frames,
             K_all=bundle.heldout_K,
@@ -2703,11 +3499,11 @@ def eval_world_tubes(
             lens_models=bundle.heldout_lens_models,
             distortions=bundle.heldout_distortions,
         )
-    metrics = aggregate_view_metrics(train_metrics)
+    metrics = train_global_metrics
     for name, metrics_rows in train_frame_split_metrics.items():
         metrics.update(prefix_metrics(f"train_{name}_frame", aggregate_view_metrics(metrics_rows)))
     if heldout_metrics:
-        metrics.update(prefix_metrics("heldout", aggregate_view_metrics(heldout_metrics)))
+        metrics.update(prefix_metrics("heldout", heldout_global_metrics))
     metrics["eval_render_elapsed_s"] = time.perf_counter() - render_started
     metrics.update(render_time_metrics(train_render_times, heldout_render_times))
     return {
@@ -2717,6 +3513,1870 @@ def eval_world_tubes(
         "train_view_metrics": train_metrics,
         "heldout_view_metrics": heldout_metrics,
     }
+
+
+def _tensor_payload_bytes(values: tuple[Tensor | None, ...]) -> int:
+    return sum(
+        int(value.numel()) * int(value.element_size())
+        for value in values
+        if value is not None
+    )
+
+
+def _tensor_storage_descriptor(
+    value: Tensor | None,
+) -> tuple[str, tuple[int, ...], Callable[[], bytes]] | None:
+    if value is None:
+        return None
+    dtype = str(value.dtype).removeprefix("torch.")
+    shape = tuple(int(dimension) for dimension in value.shape)
+
+    def materialize_bytes(tensor: Tensor = value) -> bytes:
+        return (
+            tensor.detach()
+            .to(device="cpu")
+            .contiguous()
+            .numpy()
+            .tobytes(order="C")
+        )
+
+    return dtype, shape, materialize_bytes
+
+
+def _atlas_topology_payload(atlas) -> dict[str, Any]:
+    return {
+        "source_window_indices": list(atlas.source_window_indices),
+        "source_primitive_ids": list(atlas.source_primitive_ids),
+        "active_start": list(atlas.active_start),
+        "active_stop": list(atlas.active_stop),
+        "cells": [
+            {
+                "tile_u": int(cell.tile_u),
+                "tile_v": int(cell.tile_v),
+                "start": int(cell.start),
+                "stop": int(cell.stop),
+                "primitive_ids": list(cell.primitive_ids),
+                "ordered_primitive_ids": list(cell.ordered_primitive_ids),
+                "depth_intervals": [
+                    [float(lower), float(upper)]
+                    for lower, upper in cell.depth_intervals
+                ],
+                "fallback": bool(cell.fallback),
+                "fallback_reasons": list(cell.fallback_reasons),
+            }
+            for cell in atlas.cells
+        ],
+    }
+
+
+def _write_frozen_atlas_storage(
+    atlas,
+    *,
+    out_dir: Path,
+    frame_count: int,
+) -> dict[str, Any]:
+    tensors = {
+        name: _tensor_storage_descriptor(getattr(atlas, name))
+        for name in FROZEN_ATLAS_TENSOR_NAMES
+    }
+    return write_retained_storage_artifact(
+        out_dir
+        / "frozen_world_retained_storage"
+        / f"frame_{frame_count:04d}.world_tubes_atlas",
+        frame_count=frame_count,
+        trace_count=int(atlas.coeffs.shape[0]),
+        cell_count=len(atlas.cells),
+        tensors=tensors,
+        topology=_atlas_topology_payload(atlas),
+    )
+
+
+def _clean_route_memory_baseline(device: torch.device) -> dict[str, int]:
+    synchronize_device(device)
+    gc.collect()
+    if device.type == "mps":
+        torch.mps.empty_cache()
+    elif device.type == "cuda":
+        torch.cuda.empty_cache()
+    synchronize_device(device)
+    return device_memory_stats(device)
+
+
+def _memory_phase_stats(
+    name: str,
+    sampler: DeviceMemorySampler,
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        **sampler.stats(),
+    }
+
+
+def _route_memory_report(
+    route: str,
+    *,
+    device: torch.device,
+    baseline: dict[str, int],
+    phases: list[dict[str, Any]],
+) -> dict[str, Any]:
+    baseline_current = int(baseline.get("current_allocated_bytes", 0))
+    baseline_driver = int(baseline.get("driver_allocated_bytes", 0))
+    peak_current = max(
+        [baseline_current]
+        + [
+            int(phase["sampled_peak_current_allocated_bytes"])
+            for phase in phases
+        ]
+    )
+    peak_driver = max(
+        [baseline_driver]
+        + [
+            int(phase["sampled_peak_driver_allocated_bytes"])
+            for phase in phases
+        ]
+    )
+    sample_count = sum(int(phase["memory_sample_count"]) for phase in phases)
+    eligible = (
+        device.type in {"mps", "cuda"}
+        and set(baseline)
+        == {"current_allocated_bytes", "driver_allocated_bytes"}
+        and bool(phases)
+        and all(int(phase["memory_sample_count"]) > 0 for phase in phases)
+        and peak_current >= baseline_current
+        and peak_driver >= baseline_driver
+    )
+    return {
+        "schema_version": 1,
+        "route": route,
+        "device_type": device.type,
+        "route_scoped": True,
+        "baseline_current_allocated_bytes": baseline_current,
+        "baseline_driver_allocated_bytes": baseline_driver,
+        "sampled_peak_current_allocated_bytes": peak_current,
+        "sampled_peak_driver_allocated_bytes": peak_driver,
+        "peak_increment_current_allocated_bytes": max(
+            peak_current - baseline_current,
+            0,
+        ),
+        "peak_increment_driver_allocated_bytes": max(
+            peak_driver - baseline_driver,
+            0,
+        ),
+        "memory_sample_count": sample_count,
+        "phase_count": len(phases),
+        "phases": phases,
+        "measurement_claim_eligible": eligible,
+    }
+
+
+def _world_parameter_gradients(
+    model: nn.Module,
+) -> tuple[dict[str, Tensor], tuple[str, ...]]:
+    gradients: dict[str, Tensor] = {}
+    covered = []
+    for name, parameter in model.named_parameters():
+        if parameter.grad is not None:
+            covered.append(name)
+        gradients[name] = (
+            torch.zeros_like(parameter, device="cpu")
+            if parameter.grad is None
+            else parameter.grad.detach().cpu().clone()
+        )
+    return gradients, tuple(covered)
+
+
+def _gradient_comparison(
+    replay: dict[str, Tensor],
+    compiled: dict[str, Tensor],
+    *,
+    replay_covered: tuple[str, ...],
+    compiled_covered: tuple[str, ...],
+) -> dict[str, Any]:
+    if replay.keys() != compiled.keys():
+        raise ValueError("frozen-world routes produced different parameter gradient keys")
+    per_parameter: dict[str, float] = {}
+    difference_sq = 0.0
+    reference_sq = 0.0
+    dot = 0.0
+    replay_sq = 0.0
+    compiled_sq = 0.0
+    for name in replay:
+        replay_grad = replay[name].to(dtype=torch.float64)
+        compiled_grad = compiled[name].to(dtype=torch.float64)
+        difference = replay_grad - compiled_grad
+        replay_norm = float(torch.linalg.vector_norm(replay_grad))
+        compiled_norm = float(torch.linalg.vector_norm(compiled_grad))
+        difference_norm = float(torch.linalg.vector_norm(difference))
+        per_parameter[name] = difference_norm / max(
+            replay_norm + compiled_norm,
+            1.0e-12,
+        )
+        difference_sq += float(torch.sum(difference.square()))
+        reference_sq += float(torch.sum(replay_grad.square() + compiled_grad.square()))
+        dot += float(torch.sum(replay_grad * compiled_grad))
+        replay_sq += float(torch.sum(replay_grad.square()))
+        compiled_sq += float(torch.sum(compiled_grad.square()))
+    return {
+        "global_normalized_l2_error": math.sqrt(difference_sq)
+        / max(math.sqrt(reference_sq), 1.0e-12),
+        "cosine_similarity": dot
+        / max(math.sqrt(replay_sq) * math.sqrt(compiled_sq), 1.0e-12),
+        "replay_l2_norm": math.sqrt(replay_sq),
+        "compiled_l2_norm": math.sqrt(compiled_sq),
+        "parameter_tensor_count": len(replay),
+        "replay_gradient_tensor_count": len(replay_covered),
+        "compiled_gradient_tensor_count": len(compiled_covered),
+        "gradient_coverage_matches": replay_covered == compiled_covered,
+        "replay_gradient_parameters": list(replay_covered),
+        "compiled_gradient_parameters": list(compiled_covered),
+        "max_parameter_normalized_l2_error": max(per_parameter.values(), default=0.0),
+        "per_parameter_normalized_l2_error": per_parameter,
+    }
+
+
+def _world_state_digest(
+    state: dict[str, Tensor],
+    *,
+    metadata: dict[str, Any],
+) -> str:
+    digest = hashlib.sha256()
+    digest.update(
+        json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+    for name in sorted(state):
+        tensor = state[name].detach().cpu().contiguous()
+        digest.update(name.encode("utf-8"))
+        digest.update(str(tensor.dtype).encode("utf-8"))
+        digest.update(json.dumps(list(tensor.shape)).encode("utf-8"))
+        digest.update(tensor.numpy().tobytes(order="C"))
+    return digest.hexdigest()
+
+
+def _world_state_metadata(
+    model: nn.Module,
+    *,
+    frame_count: int,
+    representation: str,
+) -> dict[str, Any]:
+    return {
+        "representation": representation,
+        "frame_count": int(frame_count),
+        "active_tube_count": int(model.active_tube_count),
+        "tube_count": int(model.tube_count),
+        "alpha_mode": str(model.alpha_mode),
+        "amplitude_convention": str(model.amplitude_convention),
+        "min_precision_xy": float(model.min_precision_xy),
+        "min_lambda_t": float(model.min_lambda_t),
+        "parameter_names": [name for name, _ in model.named_parameters()],
+    }
+
+
+def _tensor_sha256(value: Tensor) -> str:
+    digest = hashlib.sha256()
+    digest.update(str(value.dtype).encode("utf-8"))
+    digest.update(json.dumps(list(value.shape)).encode("utf-8"))
+    detached = value.detach()
+    if detached.ndim == 0:
+        chunks = (detached.reshape(1),)
+    else:
+        chunks = (detached[index : index + 1] for index in range(detached.shape[0]))
+    for chunk in chunks:
+        digest.update(
+            chunk.to(device="cpu").contiguous().numpy().tobytes(order="C")
+        )
+    return digest.hexdigest()
+
+
+def _frozen_evaluation_contract_hashes(
+    *,
+    target_frames: Tensor,
+    heldout_K: Tensor,
+    heldout_w2c: Tensor,
+    heldout_distortion: Tensor | None,
+    heldout_lens_model: str,
+    heldout_camera: str,
+    camera_projection: str,
+    full_frames: int,
+    frame_count: int,
+    frame_indices: tuple[int, ...],
+    centered_frame_times: tuple[float, ...],
+    config: UVTRenderConfig,
+) -> dict[str, str]:
+    target_sha = _tensor_sha256(target_frames)
+    frame_indices_sha = frozen_world_sequence_sha256(frame_indices)
+    centered_frame_times_sha = frozen_world_sequence_sha256(
+        centered_frame_times
+    )
+    camera_digest = hashlib.sha256()
+    camera_digest.update(_tensor_sha256(heldout_K).encode("ascii"))
+    camera_digest.update(_tensor_sha256(heldout_w2c).encode("ascii"))
+    camera_digest.update(
+        (
+            "none"
+            if heldout_distortion is None
+            else _tensor_sha256(heldout_distortion)
+        ).encode("ascii")
+    )
+    camera_digest.update(
+        json.dumps(
+            {
+                "heldout_camera": heldout_camera,
+                "heldout_lens_model": heldout_lens_model,
+                "camera_projection": camera_projection,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    camera_sha = camera_digest.hexdigest()
+    evaluation_digest = hashlib.sha256()
+    evaluation_digest.update(target_sha.encode("ascii"))
+    evaluation_digest.update(camera_sha.encode("ascii"))
+    evaluation_digest.update(frame_indices_sha.encode("ascii"))
+    evaluation_digest.update(centered_frame_times_sha.encode("ascii"))
+    evaluation_digest.update(
+        json.dumps(
+            {
+                "full_frames": int(full_frames),
+                "frame_count": int(frame_count),
+                "temporal_sampling": (
+                    "ordered_full_interval_integer_lattice_v1"
+                ),
+                "image_size": [int(config.height), int(config.width)],
+                "alpha_mode": config.alpha_mode,
+                "amplitude_convention": config.amplitude_convention,
+                "alpha_threshold": float(config.alpha_threshold),
+                "tile_x": int(config.tile_x),
+                "tile_y": int(config.tile_y),
+                "tile_t": int(config.tile_t),
+                "loss": "sqrt(error^2 + 1e-6) / global_element_count",
+                "replay_backend": "metal_tile:index_add:direct_atomic",
+                "compiled_backend": "projective_cell_interval:mixed",
+                "dtype": "float32",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    return {
+        "target_frames_sha256": target_sha,
+        "camera_program_sha256": camera_sha,
+        "frame_indices_sha256": frame_indices_sha,
+        "centered_frame_times_sha256": centered_frame_times_sha,
+        "evaluation_contract_sha256": evaluation_digest.hexdigest(),
+    }
+
+
+def _save_frozen_world_checkpoint(
+    model: nn.Module,
+    path: Path,
+    *,
+    frame_count: int,
+    representation: str,
+) -> dict[str, Any]:
+    state = snapshot_world_tube_state(model)
+    metadata = _world_state_metadata(
+        model,
+        frame_count=frame_count,
+        representation=representation,
+    )
+    world_state_sha256 = _world_state_digest(state, metadata=metadata)
+    if set(metadata["parameter_names"]) != set(state):
+        raise RuntimeError(
+            "frozen checkpoint state tensors do not match named parameters"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "schema_version": 1,
+            **metadata,
+            "world_state_sha256": world_state_sha256,
+            "state_dict": state,
+        },
+        path,
+    )
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {
+        "path": str(path),
+        "sha256": digest.hexdigest(),
+        "bytes": int(path.stat().st_size),
+        "parameter_tensor_count": len(metadata["parameter_names"]),
+        "world_state_sha256": world_state_sha256,
+        **metadata,
+    }
+
+
+def _frozen_compiled_full_vs_sliced_parity(
+    model: WorldTubeModel,
+    *,
+    heldout_K: Tensor,
+    heldout_w2c: Tensor,
+    heldout_lens_model: str,
+    heldout_distortion: Tensor | None,
+    camera_projection: str,
+    render_config: UVTRenderConfig,
+    config: UVTRenderConfig,
+    full_frames: int,
+    frame_indices: tuple[int, ...],
+    centered_frame_times: tuple[float, ...],
+    target_host: Tensor,
+    contract_hashes: dict[str, str],
+) -> dict[str, Any]:
+    """Certify one non-unit atlas against one-frame slices of that same atlas.
+
+    This is intentionally bounded to the one sweep row selected by the caller.
+    It is correctness evidence, not a performance measurement.
+    """
+
+    frame_count = len(centered_frame_times)
+    if len(frame_indices) != frame_count:
+        raise ValueError(
+            "selected-time atlas-slice parity frame/time count drifted"
+        )
+    time_steps = tuple(
+        centered_frame_times[index + 1] - centered_frame_times[index]
+        for index in range(frame_count - 1)
+    )
+    non_unit_selected_times = any(
+        not math.isclose(abs(step), 1.0, rel_tol=0.0, abs_tol=1.0e-7)
+        for step in time_steps
+    )
+    if frame_count < 2 or not non_unit_selected_times:
+        raise ValueError(
+            "selected-time atlas-slice parity requires at least two non-unit-spaced times"
+        )
+
+    device = next(model.parameters()).device
+    world_state_metadata = _world_state_metadata(
+        model,
+        frame_count=full_frames,
+        representation=model.representation_name,
+    )
+    world_state_before = _world_state_digest(
+        snapshot_world_tube_state(model),
+        metadata=world_state_metadata,
+    )
+    model.zero_grad(set_to_none=True)
+    projection_config = replace(render_config, frames=full_frames)
+    projected = project_world_tube_sequence(
+        model,
+        heldout_K,
+        heldout_w2c,
+        projection_config,
+        camera_projection=camera_projection,
+        lens_model=heldout_lens_model,
+        distortion=heldout_distortion,
+        full_frames=full_frames,
+        frame_start=0,
+    )
+    times = torch.tensor(
+        centered_frame_times,
+        dtype=torch.float32,
+        device=device,
+    ).contiguous()
+    atlas = uvt_tubes_to_projective_trace_cell_atlas(
+        projected.ma,
+        projected.q_uvt,
+        projected.depth0,
+        projected.depth_beta,
+        compiled_projected_opacity(projected, projection_config),
+        projected.color,
+        times,
+        sigma_px=1.0,
+        image_width=int(config.width),
+        image_height=int(config.height),
+        tile_size=int(config.tile_x),
+        alpha_threshold=float(config.alpha_threshold),
+        require_isotropic_spatial=False,
+        auto_support_padding_from_alpha=True,
+        allow_depth_affine_uv=True,
+        stratify_visibility=True,
+        mark_visibility_fallback=True,
+    )
+    full_state = ProjectiveCellIntervalTrainerState(
+        atlas=atlas,
+        times=times,
+        config=config,
+        sigma_px=1.0,
+        image_width=int(config.width),
+        image_height=int(config.height),
+        tile_size=int(config.tile_x),
+        fallback_render_mode="mixed",
+    )
+    target_device = target_host.to(device=device)
+    target_element_count = int(target_host.numel())
+    full_image = full_state.render()
+    full_loss = torch.sqrt(
+        (full_image - target_device).square() + 1.0e-6
+    ).sum() / float(target_element_count)
+    full_loss.backward(retain_graph=True)
+    synchronize_device(device)
+    full_gradients, full_gradient_parameters = _world_parameter_gradients(model)
+    full_loss_value = float(full_loss.detach().cpu())
+    world_state_after_full = _world_state_digest(
+        snapshot_world_tube_state(model),
+        metadata=world_state_metadata,
+    )
+
+    model.zero_grad(set_to_none=True)
+    sliced_images: list[Tensor] = []
+    sliced_loss_value = 0.0
+    cumulative_sliced_trace_count = 0
+    cumulative_sliced_cell_count = 0
+    for sample_index in range(frame_count):
+        chunk_atlas = slice_projective_trace_cell_atlas_frames(
+            atlas,
+            start=sample_index,
+            stop=sample_index + 1,
+        )
+        cumulative_sliced_trace_count += int(chunk_atlas.coeffs.shape[0])
+        cumulative_sliced_cell_count += len(chunk_atlas.cells)
+        chunk_state = ProjectiveCellIntervalTrainerState(
+            atlas=chunk_atlas,
+            times=times[sample_index : sample_index + 1].contiguous(),
+            config=replace(config, frames=1),
+            sigma_px=1.0,
+            image_width=int(config.width),
+            image_height=int(config.height),
+            tile_size=int(config.tile_x),
+            fallback_render_mode="mixed",
+        )
+        sliced_image = chunk_state.render()
+        sliced_loss = torch.sqrt(
+            (
+                sliced_image
+                - target_device[sample_index : sample_index + 1]
+            ).square()
+            + 1.0e-6
+        ).sum() / float(target_element_count)
+        sliced_loss.backward(retain_graph=sample_index + 1 < frame_count)
+        sliced_loss_value += float(sliced_loss.detach().cpu())
+        sliced_images.append(sliced_image.detach())
+        del chunk_atlas, chunk_state, sliced_image, sliced_loss
+    synchronize_device(device)
+    sliced_gradients, sliced_gradient_parameters = _world_parameter_gradients(
+        model
+    )
+    world_state_after_sliced = _world_state_digest(
+        snapshot_world_tube_state(model),
+        metadata=world_state_metadata,
+    )
+    model.zero_grad(set_to_none=True)
+
+    sliced_image_all = torch.cat(sliced_images, dim=0)
+    image_difference = (full_image.detach() - sliced_image_all).abs()
+    image_max_abs_error = float(image_difference.max().cpu())
+    image_mean_abs_error = float(image_difference.mean().cpu())
+    loss_absolute_delta = abs(full_loss_value - sliced_loss_value)
+    gradient = _gradient_comparison(
+        full_gradients,
+        sliced_gradients,
+        replay_covered=full_gradient_parameters,
+        compiled_covered=sliced_gradient_parameters,
+    )
+    same_world_state = (
+        world_state_before
+        == world_state_after_full
+        == world_state_after_sliced
+    )
+    acceptance = {
+        "image_max_abs_error": FROZEN_WORLD_ACCEPTANCE[
+            "image_max_abs_error"
+        ],
+        "loss_absolute_delta": FROZEN_WORLD_ACCEPTANCE[
+            "loss_absolute_delta"
+        ],
+        "gradient_global_normalized_l2_error": FROZEN_WORLD_ACCEPTANCE[
+            "gradient_global_normalized_l2_error"
+        ],
+        "gradient_max_parameter_normalized_l2_error": FROZEN_WORLD_ACCEPTANCE[
+            "gradient_max_parameter_normalized_l2_error"
+        ],
+        "min_world_vjp_l2_norm": FROZEN_WORLD_ACCEPTANCE[
+            "min_world_vjp_l2_norm"
+        ],
+    }
+    checks = {
+        "non_unit_selected_times": non_unit_selected_times,
+        "same_parent_atlas": True,
+        "world_state_unchanged": same_world_state,
+        "image_matches": image_max_abs_error
+        <= acceptance["image_max_abs_error"],
+        "loss_matches": loss_absolute_delta
+        <= acceptance["loss_absolute_delta"],
+        "world_vjp_matches": gradient["global_normalized_l2_error"]
+        <= acceptance["gradient_global_normalized_l2_error"],
+        "world_vjp_per_parameter_matches": gradient[
+            "max_parameter_normalized_l2_error"
+        ]
+        <= acceptance["gradient_max_parameter_normalized_l2_error"],
+        "world_vjp_nonzero": min(
+            gradient["replay_l2_norm"],
+            gradient["compiled_l2_norm"],
+        )
+        > acceptance["min_world_vjp_l2_norm"],
+        "world_vjp_coverage_matches": (
+            bool(gradient["gradient_coverage_matches"])
+            and int(gradient["replay_gradient_tensor_count"])
+            == int(gradient["parameter_tensor_count"])
+            and int(gradient["compiled_gradient_tensor_count"])
+            == int(gradient["parameter_tensor_count"])
+        ),
+    }
+    result = {
+        "schema_version": 1,
+        "status": "complete",
+        "accepted": all(checks.values()),
+        "scope": (
+            "one bounded non-unit selected-time atlas rendered whole versus "
+            "one-frame compact slices of the same parent atlas"
+        ),
+        "timing_claim_eligible": False,
+        "frame_count": frame_count,
+        "full_dataset_frame_count": full_frames,
+        "frame_indices": list(frame_indices),
+        "centered_frame_times": list(centered_frame_times),
+        "time_steps": list(time_steps),
+        "slice_chunk_frames": 1,
+        "slice_count": frame_count,
+        "parent_atlas_trace_count": int(atlas.coeffs.shape[0]),
+        "parent_atlas_cell_count": len(atlas.cells),
+        "cumulative_sliced_trace_count": cumulative_sliced_trace_count,
+        "cumulative_sliced_cell_count": cumulative_sliced_cell_count,
+        "contract_hashes": dict(contract_hashes),
+        "world_state": {
+            "before_sha256": world_state_before,
+            "after_full_atlas_sha256": world_state_after_full,
+            "after_sliced_atlas_sha256": world_state_after_sliced,
+            "unchanged": same_world_state,
+        },
+        "loss": {
+            "full_atlas": full_loss_value,
+            "chunk_sliced": sliced_loss_value,
+            "absolute_delta": loss_absolute_delta,
+        },
+        "image": {
+            "max_abs_error": image_max_abs_error,
+            "mean_abs_error": image_mean_abs_error,
+        },
+        "gradient": {
+            "global_normalized_l2_error": gradient[
+                "global_normalized_l2_error"
+            ],
+            "cosine_similarity": gradient["cosine_similarity"],
+            "full_atlas_l2_norm": gradient["replay_l2_norm"],
+            "chunk_sliced_l2_norm": gradient["compiled_l2_norm"],
+            "parameter_tensor_count": gradient["parameter_tensor_count"],
+            "full_atlas_gradient_tensor_count": gradient[
+                "replay_gradient_tensor_count"
+            ],
+            "chunk_sliced_gradient_tensor_count": gradient[
+                "compiled_gradient_tensor_count"
+            ],
+            "gradient_coverage_matches": gradient[
+                "gradient_coverage_matches"
+            ],
+            "max_parameter_normalized_l2_error": gradient[
+                "max_parameter_normalized_l2_error"
+            ],
+            "per_parameter_normalized_l2_error": gradient[
+                "per_parameter_normalized_l2_error"
+            ],
+            "full_atlas_gradient_parameters": gradient[
+                "replay_gradient_parameters"
+            ],
+            "chunk_sliced_gradient_parameters": gradient[
+                "compiled_gradient_parameters"
+            ],
+        },
+        "acceptance": acceptance,
+        "checks": checks,
+    }
+    del (
+        projected,
+        times,
+        atlas,
+        full_state,
+        target_device,
+        full_image,
+        full_loss,
+        sliced_images,
+        sliced_image_all,
+        image_difference,
+    )
+    gc.collect()
+    torch.mps.empty_cache()
+    return result
+
+
+def frozen_world_replay_compiled_report(
+    model: WorldTubeModel,
+    bundle,
+    *,
+    render_config: UVTRenderConfig,
+    camera_projection: str,
+    out_dir: Path,
+    max_frames: int = 0,
+    checkpoint: dict[str, Any] | None = None,
+    verify_selected_time_slice_parity: bool = False,
+    timing_warmups: int = 0,
+    timing_repeats: int = 1,
+) -> dict[str, Any]:
+    """Compare per-frame replay and one interval atlas from one frozen world.
+
+    Both routes consume the same trained model, held-out camera, target frames,
+    loss, alpha law, and float32 precision. The replay route reprojects and
+    bins a one-frame STAR sequence for every target time. The compiled route
+    projects once, lowers one event-stratified interval atlas, and evaluates
+    the same target times through the native compiled forward/VJP.
+    """
+
+    validate_frozen_world_timing_controls(
+        warmups=timing_warmups,
+        repeats=timing_repeats,
+    )
+    device = next(model.parameters()).device
+    if device.type != "mps":
+        raise ValueError("frozen replay/compiled comparison requires MPS")
+    if model.representation_name != "legacy_tube":
+        raise ValueError("frozen replay/compiled comparison currently requires legacy_tube")
+    if render_config.alpha_mode != "peak_splat":
+        raise ValueError("frozen replay/compiled comparison currently requires peak_splat")
+    if render_config.tile_x != render_config.tile_y:
+        raise ValueError("projective interval atlas requires equal spatial tile dimensions")
+    if (
+        bundle.heldout_frames is None
+        or bundle.heldout_K is None
+        or bundle.heldout_w2c is None
+        or int(bundle.heldout_frames.shape[0]) < 1
+    ):
+        raise ValueError("frozen replay/compiled comparison requires a held-out camera")
+
+    full_frames = int(bundle.frame_count)
+    frame_count = full_frames if max_frames <= 0 else min(int(max_frames), full_frames)
+    if frame_count < 1:
+        raise ValueError("frozen replay/compiled frame count must be positive")
+    frame_indices = frozen_world_full_interval_frame_indices(
+        full_frames,
+        frame_count,
+    )
+    centered_frame_times = tuple(
+        float(frame) - 0.5 * float(full_frames - 1)
+        for frame in frame_indices
+    )
+    config = replace(render_config, frames=frame_count)
+    target_indices = torch.tensor(
+        frame_indices,
+        dtype=torch.long,
+        device=bundle.heldout_frames.device,
+    )
+    target_host = (
+        bundle.heldout_frames[0].index_select(0, target_indices)
+        .permute(0, 2, 3, 1)
+        .to(device="cpu", dtype=torch.float32)
+    )
+    resident_chunk_frames = max(
+        1,
+        min(int(render_config.tile_t), frame_count),
+    )
+    target_element_count = int(target_host.numel())
+    heldout_K = select_view_K(bundle.heldout_K, 0)
+    heldout_w2c = select_view_w2c(bundle.heldout_w2c, 0)
+    heldout_lens_model, heldout_distortion = select_lens(
+        bundle.heldout_lens_models,
+        bundle.heldout_distortions,
+        0,
+        camera_projection=camera_projection,
+    )
+    contract_hashes = _frozen_evaluation_contract_hashes(
+        target_frames=target_host,
+        heldout_K=heldout_K,
+        heldout_w2c=heldout_w2c,
+        heldout_distortion=heldout_distortion,
+        heldout_lens_model=heldout_lens_model,
+        heldout_camera=bundle.heldout_camera_names[0],
+        camera_projection=camera_projection,
+        full_frames=full_frames,
+        frame_count=frame_count,
+        frame_indices=frame_indices,
+        centered_frame_times=centered_frame_times,
+        config=config,
+    )
+    if checkpoint is None:
+        checkpoint = _save_frozen_world_checkpoint(
+            model,
+            out_dir / "world_tubes_frozen_final_state.pt",
+            frame_count=full_frames,
+            representation=model.representation_name,
+        )
+    world_state_metadata = _world_state_metadata(
+        model,
+        frame_count=full_frames,
+        representation=model.representation_name,
+    )
+    world_state_before_routes = _world_state_digest(
+        snapshot_world_tube_state(model),
+        metadata=world_state_metadata,
+    )
+    if world_state_before_routes != checkpoint["world_state_sha256"]:
+        raise RuntimeError("saved frozen checkpoint does not match the live world")
+
+    if verify_selected_time_slice_parity:
+        selected_time_slice_parity = _frozen_compiled_full_vs_sliced_parity(
+            model,
+            heldout_K=heldout_K,
+            heldout_w2c=heldout_w2c,
+            heldout_lens_model=heldout_lens_model,
+            heldout_distortion=heldout_distortion,
+            camera_projection=camera_projection,
+            render_config=render_config,
+            config=config,
+            full_frames=full_frames,
+            frame_indices=frame_indices,
+            centered_frame_times=centered_frame_times,
+            target_host=target_host,
+            contract_hashes=contract_hashes,
+        )
+        if (
+            selected_time_slice_parity["world_state"]["before_sha256"]
+            != checkpoint["world_state_sha256"]
+            or selected_time_slice_parity["world_state"][
+                "after_sliced_atlas_sha256"
+            ]
+            != checkpoint["world_state_sha256"]
+        ):
+            raise RuntimeError(
+                "selected-time atlas-slice parity changed the frozen world"
+            )
+    else:
+        selected_time_slice_parity = {
+            "schema_version": 1,
+            "status": "not_run",
+            "accepted": False,
+            "reason": (
+                "sweep runs this bounded proof only on its smallest "
+                "non-unit selected-time row"
+            ),
+            "timing_claim_eligible": False,
+        }
+
+    model.zero_grad(set_to_none=True)
+    replay_memory_baseline = _clean_route_memory_baseline(device)
+    replay_memory_sampler = DeviceMemorySampler(device)
+    replay_memory_sampler.start()
+    replay_forward_s = 0.0
+    replay_backward_s = 0.0
+    replay_loss_value = 0.0
+    replay_payload_bytes = 0
+    for chunk_start in range(0, frame_count, resident_chunk_frames):
+        chunk_stop = min(frame_count, chunk_start + resident_chunk_frames)
+        synchronize_device(device)
+        replay_forward_started = time.perf_counter()
+        replay_frames: list[Tensor] = []
+        for sample_index in range(chunk_start, chunk_stop):
+            frame = frame_indices[sample_index]
+            frame_config = replace(config, frames=1)
+            projected_frame = project_world_tube_sequence(
+                model,
+                heldout_K,
+                heldout_w2c,
+                frame_config,
+                camera_projection=camera_projection,
+                lens_model=heldout_lens_model,
+                distortion=heldout_distortion,
+                full_frames=full_frames,
+                frame_start=frame,
+            )
+            replay_payload_bytes += _tensor_payload_bytes(
+                (
+                    projected_frame.ma,
+                    projected_frame.q_uvt,
+                    projected_frame.depth0,
+                    projected_frame.depth_beta,
+                    projected_frame.opacity,
+                    projected_frame.color,
+                )
+            )
+            replay_frames.append(
+                render_projected_sequence(
+                    projected_frame,
+                    frame_config,
+                    backend="metal_tile",
+                    reduction_mode="index_add",
+                    sample_emission_mode="direct_atomic",
+                ).rgb
+            )
+        replay_image = torch.cat(replay_frames, dim=0)
+        target_chunk = target_host[chunk_start:chunk_stop].to(device=device)
+        replay_loss = torch.sqrt(
+            (replay_image - target_chunk).square() + 1.0e-6
+        ).sum() / float(target_element_count)
+        synchronize_device(device)
+        replay_forward_s += time.perf_counter() - replay_forward_started
+        replay_backward_started = time.perf_counter()
+        replay_loss.backward()
+        synchronize_device(device)
+        replay_backward_s += time.perf_counter() - replay_backward_started
+        replay_loss_value += float(replay_loss.detach().cpu())
+        del (
+            projected_frame,
+            replay_frames,
+            replay_image,
+            replay_loss,
+            target_chunk,
+        )
+    replay_memory_sampler.stop()
+    replay_memory_phases = [
+        _memory_phase_stats(
+            "correctness_forward_backward",
+            replay_memory_sampler,
+        )
+    ]
+    replay_route_memory = _route_memory_report(
+        "replay",
+        device=device,
+        baseline=replay_memory_baseline,
+        phases=replay_memory_phases,
+    )
+    replay_gradients, replay_gradient_parameters = _world_parameter_gradients(model)
+    world_state_after_replay = _world_state_digest(
+        snapshot_world_tube_state(model),
+        metadata=_world_state_metadata(
+            model,
+            frame_count=full_frames,
+            representation=model.representation_name,
+        ),
+    )
+
+    model.zero_grad(set_to_none=True)
+    compiled_memory_baseline = _clean_route_memory_baseline(device)
+    compiled_memory_phases: list[dict[str, Any]] = []
+    compiled_compile_memory_sampler = DeviceMemorySampler(device)
+    compiled_compile_memory_sampler.start()
+    synchronize_device(device)
+    compiled_compile_started = time.perf_counter()
+    projection_config = replace(render_config, frames=full_frames)
+    projected = project_world_tube_sequence(
+        model,
+        heldout_K,
+        heldout_w2c,
+        projection_config,
+        camera_projection=camera_projection,
+        lens_model=heldout_lens_model,
+        distortion=heldout_distortion,
+        full_frames=full_frames,
+        frame_start=0,
+    )
+    times = torch.tensor(
+        centered_frame_times,
+        dtype=torch.float32,
+        device=device,
+    ).contiguous()
+    atlas = uvt_tubes_to_projective_trace_cell_atlas(
+        projected.ma,
+        projected.q_uvt,
+        projected.depth0,
+        projected.depth_beta,
+        compiled_projected_opacity(projected, projection_config),
+        projected.color,
+        times,
+        sigma_px=1.0,
+        image_width=int(config.width),
+        image_height=int(config.height),
+        tile_size=int(config.tile_x),
+        alpha_threshold=float(config.alpha_threshold),
+        require_isotropic_spatial=False,
+        auto_support_padding_from_alpha=True,
+        allow_depth_affine_uv=True,
+        stratify_visibility=True,
+        mark_visibility_fallback=True,
+    )
+    compiled_state = ProjectiveCellIntervalTrainerState(
+        atlas=atlas,
+        times=times,
+        config=config,
+        sigma_px=1.0,
+        image_width=int(config.width),
+        image_height=int(config.height),
+        tile_size=int(config.tile_x),
+        fallback_render_mode="mixed",
+    )
+    synchronize_device(device)
+    compiled_compile_s = time.perf_counter() - compiled_compile_started
+    compiled_compile_memory_sampler.stop()
+    compiled_memory_phases.append(
+        _memory_phase_stats(
+            "atlas_compile",
+            compiled_compile_memory_sampler,
+        )
+    )
+    fallback = compiled_state.fallback_stats()
+    complexity = compiled_state.complexity_stats()
+    compiled_payload_bytes = _tensor_payload_bytes(
+        (
+            atlas.coeffs,
+            atlas.opacity,
+            atlas.opacity_time_coeffs,
+            atlas.spatial_precision_uv,
+            atlas.depth_affine_uv,
+            atlas.color,
+        )
+    )
+    compiled_trace_count = int(atlas.coeffs.shape[0])
+    compiled_cell_count = len(atlas.cells)
+
+    compiled_forward_s = 0.0
+    compiled_backward_s = 0.0
+    parity_replay_forward_s = 0.0
+    compiled_loss_value = 0.0
+    image_max_abs_error = 0.0
+    image_absolute_error_sum = 0.0
+    for chunk_start in range(0, frame_count, resident_chunk_frames):
+        chunk_stop = min(frame_count, chunk_start + resident_chunk_frames)
+        synchronize_device(device)
+        compiled_forward_memory_sampler = DeviceMemorySampler(device)
+        compiled_forward_memory_sampler.start()
+        compiled_forward_started = time.perf_counter()
+        chunk_config = replace(config, frames=chunk_stop - chunk_start)
+        chunk_times = times[chunk_start:chunk_stop].contiguous()
+        chunk_atlas = slice_projective_trace_cell_atlas_frames(
+            atlas,
+            start=chunk_start,
+            stop=chunk_stop,
+        )
+        chunk_state = ProjectiveCellIntervalTrainerState(
+            atlas=chunk_atlas,
+            times=chunk_times,
+            config=chunk_config,
+            sigma_px=1.0,
+            image_width=int(config.width),
+            image_height=int(config.height),
+            tile_size=int(config.tile_x),
+            fallback_render_mode="mixed",
+        )
+        target_chunk = target_host[chunk_start:chunk_stop].to(device=device)
+        compiled_image = chunk_state.render()
+        compiled_loss = torch.sqrt(
+            (compiled_image - target_chunk).square() + 1.0e-6
+        ).sum() / float(target_element_count)
+        synchronize_device(device)
+        compiled_forward_s += time.perf_counter() - compiled_forward_started
+        compiled_forward_memory_sampler.stop()
+        compiled_memory_phases.append(
+            _memory_phase_stats(
+                f"chunk_{chunk_start:04d}_{chunk_stop:04d}_forward",
+                compiled_forward_memory_sampler,
+            )
+        )
+
+        synchronize_device(device)
+        parity_replay_started = time.perf_counter()
+        with torch.no_grad():
+            parity_frames: list[Tensor] = []
+            for sample_index in range(chunk_start, chunk_stop):
+                frame = frame_indices[sample_index]
+                frame_config = replace(config, frames=1)
+                parity_projected = project_world_tube_sequence(
+                    model,
+                    heldout_K,
+                    heldout_w2c,
+                    frame_config,
+                    camera_projection=camera_projection,
+                    lens_model=heldout_lens_model,
+                    distortion=heldout_distortion,
+                    full_frames=full_frames,
+                    frame_start=frame,
+                )
+                parity_frames.append(
+                    render_projected_sequence(
+                        parity_projected,
+                        frame_config,
+                        backend="metal_tile",
+                        reduction_mode="index_add",
+                        sample_emission_mode="direct_atomic",
+                    ).rgb
+                )
+            parity_image = torch.cat(parity_frames, dim=0)
+            image_difference = (compiled_image.detach() - parity_image).abs()
+            image_max_abs_error = max(
+                image_max_abs_error,
+                float(image_difference.max().cpu()),
+            )
+            image_absolute_error_sum += float(image_difference.sum().cpu())
+        synchronize_device(device)
+        parity_replay_forward_s += time.perf_counter() - parity_replay_started
+        del (
+            parity_projected,
+            parity_frames,
+            parity_image,
+            image_difference,
+        )
+        gc.collect()
+        torch.mps.empty_cache()
+        synchronize_device(device)
+
+        compiled_backward_memory_sampler = DeviceMemorySampler(device)
+        compiled_backward_memory_sampler.start()
+        compiled_backward_started = time.perf_counter()
+        compiled_loss.backward(retain_graph=chunk_stop < frame_count)
+        synchronize_device(device)
+        compiled_backward_s += time.perf_counter() - compiled_backward_started
+        compiled_backward_memory_sampler.stop()
+        compiled_memory_phases.append(
+            _memory_phase_stats(
+                f"chunk_{chunk_start:04d}_{chunk_stop:04d}_backward",
+                compiled_backward_memory_sampler,
+            )
+        )
+        compiled_loss_value += float(compiled_loss.detach().cpu())
+        del (
+            chunk_atlas,
+            chunk_state,
+            chunk_times,
+            compiled_image,
+            compiled_loss,
+            target_chunk,
+        )
+
+    compiled_route_memory = _route_memory_report(
+        "compiled",
+        device=device,
+        baseline=compiled_memory_baseline,
+        phases=compiled_memory_phases,
+    )
+    compiled_gradients, compiled_gradient_parameters = _world_parameter_gradients(
+        model
+    )
+    world_state_after_compiled = _world_state_digest(
+        snapshot_world_tube_state(model),
+        metadata=_world_state_metadata(
+            model,
+            frame_count=full_frames,
+            representation=model.representation_name,
+        ),
+    )
+    model.zero_grad(set_to_none=True)
+
+    gradient = _gradient_comparison(
+        replay_gradients,
+        compiled_gradients,
+        replay_covered=replay_gradient_parameters,
+        compiled_covered=compiled_gradient_parameters,
+    )
+    image_mean_abs_error = image_absolute_error_sum / float(target_element_count)
+    loss_absolute_delta = abs(compiled_loss_value - replay_loss_value)
+    acceptance = dict(FROZEN_WORLD_ACCEPTANCE)
+    same_checkpoint = (
+        checkpoint["world_state_sha256"]
+        == world_state_before_routes
+        == world_state_after_replay
+        == world_state_after_compiled
+    )
+    checks = {
+        "checkpoint_matches": same_checkpoint,
+        "image_matches": image_max_abs_error
+        <= acceptance["image_max_abs_error"],
+        "loss_matches": loss_absolute_delta
+        <= acceptance["loss_absolute_delta"],
+        "world_vjp_matches": gradient["global_normalized_l2_error"]
+        <= acceptance["gradient_global_normalized_l2_error"],
+        "world_vjp_per_parameter_matches": gradient[
+            "max_parameter_normalized_l2_error"
+        ]
+        <= acceptance["gradient_max_parameter_normalized_l2_error"],
+        "world_vjp_nonzero": min(
+            gradient["replay_l2_norm"],
+            gradient["compiled_l2_norm"],
+        )
+        > acceptance["min_world_vjp_l2_norm"],
+        "world_vjp_coverage_matches": (
+            bool(gradient["gradient_coverage_matches"])
+            and int(gradient["replay_gradient_tensor_count"])
+            == int(gradient["parameter_tensor_count"])
+            and int(gradient["compiled_gradient_tensor_count"])
+            == int(gradient["parameter_tensor_count"])
+        ),
+        "fallback_within_budget": fallback.fallback_fraction
+        <= acceptance["fallback_fraction"],
+    }
+    retained_storage_artifact = _write_frozen_atlas_storage(
+        atlas,
+        out_dir=out_dir,
+        frame_count=frame_count,
+    )
+    retained_storage = {
+        "schema_version": 1,
+        "definition": RETAINED_STORAGE_DEFINITION,
+        "shared_checkpoint_bytes": int(checkpoint["bytes"]),
+        "shared_checkpoint_excluded_from_route_totals": True,
+        "replay": {
+            "route": "replay",
+            "serialized_retained_evaluator_bytes": 0,
+            "topology_applicable": False,
+            "storage_claim_eligible": True,
+            "reason": REPLAY_STORAGE_REASON,
+        },
+        "compiled": {
+            "route": "compiled",
+            "serialized_retained_evaluator_bytes": int(
+                retained_storage_artifact["bytes"]
+            ),
+            "tensor_payload_bytes": int(
+                retained_storage_artifact["tensor_payload_bytes"]
+            ),
+            "topology_and_container_bytes": int(
+                retained_storage_artifact["topology_and_container_bytes"]
+            ),
+            "topology_bytes_included": True,
+            "artifact": retained_storage_artifact,
+            "storage_claim_eligible": True,
+        },
+        "topology_bytes_included": True,
+        "storage_claim_eligible": True,
+        "publication_claim_eligible": True,
+    }
+    route_memory = {
+        "schema_version": 1,
+        "definition": ROUTE_MEMORY_DEFINITION,
+        "measurement_source": ROUTE_MEMORY_MEASUREMENT_SOURCE,
+        "sampler_interval_ms": 5.0,
+        "compiled_parity_replay_excluded": True,
+        "replay": replay_route_memory,
+        "compiled": compiled_route_memory,
+        "publication_claim_eligible": (
+            replay_route_memory["measurement_claim_eligible"] is True
+            and compiled_route_memory["measurement_claim_eligible"] is True
+        ),
+    }
+    del projected, times, atlas, compiled_state
+    gc.collect()
+    torch.mps.empty_cache()
+
+    def replay_timing_trial() -> tuple[float, float]:
+        model.zero_grad(set_to_none=True)
+        total_forward_s = 0.0
+        total_backward_s = 0.0
+        for chunk_start in range(0, frame_count, resident_chunk_frames):
+            chunk_stop = min(frame_count, chunk_start + resident_chunk_frames)
+            synchronize_device(device)
+            forward_started = time.perf_counter()
+            trial_frames: list[Tensor] = []
+            for sample_index in range(chunk_start, chunk_stop):
+                frame = frame_indices[sample_index]
+                frame_config = replace(config, frames=1)
+                trial_projected = project_world_tube_sequence(
+                    model,
+                    heldout_K,
+                    heldout_w2c,
+                    frame_config,
+                    camera_projection=camera_projection,
+                    lens_model=heldout_lens_model,
+                    distortion=heldout_distortion,
+                    full_frames=full_frames,
+                    frame_start=frame,
+                )
+                trial_frames.append(
+                    render_projected_sequence(
+                        trial_projected,
+                        frame_config,
+                        backend="metal_tile",
+                        reduction_mode="index_add",
+                        sample_emission_mode="direct_atomic",
+                    ).rgb
+                )
+            trial_image = torch.cat(trial_frames, dim=0)
+            trial_target = target_host[chunk_start:chunk_stop].to(device=device)
+            trial_loss = torch.sqrt(
+                (trial_image - trial_target).square() + 1.0e-6
+            ).sum() / float(target_element_count)
+            synchronize_device(device)
+            total_forward_s += time.perf_counter() - forward_started
+            backward_started = time.perf_counter()
+            trial_loss.backward()
+            synchronize_device(device)
+            total_backward_s += time.perf_counter() - backward_started
+            del (
+                trial_projected,
+                trial_frames,
+                trial_image,
+                trial_target,
+                trial_loss,
+            )
+        model.zero_grad(set_to_none=True)
+        return total_forward_s, total_backward_s
+
+    def compiled_timing_trial() -> tuple[float, float, float]:
+        model.zero_grad(set_to_none=True)
+        synchronize_device(device)
+        compile_started = time.perf_counter()
+        trial_projection_config = replace(render_config, frames=full_frames)
+        trial_projected = project_world_tube_sequence(
+            model,
+            heldout_K,
+            heldout_w2c,
+            trial_projection_config,
+            camera_projection=camera_projection,
+            lens_model=heldout_lens_model,
+            distortion=heldout_distortion,
+            full_frames=full_frames,
+            frame_start=0,
+        )
+        trial_times = torch.tensor(
+            centered_frame_times,
+            dtype=torch.float32,
+            device=device,
+        ).contiguous()
+        trial_atlas = uvt_tubes_to_projective_trace_cell_atlas(
+            trial_projected.ma,
+            trial_projected.q_uvt,
+            trial_projected.depth0,
+            trial_projected.depth_beta,
+            compiled_projected_opacity(
+                trial_projected,
+                trial_projection_config,
+            ),
+            trial_projected.color,
+            trial_times,
+            sigma_px=1.0,
+            image_width=int(config.width),
+            image_height=int(config.height),
+            tile_size=int(config.tile_x),
+            alpha_threshold=float(config.alpha_threshold),
+            require_isotropic_spatial=False,
+            auto_support_padding_from_alpha=True,
+            allow_depth_affine_uv=True,
+            stratify_visibility=True,
+            mark_visibility_fallback=True,
+        )
+        synchronize_device(device)
+        compile_s = time.perf_counter() - compile_started
+
+        total_forward_s = 0.0
+        total_backward_s = 0.0
+        for chunk_start in range(0, frame_count, resident_chunk_frames):
+            chunk_stop = min(frame_count, chunk_start + resident_chunk_frames)
+            synchronize_device(device)
+            forward_started = time.perf_counter()
+            trial_chunk_atlas = slice_projective_trace_cell_atlas_frames(
+                trial_atlas,
+                start=chunk_start,
+                stop=chunk_stop,
+            )
+            trial_chunk_state = ProjectiveCellIntervalTrainerState(
+                atlas=trial_chunk_atlas,
+                times=trial_times[chunk_start:chunk_stop].contiguous(),
+                config=replace(config, frames=chunk_stop - chunk_start),
+                sigma_px=1.0,
+                image_width=int(config.width),
+                image_height=int(config.height),
+                tile_size=int(config.tile_x),
+                fallback_render_mode="mixed",
+            )
+            trial_target = target_host[chunk_start:chunk_stop].to(device=device)
+            trial_image = trial_chunk_state.render()
+            trial_loss = torch.sqrt(
+                (trial_image - trial_target).square() + 1.0e-6
+            ).sum() / float(target_element_count)
+            synchronize_device(device)
+            total_forward_s += time.perf_counter() - forward_started
+            backward_started = time.perf_counter()
+            trial_loss.backward(retain_graph=chunk_stop < frame_count)
+            synchronize_device(device)
+            total_backward_s += time.perf_counter() - backward_started
+            del (
+                trial_chunk_atlas,
+                trial_chunk_state,
+                trial_target,
+                trial_image,
+                trial_loss,
+            )
+        model.zero_grad(set_to_none=True)
+        del trial_projected, trial_times, trial_atlas
+        return compile_s, total_forward_s, total_backward_s
+
+    def complete_timing_sample(
+        *,
+        replay_forward: float,
+        replay_backward: float,
+        compiled_compile: float,
+        compiled_forward: float,
+        compiled_backward: float,
+    ) -> dict[str, float]:
+        return {
+            "replay_total_forward": replay_forward,
+            "replay_total_backward": replay_backward,
+            "replay_total_forward_backward": (
+                replay_forward + replay_backward
+            ),
+            "replay_per_frame_forward": replay_forward / float(frame_count),
+            "replay_per_frame_backward": replay_backward / float(frame_count),
+            "compiled_atlas_compile": compiled_compile,
+            "compiled_total_forward": compiled_forward,
+            "compiled_total_backward": compiled_backward,
+            "compiled_total_forward_backward": (
+                compiled_forward + compiled_backward
+            ),
+            "compiled_compile_plus_forward_backward": (
+                compiled_compile + compiled_forward + compiled_backward
+            ),
+            "compiled_per_frame_forward": (
+                compiled_forward / float(frame_count)
+            ),
+            "compiled_per_frame_backward": (
+                compiled_backward / float(frame_count)
+            ),
+        }
+
+    timing_publication_ready = (
+        timing_warmups >= FROZEN_WORLD_MIN_TIMING_WARMUPS
+        and timing_repeats >= FROZEN_WORLD_MIN_TIMING_REPEATS
+    )
+    if timing_warmups == 0 and timing_repeats == 1:
+        timing_samples = [
+            complete_timing_sample(
+                replay_forward=replay_forward_s,
+                replay_backward=replay_backward_s,
+                compiled_compile=compiled_compile_s,
+                compiled_forward=compiled_forward_s,
+                compiled_backward=compiled_backward_s,
+            )
+        ]
+        timing_label = "single_shot_correctness_timing"
+        timing_measurement_source = "backward_compatible_correctness_pass"
+    else:
+        timing_samples = []
+        for timing_trial_index in range(timing_warmups + timing_repeats):
+            if timing_trial_index % 2 == 0:
+                trial_replay_forward, trial_replay_backward = (
+                    replay_timing_trial()
+                )
+                (
+                    trial_compiled_compile,
+                    trial_compiled_forward,
+                    trial_compiled_backward,
+                ) = compiled_timing_trial()
+            else:
+                (
+                    trial_compiled_compile,
+                    trial_compiled_forward,
+                    trial_compiled_backward,
+                ) = compiled_timing_trial()
+                trial_replay_forward, trial_replay_backward = (
+                    replay_timing_trial()
+                )
+            if timing_trial_index >= timing_warmups:
+                timing_samples.append(
+                    complete_timing_sample(
+                        replay_forward=trial_replay_forward,
+                        replay_backward=trial_replay_backward,
+                        compiled_compile=trial_compiled_compile,
+                        compiled_forward=trial_compiled_forward,
+                        compiled_backward=trial_compiled_backward,
+                    )
+                )
+            gc.collect()
+        timing_label = (
+            "warmed_repeated_wall_timing_v1"
+            if timing_publication_ready
+            else "diagnostic_repeated_wall_timing_v1"
+        )
+        timing_measurement_source = (
+            "independent_alternating_paired_trials"
+        )
+    timing_sample_columns = tuple(timing_samples[0])
+    timing_samples_by_metric = {
+        key: [sample[key] for sample in timing_samples]
+        for key in timing_sample_columns
+    }
+    timing_benchmark = {
+        "schema_version": 1,
+        "status": "complete",
+        "label": timing_label,
+        "publication_ready": timing_publication_ready,
+        "warmups": timing_warmups,
+        "repeats": timing_repeats,
+        "measurement_source": timing_measurement_source,
+        "timing_definition": (
+            "device-synchronized perf_counter segments; forward includes "
+            "target transfer; compile includes world projection; summed totals "
+            "exclude inter-segment cleanup and optimizer work"
+        ),
+        "route_order": (
+            "alternating_paired_replay_compiled_v1"
+            if timing_measurement_source
+            == "independent_alternating_paired_trials"
+            else "correctness_pass_replay_then_compiled"
+        ),
+        "device_synchronized_at_boundaries": True,
+        "compiled_evaluator_uses_chunk_slices": True,
+        "forward_includes_cpu_target_to_device_transfer": True,
+        "compiled_atlas_compile_includes_world_projection": True,
+        "backward_excludes_optimizer": True,
+        "resident_chunk_frames": resident_chunk_frames,
+        "correctness_and_slice_parity_time_excluded": (
+            timing_measurement_source
+            == "independent_alternating_paired_trials"
+        ),
+        "samples_s": timing_samples_by_metric,
+        "summary_s": {
+            key: frozen_world_timing_summary(values)
+            for key, values in timing_samples_by_metric.items()
+        },
+    }
+    world_state_after_timing = _world_state_digest(
+        snapshot_world_tube_state(model),
+        metadata=world_state_metadata,
+    )
+    if world_state_after_timing != checkpoint["world_state_sha256"]:
+        raise RuntimeError("frozen-world timing changed the learned world")
+
+    return {
+        "schema_version": 2,
+        "status": "complete",
+        "accepted": all(checks.values()),
+        "scope": (
+            "one frozen learned world; heldout view 0; ordered samples are "
+            "selected from one fixed full-duration camera/world program"
+        ),
+        "checkpoint": checkpoint,
+        "world_state": {
+            "checkpoint_sha256": checkpoint["world_state_sha256"],
+            "before_routes_sha256": world_state_before_routes,
+            "after_replay_sha256": world_state_after_replay,
+            "after_compiled_sha256": world_state_after_compiled,
+            "matches_checkpoint": same_checkpoint,
+        },
+        "heldout_camera": bundle.heldout_camera_names[0],
+        "frame_count": frame_count,
+        "full_dataset_frame_count": full_frames,
+        "frame_indices": list(frame_indices),
+        "centered_frame_times": list(centered_frame_times),
+        "temporal_sampling": "ordered_full_interval_integer_lattice_v1",
+        "image_size": [int(config.height), int(config.width)],
+        "loss": {
+            "name": "robust_l1",
+            "replay": replay_loss_value,
+            "compiled": compiled_loss_value,
+            "absolute_delta": loss_absolute_delta,
+        },
+        "image": {
+            "max_abs_error": image_max_abs_error,
+            "mean_abs_error": image_mean_abs_error,
+        },
+        "gradient": gradient,
+        "selected_time_slice_parity": selected_time_slice_parity,
+        "timing_s": {
+            "replay_total_forward": replay_forward_s,
+            "replay_total_backward": replay_backward_s,
+            "replay_per_frame_forward": replay_forward_s / float(frame_count),
+            "replay_per_frame_backward": replay_backward_s / float(frame_count),
+            "compiled_atlas_compile": compiled_compile_s,
+            "compiled_total_forward": compiled_forward_s,
+            "compiled_total_backward": compiled_backward_s,
+            "compiled_per_frame_forward": compiled_forward_s / float(frame_count),
+            "compiled_per_frame_backward": compiled_backward_s / float(frame_count),
+            "parity_replay_total_forward": parity_replay_forward_s,
+        },
+        "timing_benchmark": timing_benchmark,
+        "payload_bytes": {
+            "schema_version": 1,
+            "metric_kind": "logical_work_volume_proxy",
+            "definition": LOGICAL_PAYLOAD_DEFINITION,
+            "topology_bytes_included": False,
+            "storage_claim_eligible": False,
+            "publication_claim_eligible": False,
+            "replay_cumulative_logical_tensor_bytes": replay_payload_bytes,
+            "compiled_trace_table_logical_tensor_bytes": compiled_payload_bytes,
+            "compiled_to_replay_logical_volume_ratio": compiled_payload_bytes
+            / max(replay_payload_bytes, 1),
+        },
+        "retained_storage_bytes": retained_storage,
+        "route_memory": route_memory,
+        "atlas": {
+            "trace_count": compiled_trace_count,
+            "cell_count": compiled_cell_count,
+            "interval_trace_entries": complexity.interval_trace_entries,
+            "dense_trace_samples": complexity.dense_trace_samples,
+            "interval_to_dense_trace_sample_ratio": complexity.interval_to_dense_trace_sample_ratio,
+            "fallback_cells": fallback.fallback_cells,
+            "total_tile_samples": fallback.total_tile_samples,
+            "fallback_tile_samples": fallback.fallback_tile_samples,
+            "fallback_fraction": fallback.fallback_fraction,
+            "fallback_reasons": list(fallback.fallback_reasons),
+        },
+        "contract": {
+            "same_checkpoint": same_checkpoint,
+            "same_heldout_camera": True,
+            "same_target_frames": True,
+            "same_loss": True,
+            "same_precision": True,
+            "same_alpha_mode": True,
+            "bounded_device_frame_residency": True,
+            "host_target_storage": "eager_cpu_selected_frames",
+            "resident_chunk_frames": resident_chunk_frames,
+            "timing_excludes_parity_replay": True,
+            "camera_projection": camera_projection,
+            "temporal_sampling": (
+                "ordered integer frames spanning the full dataset interval"
+            ),
+            "replay_route": (
+                "one-frame STAR projection/bin/render per selected global time"
+            ),
+            "compiled_route": (
+                "one event-stratified interval atlas evaluated by bounded "
+                "frame chunks through native forward/VJP"
+            ),
+        },
+        "contract_hashes": contract_hashes,
+        "acceptance": acceptance,
+        "checks": checks,
+    }
+
+
+def frozen_world_replay_compiled_sweep_report(
+    model: WorldTubeModel,
+    bundle,
+    *,
+    render_config: UVTRenderConfig,
+    camera_projection: str,
+    out_dir: Path,
+    primary_max_frames: int = 0,
+    requested_frame_counts: tuple[int, ...] | None = None,
+    timing_warmups: int = 0,
+    timing_repeats: int = 1,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Evaluate full-interval temporal sample densities from one frozen world."""
+
+    validate_frozen_world_timing_controls(
+        warmups=timing_warmups,
+        repeats=timing_repeats,
+    )
+    full_frames = int(bundle.frame_count)
+    resolved_frame_counts = resolve_frozen_world_frame_counts(
+        full_frames=full_frames,
+        primary_max_frames=primary_max_frames,
+        requested_frame_counts=requested_frame_counts,
+    )
+    progress_path = out_dir / "frozen_world_sweep_progress.json"
+    progress: dict[str, Any] = {
+        "schema_version": 1,
+        "status": "initializing",
+        "full_dataset_frame_count": full_frames,
+        "requested_frame_counts": list(requested_frame_counts or ()),
+        "primary_requested_frame_count": int(primary_max_frames),
+        "resolved_frame_counts": list(resolved_frame_counts),
+        "timing_warmups": timing_warmups,
+        "timing_repeats": timing_repeats,
+        "completed_frame_counts": [],
+        "row_artifacts": [],
+        "cross_process_resume_supported": False,
+    }
+    write_json(progress_path, progress)
+    slice_parity_frame_count = next(
+        (
+            frame_count
+            for frame_count in resolved_frame_counts
+            if frame_count < full_frames
+            and any(
+                right - left != 1
+                for left, right in zip(
+                    frozen_world_full_interval_frame_indices(
+                        full_frames,
+                        frame_count,
+                    ),
+                    frozen_world_full_interval_frame_indices(
+                        full_frames,
+                        frame_count,
+                    )[1:],
+                )
+            )
+        ),
+        None,
+    )
+    rows: list[dict[str, Any]] = []
+    try:
+        checkpoint = _save_frozen_world_checkpoint(
+            model,
+            out_dir / "world_tubes_frozen_final_state.pt",
+            frame_count=full_frames,
+            representation=model.representation_name,
+        )
+        progress["status"] = "checkpoint_saved"
+        progress["checkpoint"] = checkpoint
+        write_json(progress_path, progress)
+        for frame_count in resolved_frame_counts:
+            progress["status"] = "running"
+            progress["current_frame_count"] = frame_count
+            write_json(progress_path, progress)
+            row = frozen_world_replay_compiled_report(
+                model,
+                bundle,
+                render_config=render_config,
+                camera_projection=camera_projection,
+                out_dir=out_dir,
+                max_frames=frame_count,
+                checkpoint=checkpoint,
+                verify_selected_time_slice_parity=(
+                    frame_count == slice_parity_frame_count
+                ),
+                timing_warmups=timing_warmups,
+                timing_repeats=timing_repeats,
+            )
+            if row["checkpoint"] != checkpoint:
+                raise RuntimeError(
+                    "frozen-world sweep checkpoint identity drifted"
+                )
+            if (
+                row["world_state"]["checkpoint_sha256"]
+                != checkpoint["world_state_sha256"]
+            ):
+                raise RuntimeError(
+                    "frozen-world sweep world-state identity drifted"
+                )
+            checkpoint_path = Path(checkpoint["path"])
+            if (
+                int(checkpoint_path.stat().st_size) != int(checkpoint["bytes"])
+                or file_sha256(checkpoint_path) != checkpoint["sha256"]
+            ):
+                raise RuntimeError(
+                    "frozen-world sweep checkpoint file drifted"
+                )
+            row_path = (
+                out_dir
+                / "frozen_world_sweep_rows"
+                / f"frame_{frame_count:04d}.json"
+            )
+            write_json(row_path, row)
+            progress["completed_frame_counts"].append(frame_count)
+            progress["row_artifacts"].append(
+                {
+                    "frame_count": frame_count,
+                    "path": str(row_path.resolve()),
+                    "sha256": file_sha256(row_path),
+                }
+            )
+            progress["current_frame_count"] = None
+            write_json(progress_path, progress)
+            rows.append(row)
+            gc.collect()
+            torch.mps.empty_cache()
+    except BaseException as error:
+        progress["status"] = "failed"
+        progress["failure"] = {
+            "type": type(error).__name__,
+            "message": str(error),
+        }
+        progress["failed_frame_count"] = progress.get(
+            "current_frame_count"
+        )
+        write_json(progress_path, progress)
+        raise
+
+    primary_frame_count = (
+        full_frames
+        if primary_max_frames <= 0
+        else min(int(primary_max_frames), full_frames)
+    )
+    primary = next(
+        row for row in rows if int(row["frame_count"]) == primary_frame_count
+    )
+    all_rows_accepted = all(row["accepted"] is True for row in rows)
+    parity_row = next(
+        (
+            row
+            for row in rows
+            if int(row["frame_count"]) == slice_parity_frame_count
+        ),
+        None,
+    )
+    selected_time_slice_parity_accepted = (
+        parity_row is not None
+        and parity_row["selected_time_slice_parity"]["accepted"] is True
+    )
+    all_rows_timing_publication_ready = all(
+        row["timing_benchmark"]["publication_ready"] is True
+        for row in rows
+    )
+    all_rows_storage_publication_ready = all(
+        row["retained_storage_bytes"]["publication_claim_eligible"] is True
+        for row in rows
+    )
+    all_rows_route_memory_publication_ready = all(
+        row["route_memory"]["publication_claim_eligible"] is True
+        for row in rows
+    )
+    sweep = {
+        "schema_version": 1,
+        "status": "complete",
+        "timing_label": "single_shot_correctness_timing",
+        "timing_repeats": 1,
+        "timing_warmups": 0,
+        "timing_benchmark_label": (
+            "warmed_repeated_wall_timing_v1"
+            if all_rows_timing_publication_ready
+            else rows[0]["timing_benchmark"]["label"]
+        ),
+        "timing_benchmark_repeats": timing_repeats,
+        "timing_benchmark_warmups": timing_warmups,
+        "all_rows_timing_publication_ready": (
+            all_rows_timing_publication_ready
+        ),
+        "all_rows_storage_publication_ready": (
+            all_rows_storage_publication_ready
+        ),
+        "all_rows_route_memory_publication_ready": (
+            all_rows_route_memory_publication_ready
+        ),
+        "temporal_sampling": "ordered_full_interval_integer_lattice_v1",
+        "requested_frame_counts": list(requested_frame_counts or ()),
+        "primary_requested_frame_count": int(primary_max_frames),
+        "primary_resolved_frame_count": primary_frame_count,
+        "resolved_frame_counts": list(resolved_frame_counts),
+        "full_dataset_frame_count": full_frames,
+        "shared_checkpoint": checkpoint,
+        "shared_checkpoint_file_sha256": checkpoint["sha256"],
+        "shared_world_state_sha256": checkpoint["world_state_sha256"],
+        "checkpoint_shared_across_rows": True,
+        "world_state_shared_across_rows": True,
+        "progress_artifact": str(progress_path.resolve()),
+        "row_artifacts": list(progress["row_artifacts"]),
+        "cross_process_resume_supported": False,
+        "selected_time_slice_parity_frame_count": (
+            slice_parity_frame_count
+        ),
+        "selected_time_slice_parity_accepted": (
+            selected_time_slice_parity_accepted
+        ),
+        "all_rows_accepted": all_rows_accepted,
+        "publication_eligible": (
+            all_rows_accepted
+            and frozen_world_sweep_publication_eligible(
+                requested_frame_counts=requested_frame_counts,
+                full_frames=full_frames,
+                timing_warmups=timing_warmups,
+                timing_repeats=timing_repeats,
+                selected_time_slice_parity_accepted=(
+                    selected_time_slice_parity_accepted
+                ),
+                all_rows_storage_publication_ready=(
+                    all_rows_storage_publication_ready
+                ),
+                all_rows_route_memory_publication_ready=(
+                    all_rows_route_memory_publication_ready
+                ),
+            )
+        ),
+        "rows": rows,
+    }
+    progress["status"] = "complete"
+    progress["current_frame_count"] = None
+    progress["all_rows_accepted"] = all_rows_accepted
+    progress["publication_eligible"] = sweep["publication_eligible"]
+    write_json(progress_path, progress)
+    return primary, sweep
 
 
 @torch.no_grad()
@@ -3179,10 +5839,16 @@ def eval_free_splats(
     render_started = time.perf_counter()
     device = next(model.parameters()).device
 
-    def eval_split(split: str, frames_tensor: Tensor) -> tuple[list, list, list]:
+    def eval_split(
+        split: str,
+        frames_tensor: Tensor,
+    ) -> tuple[list, list, list, dict[str, float]]:
         rows = []
         metrics_rows = []
         render_times = []
+        global_accumulator = VideoMetricAccumulator()
+        global_lpips_sum = 0.0
+        global_lpips_count = 0
         selected = media_frame_positions(bundle.frame_count, media_max_frames)
         for view in range(int(frames_tensor.shape[0])):
             accumulator = VideoMetricAccumulator()
@@ -3215,10 +5881,14 @@ def eval_free_splats(
                     "alpha": rendered["alpha"].detach().cpu(),
                 }
                 accumulator.update(rendered["rgb"], target)
+                global_accumulator.update(rendered["rgb"], target)
                 if split == "heldout":
                     count = stop - start
-                    lpips_sum += video_lpips(rendered["rgb"], target) * count
+                    chunk_lpips = video_lpips(rendered["rgb"], target)
+                    lpips_sum += chunk_lpips * count
                     lpips_count += count
+                    global_lpips_sum += chunk_lpips * count
+                    global_lpips_count += count
                 append_chunk_media(
                     start=start,
                     stop=stop,
@@ -3245,17 +5915,32 @@ def eval_free_splats(
                     ),
                 )
             )
-        return rows, metrics_rows, render_times
+        global_metrics = global_accumulator.metrics()
+        if split == "heldout":
+            global_metrics["eval_lpips"] = (
+                global_lpips_sum / float(global_lpips_count)
+            )
+        return rows, metrics_rows, render_times, global_metrics
 
-    train_rows, train_metrics, train_render_times = eval_split("train", bundle.train_frames)
+    (
+        train_rows,
+        train_metrics,
+        train_render_times,
+        train_global_metrics,
+    ) = eval_split("train", bundle.train_frames)
     heldout_rows: list = []
     heldout_metrics: list = []
     heldout_render_times: list = []
     if bundle.heldout_frames is not None and bundle.heldout_K is not None and bundle.heldout_w2c is not None:
-        heldout_rows, heldout_metrics, heldout_render_times = eval_split("heldout", bundle.heldout_frames)
-    metrics = aggregate_view_metrics(train_metrics)
+        (
+            heldout_rows,
+            heldout_metrics,
+            heldout_render_times,
+            heldout_global_metrics,
+        ) = eval_split("heldout", bundle.heldout_frames)
+    metrics = train_global_metrics
     if heldout_metrics:
-        metrics.update(prefix_metrics("heldout", aggregate_view_metrics(heldout_metrics)))
+        metrics.update(prefix_metrics("heldout", heldout_global_metrics))
     metrics["eval_render_elapsed_s"] = time.perf_counter() - render_started
     metrics.update(render_time_metrics(train_render_times, heldout_render_times))
     return {"metrics": metrics, "train_rows": train_rows, "heldout_rows": heldout_rows}
@@ -3308,6 +5993,7 @@ def run_dynamic_splats_lane(
         "renderer": args.splat_renderer,
         "camera_projection": args.splat_camera_projection,
         "render_camera_projection": splat_render_cfg.camera_projection,
+        "fast_mac_options": splat_render_cfg.fast_mac_options,
         **splat_train,
         "metrics": splat_eval["metrics"],
     }
@@ -3370,6 +6056,42 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--torch-deterministic", choices=("off", "warn", "error"), default="off")
     parser.add_argument("--uvt-tubes", type=int, default=128)
+    parser.add_argument(
+        "--uvt-world-representation",
+        choices=("legacy_tube", "full_spd4"),
+        default="legacy_tube",
+        help="Keep the historical restricted tube as default; opt into native mean+SPD(4) atoms explicitly.",
+    )
+    parser.add_argument(
+        "--uvt-alpha-mode",
+        choices=("peak_splat", "beer_lambert"),
+        default="peak_splat",
+        help=(
+            "Interpret the trainable opacity field as bounded peak alpha or "
+            "nonnegative unbounded peak optical thickness."
+        ),
+    )
+    parser.add_argument(
+        "--uvt-amplitude-convention",
+        choices=("fiber_integrated", "peak_density"),
+        default="fiber_integrated",
+        help=(
+            "Use camera-compiled peak optical thickness, or train a native "
+            "world peak extinction density and multiply by the affine fiber "
+            "Jacobian and sqrt(2*pi*conditional_depth_variance)."
+        ),
+    )
+    parser.add_argument("--uvt-spd4-min-spatial-scale", type=float, default=1.0e-4)
+    parser.add_argument(
+        "--uvt-spd4-init-precision-z",
+        type=float,
+        default=None,
+        help=(
+            "Initial conditional depth precision for full_spd4. The default "
+            "matches --uvt-init-precision-xy; use a large value for a "
+            "near-planar legacy-lift initialization."
+        ),
+    )
     parser.add_argument("--uvt-lr", type=float, default=0.03)
     parser.add_argument("--uvt-lr-decay-step", type=int, default=0)
     parser.add_argument("--uvt-lr-decay-factor", type=float, default=1.0)
@@ -3393,7 +6115,38 @@ def main() -> None:
     parser.add_argument("--uvt-tile-y", type=int, default=env_int("STAR_UVT_TILE_Y", 8))
     parser.add_argument("--uvt-tile-t", type=int, default=env_int("STAR_UVT_TILE_T", 2))
     parser.add_argument("--uvt-tile-capacity", type=int, default=env_int("STAR_UVT_TILE_CAPACITY", 128))
-    parser.add_argument("--uvt-render-backend", choices=("dense", "metal_tile"), default="dense")
+    parser.add_argument(
+        "--uvt-render-backend",
+        choices=UVT_RENDER_BACKENDS,
+        default="dense",
+    )
+    parser.add_argument(
+        "--uvt-retained-depth-samples",
+        type=int,
+        default=48,
+        help="Midpoint depth samples for retained-fiber fallback pixels.",
+    )
+    parser.add_argument(
+        "--uvt-retained-sigma-extent",
+        type=float,
+        default=6.0,
+        help="Conditional-depth standard deviations retained by fiber quadrature.",
+    )
+    parser.add_argument(
+        "--uvt-order-certificate-sigma",
+        type=float,
+        default=6.0,
+        help=(
+            "Depth-band radius used by hybrid tile certificates; must be at "
+            "least --uvt-retained-sigma-extent."
+        ),
+    )
+    parser.add_argument(
+        "--uvt-order-certificate-min-gap",
+        type=float,
+        default=0.0,
+        help="Additional required separation between certified depth bands.",
+    )
     parser.add_argument("--uvt-backward-policy", choices=("manual", *BACKWARD_POLICY_NAMES), default="manual")
     parser.add_argument(
         "--uvt-reduction-mode",
@@ -3496,6 +6249,50 @@ def main() -> None:
     parser.add_argument("--eval-chunk-frames", type=int, default=4)
     parser.add_argument("--eval-media-max-frames", type=int, default=32)
     parser.add_argument(
+        "--frozen-world-replay-compiled",
+        action="store_true",
+        help=(
+            "After training, compare per-frame STAR replay against one compiled "
+            "projective interval atlas from the identical frozen heldout world."
+        ),
+    )
+    parser.add_argument(
+        "--frozen-world-max-frames",
+        type=int,
+        default=0,
+        help=(
+            "Primary fixed-program sample count; zero uses every dataset "
+            "frame, and positive counts span the full temporal interval."
+        ),
+    )
+    parser.add_argument(
+        "--frozen-world-frame-counts",
+        default=None,
+        help=(
+            "Optional comma-separated same-checkpoint sweep; zero means the "
+            "full dataset. Each resolved unique full-interval density is "
+            "evaluated from the same frozen checkpoint."
+        ),
+    )
+    parser.add_argument(
+        "--frozen-world-timing-warmups",
+        type=int,
+        default=0,
+        help=(
+            "Unreported synchronized replay/compiled timing pairs per frozen "
+            "frame-count row."
+        ),
+    )
+    parser.add_argument(
+        "--frozen-world-timing-repeats",
+        type=int,
+        default=1,
+        help=(
+            "Reported synchronized replay/compiled timing pairs per frozen "
+            "frame-count row; publication timing requires at least three."
+        ),
+    )
+    parser.add_argument(
         "--allow-paper-local-mps-execution",
         action="store_true",
         help="Required for paper-protocol MPS execution; the unified runner owns the safety preflight.",
@@ -3513,6 +6310,9 @@ def main() -> None:
     parser.add_argument("--uvt-init-frames", choices=("first", "all", "fit"), default="first")
     parser.add_argument("--out-dir", type=Path, default=ROOT / "research_project" / "benchmarks" / "results" / "multicam_heldout_compare")
     args = parser.parse_args()
+    frozen_world_frame_counts = parse_frozen_world_frame_counts(
+        args.frozen_world_frame_counts
+    )
 
     if args.only_lane == "world_tubes":
         args.skip_splats = True
@@ -3521,6 +6321,58 @@ def main() -> None:
         torch.use_deterministic_algorithms(True, warn_only=args.torch_deterministic == "warn")
 
     device = resolve_device(args.device)
+    if args.frozen_world_max_frames < 0:
+        raise ValueError("--frozen-world-max-frames must be nonnegative")
+    validate_frozen_world_timing_controls(
+        warmups=args.frozen_world_timing_warmups,
+        repeats=args.frozen_world_timing_repeats,
+    )
+    if args.frozen_world_max_frames and not args.frozen_world_replay_compiled:
+        raise ValueError(
+            "--frozen-world-max-frames requires --frozen-world-replay-compiled"
+        )
+    if (
+        frozen_world_frame_counts is not None
+        and not args.frozen_world_replay_compiled
+    ):
+        raise ValueError(
+            "--frozen-world-frame-counts requires "
+            "--frozen-world-replay-compiled"
+        )
+    if (
+        args.frozen_world_timing_warmups != 0
+        or args.frozen_world_timing_repeats != 1
+    ) and not args.frozen_world_replay_compiled:
+        raise ValueError(
+            "frozen-world timing controls require "
+            "--frozen-world-replay-compiled"
+        )
+    if args.frozen_world_replay_compiled:
+        if args.only_lane == "dynamic_3dgs":
+            raise ValueError("frozen replay/compiled comparison requires the World Tubes lane")
+        if device.type != "mps":
+            raise ValueError("frozen replay/compiled comparison requires device=mps")
+        if args.uvt_world_representation != "legacy_tube":
+            raise ValueError("frozen replay/compiled comparison requires legacy_tube")
+        if args.uvt_alpha_mode != "peak_splat":
+            raise ValueError("frozen replay/compiled comparison requires peak_splat")
+        if args.uvt_render_backend != "metal_tile":
+            raise ValueError("frozen replay/compiled comparison requires metal_tile")
+        if args.uvt_camera_sequence_mode != "static_view":
+            raise ValueError("frozen replay/compiled comparison requires static_view")
+        if any(
+            (
+                args.uvt_synthetic_pan_x,
+                args.uvt_synthetic_pan_y,
+                args.uvt_synthetic_dolly_z,
+                args.uvt_synthetic_zoom,
+                args.uvt_synthetic_principal_x,
+                args.uvt_synthetic_principal_y,
+            )
+        ):
+            raise ValueError(
+                "frozen replay/compiled comparison requires the recorded heldout camera"
+            )
     config = load_config_file(resolve_dynaworld_path(args.baseline_config))
     paper_protocol = None if args.paper_protocol is None else load_config_file(resolve_dynaworld_path(args.paper_protocol))
     if paper_protocol is not None and device.type == "mps" and not args.allow_paper_local_mps_execution:
@@ -3561,14 +6413,22 @@ def main() -> None:
         backward_policy = resolve_backward_policy(args.uvt_backward_policy)
         args.uvt_reduction_mode = backward_policy.reduction_mode
         args.uvt_sample_emission_mode = backward_policy.sample_emission_mode
-        if args.uvt_render_backend != "metal_tile":
-            raise ValueError("--uvt-backward-policy requires --uvt-render-backend metal_tile")
-    if args.uvt_render_backend == "metal_tile" and device.type != "mps":
-        raise ValueError("--uvt-render-backend=metal_tile requires device=mps")
-    if args.uvt_render_backend != "metal_tile" and (
+        if args.uvt_render_backend not in UVT_FAST_METAL_BACKENDS:
+            raise ValueError(
+                "--uvt-backward-policy requires --uvt-render-backend "
+                "metal_tile or hybrid_retained_fiber"
+            )
+    if args.uvt_render_backend in UVT_NATIVE_METAL_BACKENDS and device.type != "mps":
+        raise ValueError(
+            f"--uvt-render-backend={args.uvt_render_backend} requires device=mps"
+        )
+    if args.uvt_render_backend not in UVT_FAST_METAL_BACKENDS and (
         args.uvt_reduction_mode != "index_add" or args.uvt_sample_emission_mode != "atomic_append"
     ):
-        raise ValueError("custom UVT reduction/sample emission modes require --uvt-render-backend metal_tile")
+        raise ValueError(
+            "custom UVT reduction/sample emission modes require "
+            "--uvt-render-backend metal_tile or hybrid_retained_fiber"
+        )
     if args.uvt_reduction_mode in (
         "key_sort_scan_metal",
         "key_sort_compensated_scan_metal",
@@ -3599,6 +6459,47 @@ def main() -> None:
         "tile_pair_suffix_reduced",
     ) and args.uvt_reduction_mode != "index_add":
         raise ValueError(f"{args.uvt_sample_emission_mode} bypasses the reducer and requires --uvt-reduction-mode index_add")
+    if (
+        args.uvt_alpha_mode == "beer_lambert"
+        and args.uvt_render_backend in UVT_NATIVE_METAL_BACKENDS
+    ):
+        if args.uvt_world_representation != "full_spd4":
+            raise ValueError(
+                "Beer-Lambert Metal paper runs are scoped to "
+                "--uvt-world-representation=full_spd4"
+            )
+        if args.uvt_camera_sequence_mode != "static_view":
+            raise ValueError(
+                "Beer-Lambert Metal paper runs are scoped to "
+                "--uvt-camera-sequence-mode=static_view"
+            )
+        if args.uvt_render_backend in UVT_FAST_METAL_BACKENDS and (
+            args.uvt_reduction_mode != "index_add"
+            or args.uvt_sample_emission_mode != "direct_atomic"
+        ):
+            raise ValueError(
+                "Beer-Lambert Metal training requires the validated "
+                "direct_atomic+index_add q-UVT backward path"
+            )
+    if (
+        args.uvt_render_backend
+        in {"retained_fiber_metal", "hybrid_retained_fiber"}
+        and args.uvt_alpha_mode != "beer_lambert"
+    ):
+        raise ValueError(
+            f"{args.uvt_render_backend} requires --uvt-alpha-mode=beer_lambert"
+        )
+    if args.uvt_amplitude_convention == "peak_density":
+        if args.uvt_alpha_mode != "beer_lambert":
+            raise ValueError(
+                "--uvt-amplitude-convention=peak_density requires "
+                "--uvt-alpha-mode=beer_lambert"
+            )
+        if args.uvt_world_representation != "full_spd4":
+            raise ValueError(
+                "--uvt-amplitude-convention=peak_density requires "
+                "--uvt-world-representation=full_spd4"
+            )
     render_config = UVTRenderConfig(
         height=int(bundle.train_frames.shape[-2]),
         width=int(bundle.train_frames.shape[-1]),
@@ -3607,6 +6508,13 @@ def main() -> None:
         tile_y=args.uvt_tile_y,
         tile_t=args.uvt_tile_t,
         tile_capacity=args.uvt_tile_capacity,
+        max_alpha=max_alpha_for_mode(args.uvt_alpha_mode),
+        alpha_mode=args.uvt_alpha_mode,
+        amplitude_convention=args.uvt_amplitude_convention,
+        retained_depth_samples=args.uvt_retained_depth_samples,
+        retained_sigma_extent=args.uvt_retained_sigma_extent,
+        order_certificate_sigma=args.uvt_order_certificate_sigma,
+        order_certificate_min_gap=args.uvt_order_certificate_min_gap,
     )
     apply_uvt_tile_env(render_config)
     uvt_validation_frames = validation_frame_indices(
@@ -3660,6 +6568,46 @@ def main() -> None:
         "train_cameras": bundle.train_camera_names,
         "heldout_cameras": bundle.heldout_camera_names,
         "pose_source": bundle.pose_source,
+        "paper_dataset_bundle": paper_dataset_bundle_identity(
+            bundle,
+            image_size=load_image_size,
+        ),
+        "paper_evaluator": paper_evaluator_contract(),
+        "paper_runtime": paper_runtime_identity(),
+        "route_native_extension": (
+            fast_mac_v5_native_extension_identity()
+            if args.only_lane == "dynamic_3dgs"
+            else star_uvt_native_extension_identity()
+        ),
+        "uvt_world_representation": args.uvt_world_representation,
+        "uvt_alpha_mode": render_config.alpha_mode,
+        "uvt_amplitude_convention": render_config.amplitude_convention,
+        "uvt_opacity_semantics": render_config.opacity_semantics,
+        "uvt_init_source_amplitude": args.uvt_init_opacity,
+        "uvt_init_center_alpha": (
+            args.uvt_init_opacity
+            if render_config.amplitude_convention == "fiber_integrated"
+            else None
+        ),
+        "uvt_init_peak_density": (
+            args.uvt_init_opacity
+            if render_config.amplitude_convention == "peak_density"
+            else None
+        ),
+        "uvt_render_backend": args.uvt_render_backend,
+        "uvt_retained_depth_samples": render_config.retained_depth_samples,
+        "uvt_retained_sigma_extent": render_config.retained_sigma_extent,
+        "uvt_order_certificate_sigma": render_config.order_certificate_sigma,
+        "uvt_order_certificate_min_gap": render_config.order_certificate_min_gap,
+        "uvt_spd4_init_precision_z": (
+            (
+                args.uvt_init_precision_xy
+                if args.uvt_spd4_init_precision_z is None
+                else args.uvt_spd4_init_precision_z
+            )
+            if args.uvt_world_representation == "full_spd4"
+            else None
+        ),
         "uvt_camera_projection": args.uvt_camera_projection,
         "uvt_camera_sequence_mode": args.uvt_camera_sequence_mode,
         "uvt_segment_frames": args.uvt_segment_frames,
@@ -3679,6 +6627,25 @@ def main() -> None:
         "only_lane": args.only_lane,
         "eval_chunk_frames": args.eval_chunk_frames,
         "eval_media_max_frames": args.eval_media_max_frames,
+        "frozen_world_replay_compiled": args.frozen_world_replay_compiled,
+        "frozen_world_max_frames": args.frozen_world_max_frames,
+        "frozen_world_temporal_sampling": (
+            "ordered_full_interval_integer_lattice_v1"
+            if args.frozen_world_replay_compiled
+            else None
+        ),
+        "frozen_world_frame_counts": (
+            None
+            if frozen_world_frame_counts is None
+            else list(frozen_world_frame_counts)
+        ),
+        "frozen_world_timing_warmups": (
+            args.frozen_world_timing_warmups
+        ),
+        "frozen_world_timing_repeats": (
+            args.frozen_world_timing_repeats
+        ),
+        "star_uvt_native_extension": star_uvt_native_extension_identity(),
         "train_lens_models": bundle.train_lens_models,
         "heldout_lens_models": bundle.heldout_lens_models,
         "reference_vjepa_f32_256_16f_alpha1_128": {
@@ -3765,6 +6732,9 @@ def main() -> None:
         reduction_mode=args.uvt_reduction_mode,
         sample_emission_mode=args.uvt_sample_emission_mode,
         paper_protocol=paper_protocol,
+        world_representation=args.uvt_world_representation,
+        spd4_min_spatial_scale=args.uvt_spd4_min_spatial_scale,
+        spd4_init_precision_z=args.uvt_spd4_init_precision_z,
     )
     uvt_eval = eval_world_tubes(
         uvt_model,
@@ -3870,6 +6840,7 @@ def main() -> None:
             else None,
         }
         uvt_model.load_state_dict(final_state)
+        del selected_eval
     save_first_row_media(out_dir, "star_uvt_train_view0", uvt_eval["train_rows"], fps=float(bundle.metadata.get("fps", 4.0)))
     save_first_row_media(out_dir, "star_uvt_heldout_view0", uvt_eval["heldout_rows"], fps=float(bundle.metadata.get("fps", 4.0)))
     uvt_metrics = uvt_eval["metrics"]
@@ -3896,6 +6867,24 @@ def main() -> None:
     if device.type == "mps":
         torch.mps.empty_cache()
 
+    if args.frozen_world_replay_compiled:
+        frozen_world_report, frozen_world_sweep = (
+            frozen_world_replay_compiled_sweep_report(
+                uvt_model,
+                bundle,
+                render_config=render_config,
+                camera_projection=args.uvt_camera_projection,
+                out_dir=out_dir,
+                primary_max_frames=args.frozen_world_max_frames,
+                requested_frame_counts=frozen_world_frame_counts,
+                timing_warmups=args.frozen_world_timing_warmups,
+                timing_repeats=args.frozen_world_timing_repeats,
+            )
+        )
+    else:
+        frozen_world_report = None
+        frozen_world_sweep = None
+
     splat_report: dict[str, Any] | None = None
     if not args.skip_splats:
         splat_report = run_dynamic_splats_lane(
@@ -3911,6 +6900,23 @@ def main() -> None:
         "meta": run_meta,
         "star_uvt": {
             "tube_count": args.uvt_tubes,
+            "world_representation": args.uvt_world_representation,
+            "alpha_mode": render_config.alpha_mode,
+            "opacity_semantics": render_config.opacity_semantics,
+            "spd4_min_spatial_scale": (
+                args.uvt_spd4_min_spatial_scale
+                if args.uvt_world_representation == "full_spd4"
+                else None
+            ),
+            "spd4_init_precision_z": (
+                (
+                    args.uvt_init_precision_xy
+                    if args.uvt_spd4_init_precision_z is None
+                    else args.uvt_spd4_init_precision_z
+                )
+                if args.uvt_world_representation == "full_spd4"
+                else None
+            ),
             "render_backend": args.uvt_render_backend,
             "reduction_mode": args.uvt_reduction_mode,
             "sample_emission_mode": args.uvt_sample_emission_mode,
@@ -3927,6 +6933,7 @@ def main() -> None:
             "static_init_lambda_t": args.uvt_static_init_lambda_t,
             "static_velocity_reg": args.uvt_static_velocity_reg,
             "init_opacity": args.uvt_init_opacity,
+            "init_opacity_semantics": "initial_center_alpha",
             "min_precision_xy": args.uvt_min_precision_xy,
             "min_lambda_t": args.uvt_min_lambda_t,
             "velocity_reg": args.uvt_velocity_reg,
@@ -3969,6 +6976,8 @@ def main() -> None:
             "metrics": uvt_metrics,
             "checkpoint_curve": uvt_checkpoint_curve,
             "metal_stats": uvt_metal_stats,
+            "frozen_world_replay_compiled": frozen_world_report,
+            "frozen_world_replay_compiled_sweep": frozen_world_sweep,
         },
         "star_uvt_selected": selected_report,
         "free_dynamic_splats": splat_report,
