@@ -499,6 +499,15 @@ def _stats_from_aux(
     )
 
 
+def _require_complete_tiles(tile_overflow: Tensor, config: UVTRenderConfig) -> None:
+    if bool(torch.any(tile_overflow != 0).item()):
+        raise RuntimeError(
+            f"STAR UVT tile capacity {config.tile_capacity} overflow: primitives were dropped. "
+            "Increase tile capacity or reduce overlap before training; "
+            "return_aux=True is available for explicit overflow diagnostics."
+        )
+
+
 def render_uvt_tubes(
     ma: Tensor,
     q_uvt: Tensor,
@@ -527,6 +536,7 @@ def render_uvt_tubes(
         ma, q_uvt, depth0, depth_beta, opacity, color, meta_i32, meta_f32
     )
     if not return_aux:
+        _require_complete_tiles(tile_overflow, config)
         return image
     if ma.device.type == "mps":
         torch.mps.synchronize()
@@ -595,7 +605,7 @@ def render_uvt_tubes_gated(
     if not hasattr(torch.ops.star_uvt_v0, "render_gated"):
         raise RuntimeError("star_uvt_v0.render_gated custom op not found. Rebuild the extension.")
     meta_i32, meta_f32 = _make_meta(config, ma.device, ma.shape[0])
-    image, _tile_counts, _tile_overflow, _tile_unstable = torch.ops.star_uvt_v0.render_gated(
+    image, _tile_counts, tile_overflow, _tile_unstable = torch.ops.star_uvt_v0.render_gated(
         ma,
         q_uvt,
         depth0,
@@ -607,6 +617,7 @@ def render_uvt_tubes_gated(
         meta_i32,
         meta_f32,
     )
+    _require_complete_tiles(tile_overflow, config)
     return image
 
 
