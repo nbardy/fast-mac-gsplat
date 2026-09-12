@@ -3866,6 +3866,9 @@ def mark_projective_trace_cell_visibility_fallbacks(
     coeffs_cpu = atlas.coeffs.detach().cpu().contiguous()
     times_cpu = times.detach().cpu().contiguous()
     dense = eval_projective_trace_cell_torch(coeffs_cpu, times_cpu)
+    # Each trace/sample is visited by many tiles. Convert these exact float32
+    # values once instead of repeatedly indexing scalar CPU tensors.
+    depth_and_validity = dense[:, :, 2:4].tolist()
     depth_affine_uv_cpu = (
         None
         if atlas.depth_affine_uv is None or not has_tile_depth_domain
@@ -3906,11 +3909,11 @@ def mark_projective_trace_cell_visibility_fallbacks(
             if trace_id in seen:
                 continue
             seen.add(trace_id)
-            valid_sign = dense[trace_id, sample_index, 3]
-            if float(valid_sign.item()) == 0.0:
+            depth, valid_sign = depth_and_validity[trace_id][sample_index]
+            if valid_sign == 0.0:
                 _mark_cell(cell_index, sample_index, fallback_reason)
                 continue
-            depth_min, depth_max = _cell_trace_depth_range_for_tile_sample(
+            depth_min, depth_max = (depth, depth) if depth_affine_uv_cpu is None else _cell_trace_depth_range_for_tile_sample(
                 dense,
                 depth_affine_uv_cpu,
                 times_cpu,
