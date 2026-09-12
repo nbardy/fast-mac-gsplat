@@ -4807,8 +4807,19 @@ def frozen_world_replay_compiled_report(
     gc.collect()
     torch.mps.empty_cache()
 
-    def replay_timing_trial() -> tuple[float, float]:
+    forward_phases = ("evaluator_forward", "target_cpu_load", "target_transfer", "loss")
+
+    def forward_boundary(segments, phase, started):
+        # Every interval ends after device completion. Telescoping timestamps
+        # retain the whole forward total, including synchronization overhead.
+        synchronize_device(device)
+        stopped = time.perf_counter()
+        segments[phase] += stopped - started
+        return stopped
+
+    def replay_timing_trial() -> tuple[float, float, dict[str, float]]:
         model.zero_grad(set_to_none=True)
+        forward_segments = dict.fromkeys(forward_phases, 0.0)
         total_forward_s = 0.0
         total_backward_s = 0.0
         for chunk_start in range(0, frame_count, resident_chunk_frames):
@@ -4840,12 +4851,16 @@ def frozen_world_replay_compiled_report(
                     ).rgb
                 )
             trial_image = torch.cat(trial_frames, dim=0)
-            trial_target = target_host[chunk_start:chunk_stop].to(device=device)
+            phase_started = forward_boundary(forward_segments, "evaluator_forward", forward_started)
+            trial_target_host = target_host[chunk_start:chunk_stop]
+            phase_started = forward_boundary(forward_segments, "target_cpu_load", phase_started)
+            trial_target = trial_target_host.to(device=device)
+            phase_started = forward_boundary(forward_segments, "target_transfer", phase_started)
             trial_loss = torch.sqrt(
                 (trial_image - trial_target).square() + 1.0e-6
             ).sum() / float(target_element_count)
-            synchronize_device(device)
-            total_forward_s += time.perf_counter() - forward_started
+            forward_stopped = forward_boundary(forward_segments, "loss", phase_started)
+            total_forward_s += forward_stopped - forward_started
             backward_started = time.perf_counter()
             trial_loss.backward()
             synchronize_device(device)
@@ -4855,12 +4870,13 @@ def frozen_world_replay_compiled_report(
                 trial_frames,
                 trial_image,
                 trial_target,
+                trial_target_host,
                 trial_loss,
             )
         model.zero_grad(set_to_none=True)
-        return total_forward_s, total_backward_s
+        return total_forward_s, total_backward_s, forward_segments
 
-    def compiled_timing_trial() -> tuple[float, float, float]:
+    def compiled_timing_trial() -> tuple[float, float, float, dict[str, float]]:
         model.zero_grad(set_to_none=True)
         synchronize_device(device)
         compile_started = time.perf_counter()
@@ -4907,6 +4923,7 @@ def frozen_world_replay_compiled_report(
         synchronize_device(device)
         compile_s = time.perf_counter() - compile_started
 
+        forward_segments = dict.fromkeys(forward_phases, 0.0)
         total_forward_s = 0.0
         total_backward_s = 0.0
         for chunk_start in range(0, frame_count, resident_chunk_frames):
@@ -4928,13 +4945,18 @@ def frozen_world_replay_compiled_report(
                 tile_size=int(config.tile_x),
                 fallback_render_mode="mixed",
             )
-            trial_target = target_host[chunk_start:chunk_stop].to(device=device)
+            phase_started = forward_boundary(forward_segments, "evaluator_forward", forward_started)
+            trial_target_host = target_host[chunk_start:chunk_stop]
+            phase_started = forward_boundary(forward_segments, "target_cpu_load", phase_started)
+            trial_target = trial_target_host.to(device=device)
+            phase_started = forward_boundary(forward_segments, "target_transfer", phase_started)
             trial_image = trial_chunk_state.render()
+            phase_started = forward_boundary(forward_segments, "evaluator_forward", phase_started)
             trial_loss = torch.sqrt(
                 (trial_image - trial_target).square() + 1.0e-6
             ).sum() / float(target_element_count)
-            synchronize_device(device)
-            total_forward_s += time.perf_counter() - forward_started
+            forward_stopped = forward_boundary(forward_segments, "loss", phase_started)
+            total_forward_s += forward_stopped - forward_started
             backward_started = time.perf_counter()
             trial_loss.backward(retain_graph=chunk_stop < frame_count)
             synchronize_device(device)
@@ -4943,12 +4965,13 @@ def frozen_world_replay_compiled_report(
                 trial_chunk_atlas,
                 trial_chunk_state,
                 trial_target,
+                trial_target_host,
                 trial_image,
                 trial_loss,
             )
         model.zero_grad(set_to_none=True)
         del trial_projected, trial_times, trial_atlas
-        return compile_s, total_forward_s, total_backward_s
+        return compile_s, total_forward_s, total_backward_s, forward_segments
 
     def complete_timing_sample(
         *,
@@ -4983,6 +5006,7 @@ def frozen_world_replay_compiled_report(
             ),
         }
 
+    forward_breakdown_trials = []
     timing_publication_ready = (
         timing_warmups >= FROZEN_WORLD_MIN_TIMING_WARMUPS
         and timing_repeats >= FROZEN_WORLD_MIN_TIMING_REPEATS
@@ -5003,24 +5027,27 @@ def frozen_world_replay_compiled_report(
         timing_samples = []
         for timing_trial_index in range(timing_warmups + timing_repeats):
             if timing_trial_index % 2 == 0:
-                trial_replay_forward, trial_replay_backward = (
+                trial_replay_forward, trial_replay_backward, trial_replay_segments = (
                     replay_timing_trial()
                 )
                 (
                     trial_compiled_compile,
                     trial_compiled_forward,
                     trial_compiled_backward,
+                    trial_compiled_segments,
                 ) = compiled_timing_trial()
             else:
                 (
                     trial_compiled_compile,
                     trial_compiled_forward,
                     trial_compiled_backward,
+                    trial_compiled_segments,
                 ) = compiled_timing_trial()
-                trial_replay_forward, trial_replay_backward = (
+                trial_replay_forward, trial_replay_backward, trial_replay_segments = (
                     replay_timing_trial()
                 )
             if timing_trial_index >= timing_warmups:
+                forward_breakdown_trials.append({"replay": trial_replay_segments, "compiled": trial_compiled_segments})
                 timing_samples.append(
                     complete_timing_sample(
                         replay_forward=trial_replay_forward,
@@ -5079,6 +5106,23 @@ def frozen_world_replay_compiled_report(
             for key, values in timing_samples_by_metric.items()
         },
     }
+    if forward_breakdown_trials:
+        phase_samples = {
+            route: {phase: [trial[route][phase] for trial in forward_breakdown_trials]
+                    for phase in forward_phases}
+            for route in ("replay", "compiled")
+        }
+        timing_benchmark["forward_breakdown"] = {
+            "schema_version": 1,
+            "measurement_source": "same_trial_nonoverlapping_device_synchronized_intervals",
+            "synchronization_overhead_included": True,
+            "same_forward_total": True,
+            "evaluator_forward_definition": "replay projection/render; compiled slice/state setup plus render; excludes target load/transfer and loss",
+            "samples_s": phase_samples,
+            "summary_s": {route: {phase: frozen_world_timing_summary(values)
+                                   for phase, values in phases.items()}
+                          for route, phases in phase_samples.items()},
+        }
     world_state_after_timing = _world_state_digest(
         snapshot_world_tube_state(model),
         metadata=world_state_metadata,
