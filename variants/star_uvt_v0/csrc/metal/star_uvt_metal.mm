@@ -3581,6 +3581,7 @@ torch::Tensor metal_render_projective_trace_cell_interval_tiles(
     const torch::Tensor& opacity_time_coeffs,
     const torch::Tensor& spatial_precision_uv,
     const torch::Tensor& depth_affine_uv,
+    const torch::Tensor& alpha_cutoff_reference_uvt,
     const torch::Tensor& color,
     const torch::Tensor& tile_counts,
     const torch::Tensor& tile_trace_ids,
@@ -3605,6 +3606,9 @@ torch::Tensor metal_render_projective_trace_cell_interval_tiles(
   TORCH_CHECK(sigma_px > 0.0, "sigma_px must be positive");
 
   auto meta = parse_meta(meta_i32, meta_f32);
+  check_float_mps_2d(alpha_cutoff_reference_uvt, "alpha_cutoff_reference_uvt", 9);
+  TORCH_CHECK(alpha_cutoff_reference_uvt.size(0) == (meta.reserved1 ? coeffs.size(0) : 1),
+              "alpha cutoff reference rows must match the metadata flag");
   auto& sc = shader_config();
   check_projective_interval_meta(meta, coeffs.size(0), sc);
   TORCH_CHECK(times.size(0) == meta.frames, "times must have shape [frames]");
@@ -3638,6 +3642,7 @@ torch::Tensor metal_render_projective_trace_cell_interval_tiles(
     fn.setArg(12, projective_f32);
     fn.setArg(13, spatial_precision_uv);
     fn.setArg(14, depth_affine_uv);
+    fn.setArg(15, alpha_cutoff_reference_uvt);
     fn.dispatch(total_pixels, 256);
   });
   return out;
@@ -3838,6 +3843,7 @@ torch::Tensor metal_render_projective_trace_cell_interval_rows(
     const torch::Tensor& opacity_time_coeffs,
     const torch::Tensor& spatial_precision_uv,
     const torch::Tensor& depth_affine_uv,
+    const torch::Tensor& alpha_cutoff_reference_uvt,
     const torch::Tensor& color,
     const torch::Tensor& tile_counts,
     const torch::Tensor& tile_trace_ids,
@@ -3863,6 +3869,9 @@ torch::Tensor metal_render_projective_trace_cell_interval_rows(
   TORCH_CHECK(sigma_px > 0.0, "sigma_px must be positive");
 
   auto meta = parse_meta(meta_i32, meta_f32);
+  check_float_mps_2d(alpha_cutoff_reference_uvt, "alpha_cutoff_reference_uvt", 9);
+  TORCH_CHECK(alpha_cutoff_reference_uvt.size(0) == (meta.reserved1 ? coeffs.size(0) : 1),
+              "alpha cutoff reference rows must match the metadata flag");
   auto& sc = shader_config();
   check_projective_interval_meta(meta, coeffs.size(0), sc);
   TORCH_CHECK(times.size(0) == meta.frames, "times must have shape [frames]");
@@ -3899,6 +3908,7 @@ torch::Tensor metal_render_projective_trace_cell_interval_rows(
     fn.setArg(13, projective_f32);
     fn.setArg(14, spatial_precision_uv);
     fn.setArg(15, depth_affine_uv);
+    fn.setArg(16, alpha_cutoff_reference_uvt);
     fn.dispatch(total_pixels, 256);
   });
   return out;
@@ -3911,6 +3921,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     const torch::Tensor& opacity_time_coeffs,
     const torch::Tensor& spatial_precision_uv,
     const torch::Tensor& depth_affine_uv,
+    const torch::Tensor& alpha_cutoff_reference_uvt,
     const torch::Tensor& color,
     const torch::Tensor& grad_image,
     const torch::Tensor& tile_counts,
@@ -3940,6 +3951,9 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
   TORCH_CHECK(sigma_px > 0.0, "sigma_px must be positive");
 
   auto meta = parse_meta(meta_i32, meta_f32);
+  check_float_mps_2d(alpha_cutoff_reference_uvt, "alpha_cutoff_reference_uvt", 9);
+  TORCH_CHECK(alpha_cutoff_reference_uvt.size(0) == (meta.reserved1 ? coeffs.size(0) : 1),
+              "alpha cutoff reference rows must match the metadata flag");
   auto& sc = shader_config();
   check_projective_interval_meta(meta, coeffs.size(0), sc);
   TORCH_CHECK(times.size(0) == meta.frames, "times must have shape [frames]");
@@ -3984,6 +3998,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     fn.setArg(17, projective_f32);
     fn.setArg(18, spatial_precision_uv);
     fn.setArg(19, depth_affine_uv);
+    fn.setArg(20, alpha_cutoff_reference_uvt);
     fn.dispatch(total_pixels, 256);
   });
   return std::make_tuple(grad_coeffs, grad_opacity, grad_opacity_time_coeffs, grad_spatial_precision_uv, grad_color);

@@ -840,6 +840,7 @@ class ProjectiveCellIntervalStaticAtlas:
     spatial_precision_uv: Tensor | None = None
     depth_affine_uv: Tensor | None = None
     depth_reference_uvt: Tensor | None = None
+    alpha_cutoff_reference_uvt: Tensor | None = None
     opacity_time_centered: bool = False
 
 
@@ -1078,6 +1079,7 @@ def _static_projective_cell_atlas(atlas: ProjectiveTraceCellTraceAtlas) -> Proje
         spatial_precision_uv=atlas.spatial_precision_uv,
         depth_affine_uv=atlas.depth_affine_uv,
         depth_reference_uvt=atlas.depth_reference_uvt,
+        alpha_cutoff_reference_uvt=atlas.alpha_cutoff_reference_uvt,
         opacity_time_centered=atlas.opacity_time_centered,
     )
 
@@ -1222,6 +1224,7 @@ def refresh_projective_cell_interval_atlas_if_stale(
             spatial_precision_uv=template_atlas.spatial_precision_uv,
             depth_affine_uv=template_atlas.depth_affine_uv,
             depth_reference_uvt=template_atlas.depth_reference_uvt,
+            alpha_cutoff_reference_uvt=template_atlas.alpha_cutoff_reference_uvt,
             opacity_time_centered=template_atlas.opacity_time_centered,
         )
 
@@ -1869,6 +1872,7 @@ def _materialize_projective_cell_atlas(
         spatial_precision_uv=spatial_precision_uv if static_atlas.spatial_precision_uv is not None else None,
         depth_affine_uv=static_atlas.depth_affine_uv,
         depth_reference_uvt=static_atlas.depth_reference_uvt,
+        alpha_cutoff_reference_uvt=static_atlas.alpha_cutoff_reference_uvt,
         opacity_time_centered=static_atlas.opacity_time_centered,
     )
 

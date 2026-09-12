@@ -591,6 +591,17 @@ inline float2 projective_cell_precision_center_grad(
   return float2(q_uu * d.x + q_uv * d.y, q_uv * d.x + q_vv * d.y);
 }
 
+inline bool projective_cell_passes_alpha_cutoff(
+    float alpha, float opacity, const device float* reference, uint trace_id,
+    float2 pixel_center, float t, constant MetaF32& mf, bool use_reference) {
+  if (!use_reference) return alpha >= mf.alpha_threshold;
+  uint base = trace_id * 9u;
+  float3 d = float3(pixel_center, t) - float3(reference[base], reference[base+1u], reference[base+2u]);
+  float qv = quadratic_q(reference + base + 3u, 0u, d);
+  float source_alpha = min(mf.max_alpha, primitive_alpha_raw(opacity, exp(-0.5f*qv), mf));
+  return source_alpha >= mf.alpha_threshold;
+}
+
 inline void composite_projective_cell_trace_with_time_opacity(
     uint trace_id,
     float2 pixel_center,
@@ -603,7 +614,9 @@ inline void composite_projective_cell_trace_with_time_opacity(
     constant MetaF32& mf,
     thread float3& accum,
     thread float& transmittance,
-    bool centered) {
+    bool centered,
+    const device float* alpha_cutoff_reference_uvt,
+    bool use_alpha_cutoff_reference) {
   float u;
   float v;
   float depth;
@@ -613,7 +626,7 @@ inline void composite_projective_cell_trace_with_time_opacity(
   float radius2 = projective_cell_precision_radius2(spatial_precision_uv, trace_id, d);
   float density = time_scale * exp(-0.5f * radius2);
   float alpha = min(mf.max_alpha, primitive_alpha_raw(opacity[trace_id], density, mf));
-  if (!(alpha >= mf.alpha_threshold)) return;
+  if (!projective_cell_passes_alpha_cutoff(alpha, opacity[trace_id], alpha_cutoff_reference_uvt, trace_id, pixel_center, t, mf, use_alpha_cutoff_reference)) return;
   float w = transmittance * alpha;
   accum += w * load3(color, trace_id);
   transmittance *= (1.0f - alpha);
@@ -2293,6 +2306,7 @@ kernel void render_projective_trace_cell_interval_tiles(
     constant float* projective_f32 [[buffer(12)]],
     const device float* spatial_precision_uv [[buffer(13)]],
     const device float* depth_affine_uv [[buffer(14)]],
+    const device float* alpha_cutoff_reference_uvt [[buffer(15)]],
     uint gid [[thread_position_in_grid]]) {
   uint total_pixels = uint(mi.frames) * uint(mi.height) * uint(mi.width);
   if (gid >= total_pixels) return;
@@ -2321,7 +2335,7 @@ kernel void render_projective_trace_cell_interval_tiles(
     uint trace_id = select_projective_cell_order_id_interval(
         tile_trace_ids, tile_active_start, tile_active_stop, tile_id, count, coeffs, depth_affine_uv, pixel_center, f, t, last_depth, last_id, selected_depth);
     if (trace_id == 0xFFFFFFFFu || trace_id >= uint(mi.tube_count)) break;
-    composite_projective_cell_trace_with_time_opacity(trace_id, pixel_center, t, coeffs, opacity, opacity_time_coeffs, spatial_precision_uv, color, mf, accum, T, mi.reserved0 != 0);
+    composite_projective_cell_trace_with_time_opacity(trace_id, pixel_center, t, coeffs, opacity, opacity_time_coeffs, spatial_precision_uv, color, mf, accum, T, mi.reserved0 != 0, alpha_cutoff_reference_uvt, mi.reserved1 != 0);
     last_depth = selected_depth;
     last_id = trace_id;
     if (T <= mf.transmittance_threshold) break;
@@ -2440,6 +2454,7 @@ kernel void render_projective_trace_cell_interval_rows(
     constant float* projective_f32 [[buffer(13)]],
     const device float* spatial_precision_uv [[buffer(14)]],
     const device float* depth_affine_uv [[buffer(15)]],
+    const device float* alpha_cutoff_reference_uvt [[buffer(16)]],
     uint gid [[thread_position_in_grid]]) {
   uint total_pixels = uint(mi.height) * uint(mi.width);
   if (gid >= total_pixels) return;
@@ -2470,7 +2485,7 @@ kernel void render_projective_trace_cell_interval_rows(
       uint trace_id = select_projective_cell_order_id_interval(
           tile_trace_ids, tile_active_start, tile_active_stop, tile_id, count, coeffs, depth_affine_uv, pixel_center, f, t, last_depth, last_id, selected_depth);
       if (trace_id == 0xFFFFFFFFu || trace_id >= uint(mi.tube_count)) break;
-      composite_projective_cell_trace_with_time_opacity(trace_id, pixel_center, t, coeffs, opacity, opacity_time_coeffs, spatial_precision_uv, color, mf, accum, T, mi.reserved0 != 0);
+      composite_projective_cell_trace_with_time_opacity(trace_id, pixel_center, t, coeffs, opacity, opacity_time_coeffs, spatial_precision_uv, color, mf, accum, T, mi.reserved0 != 0, alpha_cutoff_reference_uvt, mi.reserved1 != 0);
       last_depth = selected_depth;
       last_id = trace_id;
       if (T <= mf.transmittance_threshold) break;
@@ -2506,6 +2521,7 @@ kernel void direct_atomic_projective_cell_interval_backward(
     constant float* projective_f32 [[buffer(17)]],
     const device float* spatial_precision_uv [[buffer(18)]],
     const device float* depth_affine_uv [[buffer(19)]],
+    const device float* alpha_cutoff_reference_uvt [[buffer(20)]],
     uint gid [[thread_position_in_grid]]) {
   uint total_pixels = uint(mi.frames) * uint(mi.height) * uint(mi.width);
   if (gid >= total_pixels) return;
@@ -2567,7 +2583,7 @@ kernel void direct_atomic_projective_cell_interval_backward(
     float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, trace_id, t, mi.reserved0 != 0);
     float alpha_raw = primitive_alpha_raw(opacity[trace_id], time_scale * exp_term, mf);
     float alpha = min(mf.max_alpha, alpha_raw);
-    if (!(alpha >= mf.alpha_threshold)) continue;
+    if (!projective_cell_passes_alpha_cutoff(alpha, opacity[trace_id], alpha_cutoff_reference_uvt, trace_id, pixel_center, t, mf, mi.reserved1 != 0)) continue;
     t_before[i] = T;
     alpha_values[i] = alpha;
     processed[i] = true;

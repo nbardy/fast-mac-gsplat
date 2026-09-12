@@ -149,6 +149,7 @@ torch::Tensor render_projective_trace_cell_interval_tiles_dispatch(
     const torch::Tensor& opacity_time_coeffs,
     const torch::Tensor& spatial_precision_uv,
     const torch::Tensor& depth_affine_uv,
+    const torch::Tensor& alpha_cutoff_reference_uvt,
     const torch::Tensor& color,
     const torch::Tensor& tile_counts,
     const torch::Tensor& tile_trace_ids,
@@ -166,6 +167,7 @@ torch::Tensor render_projective_trace_cell_interval_tiles_dispatch(
         opacity_time_coeffs,
         spatial_precision_uv,
         depth_affine_uv,
+        alpha_cutoff_reference_uvt,
         color,
         tile_counts,
         tile_trace_ids,
@@ -266,6 +268,7 @@ torch::Tensor render_projective_trace_cell_interval_rows_dispatch(
     const torch::Tensor& opacity_time_coeffs,
     const torch::Tensor& spatial_precision_uv,
     const torch::Tensor& depth_affine_uv,
+    const torch::Tensor& alpha_cutoff_reference_uvt,
     const torch::Tensor& color,
     const torch::Tensor& tile_counts,
     const torch::Tensor& tile_trace_ids,
@@ -284,6 +287,7 @@ torch::Tensor render_projective_trace_cell_interval_rows_dispatch(
         opacity_time_coeffs,
         spatial_precision_uv,
         depth_affine_uv,
+        alpha_cutoff_reference_uvt,
         color,
         tile_counts,
         tile_trace_ids,
@@ -338,6 +342,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
     const torch::Tensor& opacity_time_coeffs,
     const torch::Tensor& spatial_precision_uv,
     const torch::Tensor& depth_affine_uv,
+    const torch::Tensor& alpha_cutoff_reference_uvt,
     const torch::Tensor& color,
     const torch::Tensor& grad_image,
     const torch::Tensor& tile_counts,
@@ -356,6 +361,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
         opacity_time_coeffs,
         spatial_precision_uv,
         depth_affine_uv,
+        alpha_cutoff_reference_uvt,
         color,
         grad_image,
         tile_counts,
@@ -1229,12 +1235,12 @@ TORCH_LIBRARY(star_uvt_v0, m) {
   m.def("projective_trace_family_backward(Tensor family_coeffs, Tensor q_basis, Tensor times, Tensor grad_out, float eps) -> (Tensor, Tensor)");
   m.def("render_projective_trace_tiles(Tensor coeffs, Tensor times, Tensor opacity, Tensor color, Tensor tile_counts, Tensor tile_primitive_ids, Tensor tile_active_start, Tensor tile_active_stop, Tensor meta_i32, Tensor meta_f32, float sigma_px) -> Tensor");
   m.def("render_projective_trace_cell_tiles(Tensor coeffs, Tensor times, Tensor opacity, Tensor color, Tensor tile_counts, Tensor tile_trace_ids, Tensor tile_active_start, Tensor tile_active_stop, Tensor meta_i32, Tensor meta_f32, float sigma_px) -> Tensor");
-  m.def("render_projective_trace_cell_interval_tiles(Tensor coeffs, Tensor times, Tensor opacity, Tensor opacity_time_coeffs, Tensor spatial_precision_uv, Tensor depth_affine_uv, Tensor color, Tensor tile_counts, Tensor tile_trace_ids, Tensor tile_active_start, Tensor tile_active_stop, Tensor meta_i32, Tensor meta_f32, float sigma_px) -> Tensor");
+  m.def("render_projective_trace_cell_interval_tiles(Tensor coeffs, Tensor times, Tensor opacity, Tensor opacity_time_coeffs, Tensor spatial_precision_uv, Tensor depth_affine_uv, Tensor alpha_cutoff_reference_uvt, Tensor color, Tensor tile_counts, Tensor tile_trace_ids, Tensor tile_active_start, Tensor tile_active_stop, Tensor meta_i32, Tensor meta_f32, float sigma_px) -> Tensor");
   m.def("render_projective_trace_family_interval_tiles(Tensor family_coeffs, Tensor q_basis, Tensor times, Tensor opacity, Tensor opacity_time_coeffs, Tensor spatial_precision_uv, Tensor depth_affine_uv, Tensor color, Tensor tile_counts, Tensor tile_trace_ids, Tensor tile_active_start, Tensor tile_active_stop, Tensor meta_i32, Tensor meta_f32, float sigma_px) -> Tensor");
   m.def("direct_projective_trace_family_interval_backward(Tensor family_coeffs, Tensor q_basis, Tensor times, Tensor opacity, Tensor opacity_time_coeffs, Tensor spatial_precision_uv, Tensor depth_affine_uv, Tensor color, Tensor grad_image, Tensor tile_counts, Tensor tile_trace_ids, Tensor tile_active_start, Tensor tile_active_stop, Tensor meta_i32, Tensor meta_f32, float sigma_px) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)");
-  m.def("render_projective_trace_cell_interval_rows(Tensor coeffs, Tensor times, Tensor opacity, Tensor opacity_time_coeffs, Tensor spatial_precision_uv, Tensor depth_affine_uv, Tensor color, Tensor tile_counts, Tensor tile_trace_ids, Tensor tile_active_start, Tensor tile_active_stop, Tensor row_weights, Tensor meta_i32, Tensor meta_f32, float sigma_px) -> Tensor");
+  m.def("render_projective_trace_cell_interval_rows(Tensor coeffs, Tensor times, Tensor opacity, Tensor opacity_time_coeffs, Tensor spatial_precision_uv, Tensor depth_affine_uv, Tensor alpha_cutoff_reference_uvt, Tensor color, Tensor tile_counts, Tensor tile_trace_ids, Tensor tile_active_start, Tensor tile_active_stop, Tensor row_weights, Tensor meta_i32, Tensor meta_f32, float sigma_px) -> Tensor");
   m.def("direct_projective_trace_backward(Tensor coeffs, Tensor times, Tensor opacity, Tensor color, Tensor grad_image, Tensor tile_counts, Tensor tile_primitive_ids, Tensor tile_active_start, Tensor tile_active_stop, Tensor meta_i32, Tensor meta_f32, float sigma_px) -> (Tensor, Tensor, Tensor)");
-  m.def("direct_projective_trace_cell_interval_backward(Tensor coeffs, Tensor times, Tensor opacity, Tensor opacity_time_coeffs, Tensor spatial_precision_uv, Tensor depth_affine_uv, Tensor color, Tensor grad_image, Tensor tile_counts, Tensor tile_trace_ids, Tensor tile_active_start, Tensor tile_active_stop, Tensor meta_i32, Tensor meta_f32, float sigma_px) -> (Tensor, Tensor, Tensor, Tensor, Tensor)");
+  m.def("direct_projective_trace_cell_interval_backward(Tensor coeffs, Tensor times, Tensor opacity, Tensor opacity_time_coeffs, Tensor spatial_precision_uv, Tensor depth_affine_uv, Tensor alpha_cutoff_reference_uvt, Tensor color, Tensor grad_image, Tensor tile_counts, Tensor tile_trace_ids, Tensor tile_active_start, Tensor tile_active_stop, Tensor meta_i32, Tensor meta_f32, float sigma_px) -> (Tensor, Tensor, Tensor, Tensor, Tensor)");
   m.def("render_features(Tensor ma, Tensor q_uvt, Tensor depth0, Tensor depth_beta, Tensor opacity, Tensor feature, Tensor meta_i32, Tensor meta_f32) -> (Tensor, Tensor, Tensor, Tensor, Tensor)");
   m.def("render_features_with_bins(Tensor ma, Tensor q_uvt, Tensor depth0, Tensor depth_beta, Tensor opacity, Tensor feature, Tensor meta_i32, Tensor meta_f32) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor)");
   m.def("bin_feature_tubes(Tensor ma, Tensor q_uvt, Tensor depth0, Tensor depth_beta, Tensor opacity, Tensor meta_i32, Tensor meta_f32) -> (Tensor, Tensor, Tensor, Tensor, Tensor)");

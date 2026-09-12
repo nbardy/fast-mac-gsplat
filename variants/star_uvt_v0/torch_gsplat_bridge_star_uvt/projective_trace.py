@@ -140,6 +140,9 @@ class ProjectiveTraceCellTraceAtlas:
     # Original [ma_u,ma_v,ma_t,depth0,beta_u,beta_v,beta_t] for UVT fallback ordering.
     # It must be regenerated with the UVT projection when the world changes.
     depth_reference_uvt: Tensor | None = None
+    # Original [ma_uvt, q_uvt] used only for the discrete alpha-cutoff decision.
+    # Regenerate from live UVT inputs when their geometry changes.
+    alpha_cutoff_reference_uvt: Tensor | None = None
     # False: c0+c1*t+c2*t^2. True: c0+c2*(t-c1)^2.
     opacity_time_centered: bool = False
 
@@ -233,6 +236,7 @@ def slice_projective_trace_cell_atlas_frames(
         spatial_precision_uv=select_optional(atlas.spatial_precision_uv),
         depth_affine_uv=select_optional(atlas.depth_affine_uv),
         depth_reference_uvt=select_optional(atlas.depth_reference_uvt),
+        alpha_cutoff_reference_uvt=select_optional(atlas.alpha_cutoff_reference_uvt),
     )
 
 
@@ -1844,6 +1848,7 @@ def uvt_tubes_to_projective_trace_cell_atlas(
         spatial_precision_uv=q_uvt.index_select(0, row_ids)[:, [0, 1, 3]].contiguous(),
         depth_affine_uv=depth_affine_uv,
         depth_reference_uvt=torch.cat((selected_ma, selected_depth0[:, None], selected_depth_beta), dim=1).contiguous(),
+        alpha_cutoff_reference_uvt=torch.cat((selected_ma, q_uvt.index_select(0, row_ids)), dim=1).detach().contiguous(),
     )
     atlas = rebin_projective_trace_cell_atlas_support_events(
         atlas,
@@ -1886,6 +1891,12 @@ def _validate_projective_trace_cell_atlas_metadata(atlas: ProjectiveTraceCellTra
     ):
         if len(values) != trace_count:
             raise ValueError(f"{name} must have one entry per cell trace")
+    reference = atlas.alpha_cutoff_reference_uvt
+    if reference is not None and (
+        reference.shape != (trace_count, 9) or reference.dtype != torch.float32
+        or reference.device != atlas.coeffs.device or not reference.is_contiguous()
+    ):
+        raise ValueError("alpha_cutoff_reference_uvt must be contiguous float32 [N,9] on the atlas device")
     if atlas.opacity_time_coeffs is not None:
         if atlas.opacity_time_coeffs.shape != (trace_count, 3):
             raise ValueError("opacity_time_coeffs must have shape [N,3]")
@@ -4296,11 +4307,36 @@ def rebin_projective_trace_cell_atlas(
     return replace(atlas, cells=assemble_projective_trace_tile_time_atlas(records))
 
 
+@torch.no_grad()
+def _cell_alpha_cutoff_mask(atlas, trace_ids, time, u, v, alpha, cutoff):
+    if atlas.alpha_cutoff_reference_uvt is None:
+        return alpha >= cutoff
+    reference = atlas.alpha_cutoff_reference_uvt[trace_ids]
+    opacity = atlas.opacity[trace_ids]
+    while reference.ndim < alpha.ndim + 1:
+        reference = reference.unsqueeze(-2)
+        opacity = opacity.unsqueeze(-1)
+    du, dv, dt = u-reference[..., 0], v-reference[..., 1], time-reference[..., 2]
+    # Keep the source quadratic's float32 operation order. Only the branch is
+    # discrete; differentiable alpha values still use the compiled expression.
+    qv = (reference[..., 3]*du*du + 2.0*reference[..., 4]*du*dv
+          + 2.0*reference[..., 5]*du*dt + reference[..., 6]*dv*dv
+          + 2.0*reference[..., 7]*dv*dt + reference[..., 8]*dt*dt)
+    return (opacity*torch.exp(-0.5*qv)).clamp(0.0, 1.0) >= cutoff
+
+
+def _cell_alpha_cutoff_reference_or_empty(atlas):
+    if atlas.alpha_cutoff_reference_uvt is not None:
+        return atlas.alpha_cutoff_reference_uvt.contiguous()
+    return atlas.coeffs.new_zeros((1, 9))
+
+
 def _composite_ordered_projective_cell_tile(
     atlas: ProjectiveTraceCellTraceAtlas,
     dense: Tensor,
     opacity_time_scale: Tensor | None,
     sample_index: int,
+    sample_time: Tensor,
     ordered_ids: tuple[int, ...],
     pixel_u: Tensor,
     pixel_v: Tensor,
@@ -4326,7 +4362,7 @@ def _composite_ordered_projective_cell_tile(
         opacity = opacity * opacity_time_scale.index_select(0, index)[:, sample_index]
     alpha = (opacity[:, None, None] * torch.exp(-0.5 * radius2)).clamp(0.0, 1.0)
     if alpha_cutoff > 0.0:
-        alpha = torch.where(alpha >= float(alpha_cutoff), alpha, torch.zeros_like(alpha))
+        alpha = torch.where(_cell_alpha_cutoff_mask(atlas, index, sample_time, pixel_u[None, None, :], pixel_v[None, :, None], alpha, float(alpha_cutoff)), alpha, torch.zeros_like(alpha))
     prefix = torch.cat((torch.ones_like(alpha[:1]), torch.cumprod(1.0 - alpha, dim=0)[:-1]), dim=0)
     if transmittance_cutoff > 0.0:
         # The scalar reference stops only once every pixel is below threshold.
@@ -4459,7 +4495,7 @@ def render_projective_trace_cell_atlas_reference(
                 dv = pixel_v.reshape(-1, 1)
                 if fallback_tiles_only and not use_pixel_depth_fallback_sort:
                     out[sample_index, v0:v1, u0:u1, :] = _composite_ordered_projective_cell_tile(
-                        atlas, dense, opacity_time_scale, sample_index,
+                        atlas, dense, opacity_time_scale, sample_index, times[sample_index],
                         tuple(i for i in ordered_ids if valid_values[i][sample_index] != 0.0),
                         pixel_u, pixel_v, sigma_px=sigma_px, alpha_cutoff=alpha_cutoff,
                         transmittance_cutoff=transmittance_cutoff,
@@ -4519,7 +4555,7 @@ def render_projective_trace_cell_atlas_reference(
                                 if opacity_time_scale is not None:
                                     opacity_i = opacity_i * opacity_time_scale[trace_id, sample_index]
                                 alpha = (opacity_i * torch.exp(-0.5 * radius2)).clamp(0.0, 1.0)
-                                if alpha_cutoff > 0.0 and bool(alpha < float(alpha_cutoff)):
+                                if alpha_cutoff > 0.0 and not bool(_cell_alpha_cutoff_mask(atlas, trace_id, times[sample_index], pixel_u_value, pixel_v_value, alpha, float(alpha_cutoff))):
                                     alpha = torch.zeros_like(alpha)
                                 tile_rgb[local_v, local_u, :] += pixel_transmittance * alpha * atlas.color[trace_id]
                                 pixel_transmittance = pixel_transmittance * (1.0 - alpha)
@@ -4547,7 +4583,7 @@ def render_projective_trace_cell_atlas_reference(
                     alpha = opacity_i * torch.exp(-0.5 * radius2)
                     alpha = alpha.clamp(0.0, 1.0)
                     if alpha_cutoff > 0.0:
-                        alpha = torch.where(alpha >= float(alpha_cutoff), alpha, torch.zeros_like(alpha))
+                        alpha = torch.where(_cell_alpha_cutoff_mask(atlas, trace_id, times[sample_index], du, dv, alpha, float(alpha_cutoff)), alpha, torch.zeros_like(alpha))
                     tile_rgb += transmittance.unsqueeze(-1) * alpha.unsqueeze(-1) * atlas.color[trace_id]
                     transmittance = transmittance * (1.0 - alpha)
                     if transmittance_cutoff > 0.0 and bool(torch.all(transmittance <= float(transmittance_cutoff)).item()):
@@ -4629,7 +4665,7 @@ def _render_projective_trace_cell_atlas_dense_samples_reference(
             alpha = opacity_i * torch.exp(-0.5 * radius2)
             alpha = alpha.clamp(0.0, 1.0)
             if alpha_cutoff > 0.0:
-                alpha = torch.where(alpha >= float(alpha_cutoff), alpha, torch.zeros_like(alpha))
+                alpha = torch.where(_cell_alpha_cutoff_mask(atlas, trace_id, times[sample_index], du, dv, alpha, float(alpha_cutoff)), alpha, torch.zeros_like(alpha))
             out[sample_index] += transmittance.unsqueeze(-1) * alpha.unsqueeze(-1) * atlas.color[trace_id]
             transmittance = transmittance * (1.0 - alpha)
             if transmittance_cutoff > 0.0 and bool(torch.all(transmittance <= float(transmittance_cutoff)).item()):
@@ -4863,6 +4899,8 @@ def lower_projective_trace_cell_atlas_quadrature(
                 spatial_precision_uv=_index_select_cell_spatial_precision_uv(atlas, empty_indices),
                 depth_affine_uv=_index_select_cell_depth_affine_uv(atlas, empty_indices),
                 depth_reference_uvt=(None if atlas.depth_reference_uvt is None else atlas.depth_reference_uvt.index_select(0, empty_indices)),
+                alpha_cutoff_reference_uvt=(None if atlas.alpha_cutoff_reference_uvt is None else atlas.alpha_cutoff_reference_uvt.index_select(0, empty_indices)),
+                opacity_time_centered=atlas.opacity_time_centered,
             ),
             times=sample_times,
             weights=sample_weights,
@@ -4901,6 +4939,8 @@ def lower_projective_trace_cell_atlas_quadrature(
         spatial_precision_uv=_index_select_cell_spatial_precision_uv(atlas, index),
         depth_affine_uv=_index_select_cell_depth_affine_uv(atlas, index),
         depth_reference_uvt=(None if atlas.depth_reference_uvt is None else atlas.depth_reference_uvt.index_select(0, index)),
+        alpha_cutoff_reference_uvt=(None if atlas.alpha_cutoff_reference_uvt is None else atlas.alpha_cutoff_reference_uvt.index_select(0, index)),
+        opacity_time_centered=atlas.opacity_time_centered,
     )
     if not source_trace_indices:
         return ProjectiveTraceCellQuadratureLowering(
@@ -4991,6 +5031,7 @@ def _projective_trace_cell_atlas_detached_cpu(atlas: ProjectiveTraceCellTraceAtl
     return ProjectiveTraceCellTraceAtlas(
         coeffs=atlas.coeffs.detach().cpu().contiguous(),
         depth_reference_uvt=(None if atlas.depth_reference_uvt is None else atlas.depth_reference_uvt.detach().cpu().contiguous()),
+        alpha_cutoff_reference_uvt=(None if atlas.alpha_cutoff_reference_uvt is None else atlas.alpha_cutoff_reference_uvt.detach().cpu().contiguous()),
         opacity=atlas.opacity.detach().cpu().contiguous(),
         color=atlas.color.detach().cpu().contiguous(),
         cells=atlas.cells,
@@ -5596,7 +5637,7 @@ def _require_peak_splat_projective_alpha(config) -> None:
         )
 
 
-def _make_projective_interval_meta(config, device: torch.device, trace_count: int, *, opacity_time_centered: bool = False) -> tuple[Tensor, Tensor]:
+def _make_projective_interval_meta(config, device: torch.device, trace_count: int, *, opacity_time_centered: bool = False, has_alpha_cutoff_reference: bool = False) -> tuple[Tensor, Tensor]:
     _require_peak_splat_projective_alpha(config)
     if int(config.height) <= 0 or int(config.width) <= 0 or int(config.frames) <= 0:
         raise ValueError("height, width, and frames must be positive")
@@ -5624,7 +5665,7 @@ def _make_projective_interval_meta(config, device: torch.device, trace_count: in
             int(trace_count),
             int(config.tile_capacity),
             int(opacity_time_centered),
-            0,
+            int(has_alpha_cutoff_reference),
         ],
         device=device,
         dtype=torch.int32,
@@ -5836,7 +5877,7 @@ def render_projective_trace_cell_interval_atlas_metal(
     if bool(torch.any(bins.tile_overflow > 0).item()):
         raise ValueError("packed projective interval atlas tile capacity overflow")
 
-    meta_i32, meta_f32 = _make_projective_interval_meta(config, atlas.coeffs.device, int(atlas.coeffs.shape[0]), opacity_time_centered=atlas.opacity_time_centered)
+    meta_i32, meta_f32 = _make_projective_interval_meta(config, atlas.coeffs.device, int(atlas.coeffs.shape[0]), opacity_time_centered=atlas.opacity_time_centered, has_alpha_cutoff_reference=atlas.alpha_cutoff_reference_uvt is not None)
     return torch.ops.star_uvt_v0.render_projective_trace_cell_interval_tiles(
         atlas.coeffs.contiguous(),
         times.contiguous(),
@@ -5844,6 +5885,7 @@ def render_projective_trace_cell_interval_atlas_metal(
         _cell_opacity_time_coeffs_or_zeros(atlas).contiguous(),
         _cell_spatial_precision_uv_or_isotropic(atlas, sigma_px=float(sigma_px)).contiguous(),
         _cell_depth_affine_uv_or_zeros(atlas).contiguous(),
+        _cell_alpha_cutoff_reference_or_empty(atlas),
         atlas.color.contiguous(),
         bins.tile_counts,
         bins.tile_primitive_ids,
@@ -6131,7 +6173,7 @@ def render_projective_trace_cell_interval_atlas_rows_metal(
     if bool(torch.any(bins.tile_overflow > 0).item()):
         raise ValueError("packed projective interval row atlas tile capacity overflow")
 
-    meta_i32, meta_f32 = _make_projective_interval_meta(config, atlas.coeffs.device, int(atlas.coeffs.shape[0]), opacity_time_centered=atlas.opacity_time_centered)
+    meta_i32, meta_f32 = _make_projective_interval_meta(config, atlas.coeffs.device, int(atlas.coeffs.shape[0]), opacity_time_centered=atlas.opacity_time_centered, has_alpha_cutoff_reference=atlas.alpha_cutoff_reference_uvt is not None)
     return torch.ops.star_uvt_v0.render_projective_trace_cell_interval_rows(
         atlas.coeffs.contiguous(),
         times.contiguous(),
@@ -6139,6 +6181,7 @@ def render_projective_trace_cell_interval_atlas_rows_metal(
         _cell_opacity_time_coeffs_or_zeros(atlas).contiguous(),
         _cell_spatial_precision_uv_or_isotropic(atlas, sigma_px=float(sigma_px)).contiguous(),
         _cell_depth_affine_uv_or_zeros(atlas).contiguous(),
+        _cell_alpha_cutoff_reference_or_empty(atlas),
         atlas.color.contiguous(),
         bins.tile_counts,
         bins.tile_primitive_ids,
@@ -6279,7 +6322,7 @@ def direct_backward_projective_trace_cell_interval_atlas_metal(
     if bool(torch.any(bins.tile_overflow > 0).item()):
         raise ValueError("packed projective interval atlas tile capacity overflow")
 
-    meta_i32, meta_f32 = _make_projective_interval_meta(config, atlas.coeffs.device, int(atlas.coeffs.shape[0]), opacity_time_centered=atlas.opacity_time_centered)
+    meta_i32, meta_f32 = _make_projective_interval_meta(config, atlas.coeffs.device, int(atlas.coeffs.shape[0]), opacity_time_centered=atlas.opacity_time_centered, has_alpha_cutoff_reference=atlas.alpha_cutoff_reference_uvt is not None)
     grad_coeffs, grad_opacity, grad_opacity_time_coeffs, grad_spatial_precision_uv, grad_color = torch.ops.star_uvt_v0.direct_projective_trace_cell_interval_backward(
         atlas.coeffs.contiguous(),
         times.contiguous(),
@@ -6287,6 +6330,7 @@ def direct_backward_projective_trace_cell_interval_atlas_metal(
         _cell_opacity_time_coeffs_or_zeros(atlas).contiguous(),
         _cell_spatial_precision_uv_or_isotropic(atlas, sigma_px=float(sigma_px)).contiguous(),
         _cell_depth_affine_uv_or_zeros(atlas).contiguous(),
+        _cell_alpha_cutoff_reference_or_empty(atlas),
         atlas.color.contiguous(),
         grad_image.contiguous(),
         bins.tile_counts,
