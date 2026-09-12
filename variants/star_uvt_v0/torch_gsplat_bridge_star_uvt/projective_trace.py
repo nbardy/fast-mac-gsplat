@@ -4315,6 +4315,48 @@ def rebin_projective_trace_cell_atlas(
     return replace(atlas, cells=assemble_projective_trace_tile_time_atlas(records))
 
 
+def _composite_ordered_projective_cell_tile(
+    atlas: ProjectiveTraceCellTraceAtlas,
+    dense: Tensor,
+    opacity_time_scale: Tensor | None,
+    sample_index: int,
+    ordered_ids: tuple[int, ...],
+    pixel_u: Tensor,
+    pixel_v: Tensor,
+    *,
+    sigma_px: float,
+    alpha_cutoff: float,
+    transmittance_cutoff: float,
+) -> Tensor:
+    """Batch a tile's fixed order while preserving tile-wide early termination."""
+    if not ordered_ids:
+        return atlas.color.new_zeros((pixel_v.numel(), pixel_u.numel(), atlas.color.shape[1]))
+    index = torch.tensor(ordered_ids, dtype=torch.long, device=atlas.color.device)
+    centers = dense.index_select(0, index)[:, sample_index]
+    du = pixel_u[None, None, :] - centers[:, 0, None, None]
+    dv = pixel_v[None, :, None] - centers[:, 1, None, None]
+    if atlas.spatial_precision_uv is None:
+        radius2 = (du.square() + dv.square()) / float(sigma_px * sigma_px)
+    else:
+        q = atlas.spatial_precision_uv.index_select(0, index)
+        radius2 = q[:, 0, None, None] * du.square() + 2.0 * q[:, 1, None, None] * du * dv + q[:, 2, None, None] * dv.square()
+    opacity = atlas.opacity.index_select(0, index)
+    if opacity_time_scale is not None:
+        opacity = opacity * opacity_time_scale.index_select(0, index)[:, sample_index]
+    alpha = (opacity[:, None, None] * torch.exp(-0.5 * radius2)).clamp(0.0, 1.0)
+    if alpha_cutoff > 0.0:
+        alpha = torch.where(alpha >= float(alpha_cutoff), alpha, torch.zeros_like(alpha))
+    prefix = torch.cat((torch.ones_like(alpha[:1]), torch.cumprod(1.0 - alpha, dim=0)[:-1]), dim=0)
+    if transmittance_cutoff > 0.0:
+        # The scalar reference stops only once every pixel is below threshold.
+        # Its first valid trace is always processed, even for thresholds >= 1.
+        active = prefix.detach().amax(dim=(1, 2)) > float(transmittance_cutoff)
+        active[0] = True
+        prefix = prefix * active[:, None, None]
+    weights = (prefix * alpha).flatten(1).transpose(0, 1)
+    return (weights @ atlas.color.index_select(0, index)).reshape(pixel_v.numel(), pixel_u.numel(), -1)
+
+
 def render_projective_trace_cell_atlas_reference(
     atlas: ProjectiveTraceCellTraceAtlas,
     times: Tensor,
@@ -4358,6 +4400,10 @@ def render_projective_trace_cell_atlas_reference(
         None if atlas.depth_reference_uvt is None or use_pixel_depth_fallback_sort
         else _uvt_reference_depth(atlas.depth_reference_uvt, times, 0.0, 0.0)
     )
+    # Sorting/validity decisions are discrete. Copy their exact float32 values
+    # once instead of synchronizing MPS for every trace in every tile.
+    valid_values = dense[:, :, 3].detach().cpu().tolist()
+    depth_values = (dense[:, :, 2] if reference_depth is None else reference_depth).detach().cpu().tolist()
     def source_order_key(trace_id: int) -> tuple[int, int]:
         return (int(atlas.source_primitive_ids[trace_id]), int(trace_id))
 
@@ -4393,11 +4439,9 @@ def render_projective_trace_cell_atlas_reference(
             sample_index, _tile_u, _tile_v = key
 
             def _live_depth_key(item: tuple[int, float, float]) -> tuple[float, int, int]:
-                valid_sign = dense[item[0], sample_index, 3]
-                if float(valid_sign.item()) == 0.0:
+                if valid_values[item[0]][sample_index] == 0.0:
                     return (math.inf, *source_order_key(item[0]))
-                depth = dense[item[0], sample_index, 2] if reference_depth is None else reference_depth[item[0], sample_index]
-                return (float(depth.item()), *source_order_key(item[0]))
+                return (depth_values[item[0]][sample_index], *source_order_key(item[0]))
 
             entries.sort(key=_live_depth_key)
         else:
@@ -4432,6 +4476,14 @@ def render_projective_trace_cell_atlas_reference(
                 pixel_u = torch.arange(u0, u1, dtype=atlas.color.dtype, device=atlas.color.device) + 0.5
                 du = pixel_u.reshape(1, -1)
                 dv = pixel_v.reshape(-1, 1)
+                if fallback_tiles_only and not use_pixel_depth_fallback_sort:
+                    out[sample_index, v0:v1, u0:u1, :] = _composite_ordered_projective_cell_tile(
+                        atlas, dense, opacity_time_scale, sample_index,
+                        tuple(i for i in ordered_ids if valid_values[i][sample_index] != 0.0),
+                        pixel_u, pixel_v, sigma_px=sigma_px, alpha_cutoff=alpha_cutoff,
+                        transmittance_cutoff=transmittance_cutoff,
+                    )
+                    continue
                 tile_rgb = out[sample_index, v0:v1, u0:u1, :]
                 transmittance = torch.ones((v1 - v0, u1 - u0), dtype=atlas.color.dtype, device=atlas.color.device)
 
@@ -4463,8 +4515,7 @@ def render_projective_trace_cell_atlas_reference(
                             for trace_id in pixel_order:
                                 center_u = dense[trace_id, sample_index, 0]
                                 center_v = dense[trace_id, sample_index, 1]
-                                valid_sign = dense[trace_id, sample_index, 3]
-                                if float(valid_sign.item()) == 0.0:
+                                if valid_values[trace_id][sample_index] == 0.0:
                                     continue
                                 du_centered = torch.as_tensor(
                                     float(pixel_u_value),
@@ -4498,8 +4549,7 @@ def render_projective_trace_cell_atlas_reference(
                 for trace_id in ordered_ids:
                     center_u = dense[trace_id, sample_index, 0]
                     center_v = dense[trace_id, sample_index, 1]
-                    valid_sign = dense[trace_id, sample_index, 3]
-                    if float(valid_sign.item()) == 0.0:
+                    if valid_values[trace_id][sample_index] == 0.0:
                         continue
                     du_centered = du - center_u
                     dv_centered = dv - center_v
