@@ -118,7 +118,6 @@ from torch_gsplat_bridge_star_uvt import (  # noqa: E402
     UVTRenderConfig,
     direct_atomic_backward,
     direct_atomic_backward_gated,
-    direct_backward_projective_trace_cell_interval_atlas_metal,
     direct_fixedpoint_backward,
     direct_split_fixedpoint_backward,
     eval_projective_trace_cell_torch,
@@ -135,7 +134,6 @@ from torch_gsplat_bridge_star_uvt import (  # noqa: E402
     projective_trace_cell_atlas_visibility_report,
     rebin_projective_trace_cell_atlas_support_events,
     render_projective_trace_cell_atlas_reference,
-    render_projective_trace_cell_interval_atlas_metal,
     split_projective_trace_cell_atlas_fallback_cells,
     stratify_projective_trace_cell_atlas_visibility_events,
     stratify_projective_trace_cell_atlas_visibility,
@@ -160,6 +158,8 @@ from torch_gsplat_bridge_star_uvt import (  # noqa: E402
     tile_pair_reduced_backward,
     tile_pair_reduced_parallel_backward,
 )
+
+from torch_gsplat_bridge_star_uvt.projective_trace import _prepare_projective_trace_cell_interval_atlas_metal
 
 KEYED_REDUCTION_MODES = (
     "key_sort_scan_metal",
@@ -1891,53 +1891,32 @@ class _ProjectiveCellIntervalBackward(torch.autograd.Function):
         config: UVTRenderConfig,
         sigma_px: float,
     ) -> Tensor:
-        ctx.static_atlas = static_atlas
-        ctx.config = config
-        ctx.sigma_px = float(sigma_px)
-        ctx.save_for_backward(coeffs, opacity, opacity_time_coeffs, spatial_precision_uv, color, times)
         atlas = _materialize_projective_cell_atlas(
-            coeffs,
-            opacity,
-            opacity_time_coeffs,
-            spatial_precision_uv,
-            color,
-            static_atlas,
+            coeffs, opacity, opacity_time_coeffs, spatial_precision_uv,
+            color, static_atlas,
         )
-        return render_projective_trace_cell_interval_atlas_metal(
-            atlas,
-            times,
-            config,
-            sigma_px=float(sigma_px),
+        inputs = _prepare_projective_trace_cell_interval_atlas_metal(
+            atlas, times, config, sigma_px=float(sigma_px),
         )
+        # Backward must consume this forward's values, membership and metadata.
+        # Saving tensors also enables PyTorch's in-place version checks.
+        ctx.save_for_backward(*inputs)
+        ctx.sigma_px = float(sigma_px)
+        ctx.has_spatial_precision = static_atlas.spatial_precision_uv is not None
+        return torch.ops.star_uvt_v0.render_projective_trace_cell_interval_tiles(*inputs, ctx.sigma_px)
 
     @staticmethod
     def backward(ctx, grad_output: Tensor) -> tuple[Tensor | None, ...]:
-        coeffs, opacity, opacity_time_coeffs, spatial_precision_uv, color, times = ctx.saved_tensors
-        atlas = _materialize_projective_cell_atlas(
-            coeffs.detach(),
-            opacity.detach(),
-            opacity_time_coeffs.detach(),
-            spatial_precision_uv.detach(),
-            color.detach(),
-            ctx.static_atlas,
-        )
-        grads = direct_backward_projective_trace_cell_interval_atlas_metal(
-            atlas,
-            times.detach(),
-            grad_output.contiguous(),
-            ctx.config,
-            sigma_px=ctx.sigma_px,
+        inputs = ctx.saved_tensors
+        # The native VJP adds the image cotangent after the eight value tensors.
+        grads = torch.ops.star_uvt_v0.direct_projective_trace_cell_interval_backward(
+            *inputs[:8], grad_output.contiguous(), *inputs[8:], ctx.sigma_px,
         )
         return (
-            grads.grad_coeffs,
-            grads.grad_opacity,
-            grads.grad_opacity_time_coeffs,
-            grads.grad_spatial_precision_uv if ctx.static_atlas.spatial_precision_uv is not None else None,
-            grads.grad_color,
-            None,
-            None,
-            None,
-            None,
+            *grads[:3],
+            grads[3] if ctx.has_spatial_precision else None,
+            grads[4],
+            None, None, None, None,
         )
 
 

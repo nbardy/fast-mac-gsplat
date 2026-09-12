@@ -5829,22 +5829,15 @@ def render_projective_trace_cell_atlas_metal(
     )
 
 
-def render_projective_trace_cell_interval_atlas_metal(
+def _prepare_projective_trace_cell_interval_atlas_metal(
     atlas: ProjectiveTraceCellTraceAtlas,
     times: Tensor,
     config,
     *,
     sigma_px: float,
     allow_fallback_cells: bool = False,
-) -> Tensor:
-    """Render cell-local traces from interval-compressed spatial tile bins.
-
-    Unlike ``render_projective_trace_cell_atlas_metal``, this path packs each
-    accepted cell once into a spatial tile bin and relies on per-entry
-    ``[active_start, active_stop)`` checks in the Metal kernel. It is the first
-    hot-path shape that consumes the interval-compressed atlas object directly
-    instead of re-expanding it into fixed temporal slabs.
-    """
+) -> tuple[Tensor, ...]:
+    """Validate and pack the exact native inputs for one forward graph."""
 
     _check_projective_trace_render_inputs(atlas.coeffs, times, atlas.color, atlas.opacity)
     if atlas.coeffs.device.type != "mps":
@@ -5874,7 +5867,7 @@ def render_projective_trace_cell_interval_atlas_metal(
         raise ValueError("packed projective interval atlas tile capacity overflow")
 
     meta_i32, meta_f32 = _make_projective_interval_meta(config, atlas.coeffs.device, int(atlas.coeffs.shape[0]), opacity_time_centered=atlas.opacity_time_centered, has_alpha_cutoff_reference=atlas.alpha_cutoff_reference_uvt is not None)
-    return torch.ops.star_uvt_v0.render_projective_trace_cell_interval_tiles(
+    return (
         atlas.coeffs.contiguous(),
         times.contiguous(),
         atlas.opacity.contiguous(),
@@ -5889,8 +5882,31 @@ def render_projective_trace_cell_interval_atlas_metal(
         bins.tile_active_stop,
         meta_i32,
         meta_f32,
-        float(sigma_px),
     )
+
+
+def render_projective_trace_cell_interval_atlas_metal(
+    atlas: ProjectiveTraceCellTraceAtlas,
+    times: Tensor,
+    config,
+    *,
+    sigma_px: float,
+    allow_fallback_cells: bool = False,
+) -> Tensor:
+    """Render cell-local traces from interval-compressed spatial tile bins.
+
+    Unlike ``render_projective_trace_cell_atlas_metal``, this path packs each
+    accepted cell once into a spatial tile bin and relies on per-entry
+    ``[active_start, active_stop)`` checks in the Metal kernel. It is the first
+    hot-path shape that consumes the interval-compressed atlas object directly
+    instead of re-expanding it into fixed temporal slabs.
+    """
+
+    inputs = _prepare_projective_trace_cell_interval_atlas_metal(
+        atlas, times, config, sigma_px=sigma_px,
+        allow_fallback_cells=allow_fallback_cells,
+    )
+    return torch.ops.star_uvt_v0.render_projective_trace_cell_interval_tiles(*inputs, float(sigma_px))
 
 
 def render_projective_trace_family_interval_atlas_metal(
