@@ -1454,6 +1454,7 @@ def pack_projective_trace_tile_time_bins(
     active_stop = [0] * (tile_count * tile_capacity)
     overflow = [0] * tile_count
     ranges: list[dict[int, list[tuple[int, int]]]] = [{} for _ in range(tile_count)]
+    unit_interval = [(0, 1)]
 
     for cell in cells:
         if cell.fallback and not allow_fallback_cells:
@@ -1465,6 +1466,12 @@ def pack_projective_trace_tile_time_bins(
             raise ValueError("cell time range is invalid for frames")
         if len(cell.ordered_primitive_ids) != len(cell.depth_intervals):
             raise ValueError("cell ordered ids and depth intervals must match")
+        if frames == 1 and cell.start == 0 and cell.stop == 1:
+            # Every valid integer interval is [0,1); union is ordered deduplication.
+            tile_ranges = ranges[cell.tile_v * tiles_x + cell.tile_u]
+            for primitive_id in cell.ordered_primitive_ids:
+                tile_ranges[int(primitive_id)] = unit_interval
+            continue
         tz0 = cell.start // tile_t
         tz1 = (cell.stop - 1) // tile_t
         for tz in range(tz0, tz1 + 1):
@@ -1474,12 +1481,15 @@ def pack_projective_trace_tile_time_bins(
 
     for tile_id, trace_ranges in enumerate(ranges):
         entries: list[tuple[int, int, int]] = []
-        for primitive_id, intervals in trace_ranges.items():
-            for start, stop in sorted(intervals):
-                if entries and entries[-1][0] == primitive_id and start <= entries[-1][2]:
-                    entries[-1] = (primitive_id, entries[-1][1], max(stop, entries[-1][2]))
-                else:
-                    entries.append((primitive_id, start, stop))
+        if frames == 1:
+            entries = [(primitive_id, 0, 1) for primitive_id in trace_ranges]
+        else:
+            for primitive_id, intervals in trace_ranges.items():
+                for start, stop in sorted(intervals):
+                    if entries and entries[-1][0] == primitive_id and start <= entries[-1][2]:
+                        entries[-1] = (primitive_id, entries[-1][1], max(stop, entries[-1][2]))
+                    else:
+                        entries.append((primitive_id, start, stop))
         counts[tile_id] = len(entries)
         overflow[tile_id] = int(len(entries) > tile_capacity)
         for slot, (primitive_id, start, stop) in enumerate(entries[:tile_capacity]):
