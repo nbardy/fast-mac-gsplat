@@ -2061,6 +2061,7 @@ def train_world_tubes(
     world_representation: str = "legacy_tube",
     spd4_min_spatial_scale: float = 1.0e-4,
     spd4_init_precision_z: float | None = None,
+    progress_dir: Path | None = None,
 ) -> tuple[WorldTubeModel | SPD4WorldAtomModel, dict[str, Any], list[dict[str, Any]]]:
     if loss_scope not in {"sampled_frame", "view_sequence", "temporal_window", "paper_batch"}:
         raise ValueError("loss_scope must be one of: sampled_frame, view_sequence, temporal_window, paper_batch")
@@ -2874,6 +2875,22 @@ def train_world_tubes(
                     "paper_epoch_complete": None if paper_batch is None else paper_batch.completes_epoch,
                 }
             )
+            if progress_dir is not None and world_representation == "legacy_tube":
+                write_json_atomic(
+                    progress_dir / "latest.json",
+                    {
+                        "step": completed_step,
+                        "elapsed_s": elapsed_after_step,
+                        "logs": logs,
+                        "checkpoint": _save_frozen_world_checkpoint(
+                            model,
+                            progress_dir / f"step_{completed_step:06d}.pt",
+                            frame_count=frames,
+                            representation=model.representation_name,
+                        ),
+                        "optimizer_state_saved": False,
+                    },
+                )
         if checkpoint_every_steps > 0 and completed_step % checkpoint_every_steps == 0:
             checkpoint_state = snapshot_world_tube_state(model)
             checkpoints.append(
@@ -6765,6 +6782,7 @@ def main() -> None:
         world_representation=args.uvt_world_representation,
         spd4_min_spatial_scale=args.uvt_spd4_min_spatial_scale,
         spd4_init_precision_z=args.uvt_spd4_init_precision_z,
+        progress_dir=out_dir / "training_progress",
     )
     # Save the learned state and optimizer-run evidence before evaluation can
     # fail (for example, on overflow in a previously unsampled view/time).
@@ -6983,6 +7001,7 @@ def main() -> None:
             "lr": args.uvt_lr,
             "lr_decay_step": args.uvt_lr_decay_step,
             "lr_decay_factor": args.uvt_lr_decay_factor,
+            "init_depth": args.init_depth,
             "init_precision_xy": args.uvt_init_precision_xy,
             "init_lambda_t": args.uvt_init_lambda_t,
             "static_tube_fraction": args.uvt_static_tube_fraction,
