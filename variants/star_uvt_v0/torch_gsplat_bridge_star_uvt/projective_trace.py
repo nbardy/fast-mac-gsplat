@@ -1384,9 +1384,10 @@ def pack_projective_trace_tile_time_bins(
 ) -> ProjectiveTraceTileBins:
     """Pack compiler-side projective atlas cells into dense tile-time buffers.
 
-    Each slot stores a primitive id plus the exact sample interval where that
-    chart/cell entry is valid, so coarse tile-time bins do not leak split
-    projective windows across their boundaries.
+    Each slot stores a trace-table id and an active sample interval. Overlapping
+    or touching intervals for that same id are unioned; gaps and distinct chart
+    ids remain separate. This preserves the active trace set at every sample
+    without spending native capacity on repeated visibility-cell entries.
     """
 
     if image_width <= 0 or image_height <= 0 or frames <= 0:
@@ -1405,7 +1406,7 @@ def pack_projective_trace_tile_time_bins(
     active_start = torch.zeros((tile_count * tile_capacity,), dtype=torch.int32)
     active_stop = torch.zeros((tile_count * tile_capacity,), dtype=torch.int32)
     overflow = torch.zeros((tile_count,), dtype=torch.int32)
-    seen: list[set[tuple[int, int, int]]] = [set() for _ in range(tile_count)]
+    ranges: list[dict[int, list[tuple[int, int]]]] = [{} for _ in range(tile_count)]
 
     for cell in cells:
         if cell.fallback and not allow_fallback_cells:
@@ -1422,19 +1423,23 @@ def pack_projective_trace_tile_time_bins(
         for tz in range(tz0, tz1 + 1):
             tile_id = (tz * tiles_y + cell.tile_v) * tiles_x + cell.tile_u
             for primitive_id in cell.ordered_primitive_ids:
-                entry_key = (int(primitive_id), int(cell.start), int(cell.stop))
-                if entry_key in seen[tile_id]:
-                    continue
-                seen[tile_id].add(entry_key)
-                slot = int(counts[tile_id].item())
-                counts[tile_id] += 1
-                if slot >= tile_capacity:
-                    overflow[tile_id] = 1
-                    continue
-                offset = tile_id * tile_capacity + slot
-                primitive_ids[offset] = int(primitive_id)
-                active_start[offset] = int(cell.start)
-                active_stop[offset] = int(cell.stop)
+                ranges[tile_id].setdefault(int(primitive_id), []).append((int(cell.start), int(cell.stop)))
+
+    for tile_id, trace_ranges in enumerate(ranges):
+        entries: list[tuple[int, int, int]] = []
+        for primitive_id, intervals in trace_ranges.items():
+            for start, stop in sorted(intervals):
+                if entries and entries[-1][0] == primitive_id and start <= entries[-1][2]:
+                    entries[-1] = (primitive_id, entries[-1][1], max(stop, entries[-1][2]))
+                else:
+                    entries.append((primitive_id, start, stop))
+        counts[tile_id] = len(entries)
+        overflow[tile_id] = int(len(entries) > tile_capacity)
+        for slot, (primitive_id, start, stop) in enumerate(entries[:tile_capacity]):
+            offset = tile_id * tile_capacity + slot
+            primitive_ids[offset] = primitive_id
+            active_start[offset] = start
+            active_stop[offset] = stop
 
     if device is not None:
         counts = counts.to(device=device)
@@ -2773,7 +2778,11 @@ def projective_trace_cell_atlas_fallback_stats(
 def projective_trace_cell_atlas_complexity_stats(
     atlas: ProjectiveTraceCellTraceAtlas,
 ) -> ProjectiveTraceCellAtlasComplexityStats:
-    """Measure interval compression, visibility-stratum growth, and fallback."""
+    """Measure stored cell topology and fallback, before native interval union.
+
+    ``interval_trace_entries`` counts retained cell entries, not packed slots;
+    the native packer's ``tile_counts`` measures its coalesced work separately.
+    """
 
     fallback = projective_trace_cell_atlas_fallback_stats(atlas)
     groups: dict[tuple[int, int, tuple[int, ...]], int] = {}
@@ -3862,7 +3871,11 @@ def mark_projective_trace_cell_visibility_fallbacks(
     tile_size: int | None = None,
     fallback_reason: str = "visibility_ambiguous_depth",
 ) -> ProjectiveTraceCellTraceAtlas:
-    """Mark cells whose live depths are too close for a stable static order."""
+    """Mark only the sample runs whose depths cannot use a stable order.
+
+    A bad sample must not force unrelated times in its parent cell to fallback.
+    Existing fallback reasons remain in force over their original whole interval.
+    """
 
     if depth_epsilon < 0.0:
         raise ValueError("depth_epsilon must be non-negative")
@@ -3883,10 +3896,10 @@ def mark_projective_trace_cell_visibility_fallbacks(
     )
     frame_count = int(times_cpu.numel())
     trace_count = int(coeffs_cpu.shape[0])
-    fallback_reasons_by_cell: dict[int, set[str]] = {}
+    fallback_reasons_by_cell: dict[int, dict[int, set[str]]] = {}
 
-    def _mark_cell(cell_index: int, reason: str) -> None:
-        fallback_reasons_by_cell.setdefault(int(cell_index), set()).add(str(reason))
+    def _mark_cell(cell_index: int, sample_index: int, reason: str) -> None:
+        fallback_reasons_by_cell.setdefault(int(cell_index), {}).setdefault(int(sample_index), set()).add(str(reason))
 
     entries_by_key: dict[tuple[int, int, int], list[tuple[int, int]]] = {}
     for cell_index, cell in enumerate(atlas.cells):
@@ -3909,7 +3922,7 @@ def mark_projective_trace_cell_visibility_fallbacks(
             seen.add(trace_id)
             valid_sign = dense[trace_id, sample_index, 3]
             if float(valid_sign.item()) == 0.0:
-                _mark_cell(cell_index, fallback_reason)
+                _mark_cell(cell_index, sample_index, fallback_reason)
                 continue
             depth_min, depth_max = _cell_trace_depth_range_for_tile_sample(
                 dense,
@@ -3929,8 +3942,8 @@ def mark_projective_trace_cell_visibility_fallbacks(
         live_depths.sort(key=lambda item: (item[0], item[1], item[2]))
         for (_min_a, max_a, _trace_a, cell_a), (min_b, _max_b, _trace_b, cell_b) in zip(live_depths, live_depths[1:]):
             if max_a + float(depth_epsilon) >= min_b:
-                _mark_cell(cell_a, fallback_reason)
-                _mark_cell(cell_b, fallback_reason)
+                _mark_cell(cell_a, sample_index, fallback_reason)
+                _mark_cell(cell_b, sample_index, fallback_reason)
 
     if atlas.depth_affine_uv is not None and has_tile_depth_domain:
         uv_event_report = projective_trace_cell_uv_visibility_event_report(
@@ -3942,7 +3955,7 @@ def mark_projective_trace_cell_visibility_fallbacks(
             depth_epsilon=depth_epsilon,
         )
         for event in uv_event_report.events:
-            _mark_cell(int(event.cell_index), "visibility_uv_depth_line")
+            _mark_cell(int(event.cell_index), int(event.sample_index), "visibility_uv_depth_line")
 
     if not fallback_reasons_by_cell:
         return atlas
@@ -3952,8 +3965,18 @@ def mark_projective_trace_cell_visibility_fallbacks(
         if cell_index not in fallback_reasons_by_cell:
             cells.append(cell)
             continue
-        reasons = tuple(sorted((*cell.fallback_reasons, *fallback_reasons_by_cell[cell_index])))
-        cells.append(replace(cell, fallback=True, fallback_reasons=reasons))
+        marked_samples = fallback_reasons_by_cell[cell_index]
+        boundaries = sorted({cell.start, cell.stop, *marked_samples, *(sample + 1 for sample in marked_samples)})
+        segments: list[ProjectiveTraceTileTimeCell] = []
+        for start, stop in zip(boundaries, boundaries[1:]):
+            added_reasons = marked_samples.get(start, set())
+            reasons = tuple(sorted(set(cell.fallback_reasons) | added_reasons))
+            fallback = bool(cell.fallback or added_reasons)
+            if segments and segments[-1].fallback == fallback and segments[-1].fallback_reasons == reasons:
+                segments[-1] = replace(segments[-1], stop=stop)
+            else:
+                segments.append(replace(cell, start=start, stop=stop, fallback=fallback, fallback_reasons=reasons))
+        cells.extend(segments)
 
     return replace(atlas, cells=cells)
 
