@@ -40,6 +40,7 @@ from torch_gsplat_bridge_star_uvt import (  # noqa: E402
     UVTRenderConfig,
     render_uvt_tubes,
     slice_projective_trace_cell_atlas_frames,
+    iter_projective_trace_cell_atlas_frame_slices,
     uvt_tubes_to_projective_trace_cell_atlas,
 )
 from camera import CameraSpec  # noqa: E402
@@ -4586,6 +4587,9 @@ def frozen_world_replay_compiled_report(
     compiled_loss_value = 0.0
     image_max_abs_error = 0.0
     image_absolute_error_sum = 0.0
+    compiled_slices = iter_projective_trace_cell_atlas_frame_slices(
+        atlas, frame_count=frame_count, chunk_frames=resident_chunk_frames,
+    )
     for chunk_start in range(0, frame_count, resident_chunk_frames):
         chunk_stop = min(frame_count, chunk_start + resident_chunk_frames)
         synchronize_device(device)
@@ -4594,11 +4598,7 @@ def frozen_world_replay_compiled_report(
         compiled_forward_started = time.perf_counter()
         chunk_config = replace(config, frames=chunk_stop - chunk_start)
         chunk_times = times[chunk_start:chunk_stop].contiguous()
-        chunk_atlas = slice_projective_trace_cell_atlas_frames(
-            atlas,
-            start=chunk_start,
-            stop=chunk_stop,
-        )
+        chunk_atlas = next(compiled_slices)
         chunk_state = ProjectiveCellIntervalTrainerState(
             atlas=chunk_atlas,
             times=chunk_times,
@@ -4693,6 +4693,7 @@ def frozen_world_replay_compiled_report(
             target_chunk,
         )
 
+    del compiled_slices
     compiled_route_memory = _route_memory_report(
         "compiled",
         device=device,
@@ -4926,15 +4927,14 @@ def frozen_world_replay_compiled_report(
         forward_segments = dict.fromkeys(forward_phases, 0.0)
         total_forward_s = 0.0
         total_backward_s = 0.0
+        trial_slices = iter_projective_trace_cell_atlas_frame_slices(
+            trial_atlas, frame_count=frame_count, chunk_frames=resident_chunk_frames,
+        )
         for chunk_start in range(0, frame_count, resident_chunk_frames):
             chunk_stop = min(frame_count, chunk_start + resident_chunk_frames)
             synchronize_device(device)
             forward_started = time.perf_counter()
-            trial_chunk_atlas = slice_projective_trace_cell_atlas_frames(
-                trial_atlas,
-                start=chunk_start,
-                stop=chunk_stop,
-            )
+            trial_chunk_atlas = next(trial_slices)
             trial_chunk_state = ProjectiveCellIntervalTrainerState(
                 atlas=trial_chunk_atlas,
                 times=trial_times[chunk_start:chunk_stop].contiguous(),
@@ -4970,7 +4970,7 @@ def frozen_world_replay_compiled_report(
                 trial_loss,
             )
         model.zero_grad(set_to_none=True)
-        del trial_projected, trial_times, trial_atlas
+        del trial_slices, trial_projected, trial_times, trial_atlas
         return compile_s, total_forward_s, total_backward_s, forward_segments
 
     def complete_timing_sample(

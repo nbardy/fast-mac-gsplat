@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
+import heapq
 import math
 
 import torch
@@ -236,6 +238,45 @@ def slice_projective_trace_cell_atlas_frames(
         depth_reference_uvt=select_optional(atlas.depth_reference_uvt),
         alpha_cutoff_reference_uvt=select_optional(atlas.alpha_cutoff_reference_uvt),
     )
+
+
+def iter_projective_trace_cell_atlas_frame_slices(
+    atlas: ProjectiveTraceCellTraceAtlas,
+    *,
+    frame_count: int,
+    chunk_frames: int,
+) -> Iterator[ProjectiveTraceCellTraceAtlas]:
+    """Stream compact slices; snapshot topology once, rebuild after cell edits."""
+
+    if frame_count < 0 or chunk_frames <= 0:
+        raise ValueError("frame_count must be nonnegative and chunk_frames positive")
+    source_cells = tuple(atlas.cells)
+    starts = sorted(
+        (int(cell.start), index)
+        for index, cell in enumerate(source_cells)
+        if int(cell.stop) > int(cell.start)
+    )
+    cursor = 0
+    active: set[int] = set()
+    stops: list[tuple[int, int]] = []
+    for start in range(0, frame_count, chunk_frames):
+        stop = min(frame_count, start + chunk_frames)
+        while stops and stops[0][0] <= start:
+            _, index = heapq.heappop(stops)
+            active.remove(index)
+        while cursor < len(starts) and starts[cursor][0] < stop:
+            index = starts[cursor][1]
+            cell_stop = int(source_cells[index].stop)
+            if cell_stop > start:
+                active.add(index)
+                heapq.heappush(stops, (cell_stop, index))
+            cursor += 1
+        # Temporal lookup must preserve the source's cell/compositing order.
+        yield slice_projective_trace_cell_atlas_frames(
+            replace(atlas, cells=[source_cells[index] for index in sorted(active)]),
+            start=start,
+            stop=stop,
+        )
 
 
 @dataclass(frozen=True)
