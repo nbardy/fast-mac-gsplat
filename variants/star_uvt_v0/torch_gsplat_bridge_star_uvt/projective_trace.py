@@ -3717,10 +3717,6 @@ def stratify_projective_trace_cell_atlas_visibility_events(
     trace_count = int(coeffs_cpu.shape[0])
     cells: list[ProjectiveTraceTileTimeCell] = []
 
-    def _depth_at(trace_id: int, t_value: float) -> float:
-        coeff = coeffs_cpu[trace_id, 6:9]
-        return float((coeff[0] + coeff[1] * t_value + coeff[2] * t_value * t_value).item())
-
     def _add_boundary(boundaries: set[int], cell: ProjectiveTraceTileTimeCell, boundary: int) -> None:
         if int(cell.start) < boundary < int(cell.stop):
             boundaries.add(boundary)
@@ -3755,10 +3751,18 @@ def stratify_projective_trace_cell_atlas_visibility_events(
             _add_boundary(boundaries, cell, int(atlas.active_start[trace_id]))
             _add_boundary(boundaries, cell, int(atlas.active_stop[trace_id]))
 
-        for pair_i, trace_a in enumerate(trace_ids):
-            for trace_b in trace_ids[pair_i + 1:]:
-                overlap_start = max(int(cell.start), int(atlas.active_start[trace_a]), int(atlas.active_start[trace_b]))
-                overlap_stop = min(int(cell.stop), int(atlas.active_stop[trace_a]), int(atlas.active_stop[trace_b]))
+        # A pair cannot span two samples unless each member does. Keep short
+        # spans in the cells, but exclude them from continuous root searches.
+        root_spans = [
+            (trace_id, max(int(cell.start), int(atlas.active_start[trace_id])),
+             min(int(cell.stop), int(atlas.active_stop[trace_id])))
+            for trace_id in trace_ids
+        ]
+        root_spans = [span for span in root_spans if span[2] - span[1] >= 2]
+        for pair_i, (trace_a, start_a, stop_a) in enumerate(root_spans):
+            for trace_b, start_b, stop_b in root_spans[pair_i + 1:]:
+                overlap_start = max(start_a, start_b)
+                overlap_stop = min(stop_a, stop_b)
                 if overlap_stop - overlap_start < 2:
                     continue
                 t_min = float(times_cpu[overlap_start].item())
@@ -3785,11 +3789,11 @@ def stratify_projective_trace_cell_atlas_visibility_events(
             if not active_trace_ids:
                 continue
             t_mid = 0.5 * (float(times_cpu[start].item()) + float(times_cpu[stop - 1].item()))
+            depth_coeffs = coeffs_cpu[list(active_trace_ids), 6:9]
+            # Preserve the scalar float32 operation order, including (z2*t)*t.
+            midpoint_depths = depth_coeffs[:, 0] + depth_coeffs[:, 1] * t_mid + depth_coeffs[:, 2] * t_mid * t_mid
             ordered = tuple(
-                trace_id
-                for _depth, trace_id in sorted(
-                    (_depth_at(trace_id, t_mid), trace_id) for trace_id in active_trace_ids
-                )
+                trace_id for _depth, trace_id in sorted(zip(midpoint_depths.tolist(), active_trace_ids))
             )
             depth_intervals: list[tuple[float, float]] = []
             for trace_id in ordered:
