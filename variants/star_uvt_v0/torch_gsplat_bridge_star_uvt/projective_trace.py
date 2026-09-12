@@ -3875,6 +3875,8 @@ def mark_projective_trace_cell_visibility_fallbacks(
 
     A bad sample must not force unrelated times in its parent cell to fallback.
     Existing fallback reasons remain in force over their original whole interval.
+    Exactly zero spatial slope polynomials use scalar depth checks; they have
+    no spatial order boundary to search for, even when scalar depths coincide.
     """
 
     if depth_epsilon < 0.0:
@@ -3894,6 +3896,8 @@ def mark_projective_trace_cell_visibility_fallbacks(
         if atlas.depth_affine_uv is None or not has_tile_depth_domain
         else atlas.depth_affine_uv.detach().cpu().contiguous()
     )
+    if depth_affine_uv_cpu is not None and not bool(torch.any(depth_affine_uv_cpu != 0).item()):
+        depth_affine_uv_cpu = None
     frame_count = int(times_cpu.numel())
     trace_count = int(coeffs_cpu.shape[0])
     fallback_reasons_by_cell: dict[int, dict[int, set[str]]] = {}
@@ -3903,6 +3907,13 @@ def mark_projective_trace_cell_visibility_fallbacks(
 
     entries_by_key: dict[tuple[int, int, int], list[tuple[int, int]]] = {}
     for cell_index, cell in enumerate(atlas.cells):
+        if cell.tile_u < 0 or cell.tile_v < 0 or (
+            has_tile_depth_domain and (
+                cell.tile_u * int(tile_size) >= int(image_width)
+                or cell.tile_v * int(tile_size) >= int(image_height)
+            )
+        ):
+            raise ValueError("cell tile coordinates are outside the image tile grid")
         if cell.start < 0 or cell.stop > frame_count or cell.start >= cell.stop:
             raise ValueError("cell time range is invalid for times")
         for trace_id in cell.ordered_primitive_ids:
@@ -3945,7 +3956,7 @@ def mark_projective_trace_cell_visibility_fallbacks(
                 _mark_cell(cell_a, sample_index, fallback_reason)
                 _mark_cell(cell_b, sample_index, fallback_reason)
 
-    if atlas.depth_affine_uv is not None and has_tile_depth_domain:
+    if depth_affine_uv_cpu is not None:
         uv_event_report = projective_trace_cell_uv_visibility_event_report(
             atlas,
             times,
