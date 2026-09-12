@@ -3723,6 +3723,10 @@ def stratify_projective_trace_cell_atlas_visibility_events(
     frame_count = int(times_cpu.numel())
     trace_count = int(coeffs_cpu.shape[0])
     cells: list[ProjectiveTraceTileTimeCell] = []
+    # Spatial tiles often repeat the same trace/time queries. Keep results
+    # local to this compilation so later geometry updates cannot reuse them.
+    roots_by_span: dict[tuple[int, int, int, int], tuple[float, ...]] = {}
+    depths_by_span: dict[tuple[int, int, int], tuple[float, float]] = {}
 
     def _add_boundary(boundaries: set[int], cell: ProjectiveTraceTileTimeCell, boundary: int) -> None:
         if int(cell.start) < boundary < int(cell.stop):
@@ -3772,16 +3776,17 @@ def stratify_projective_trace_cell_atlas_visibility_events(
                 overlap_stop = min(stop_a, stop_b)
                 if overlap_stop - overlap_start < 2:
                     continue
-                t_min = float(times_cpu[overlap_start].item())
-                t_max = float(times_cpu[overlap_stop - 1].item())
-                for root in _projective_trace_cell_pair_depth_roots(
-                    coeffs_cpu,
-                    trace_a=trace_a,
-                    trace_b=trace_b,
-                    t_min=t_min,
-                    t_max=t_max,
-                    eps=float(root_epsilon),
-                ):
+                root_span = (trace_a, trace_b, overlap_start, overlap_stop)
+                if root_span not in roots_by_span:
+                    roots_by_span[root_span] = _projective_trace_cell_pair_depth_roots(
+                        coeffs_cpu,
+                        trace_a=trace_a,
+                        trace_b=trace_b,
+                        t_min=float(times_cpu[overlap_start].item()),
+                        t_max=float(times_cpu[overlap_stop - 1].item()),
+                        eps=float(root_epsilon),
+                    )
+                for root in roots_by_span[root_span]:
                     _add_root_boundaries(boundaries, cell, root)
 
         ordered_boundaries = sorted(boundaries)
@@ -3804,18 +3809,16 @@ def stratify_projective_trace_cell_atlas_visibility_events(
             )
             depth_intervals: list[tuple[float, float]] = []
             for trace_id in ordered:
-                trace_depths = dense[trace_id, start:stop, 2]
-                valid = dense[trace_id, start:stop, 3] != 0.0
-                valid_depths = trace_depths[valid]
-                if valid_depths.numel() == 0:
-                    depth_intervals.append((math.inf, math.inf))
-                    continue
-                depth_intervals.append(
-                    (
-                        float(valid_depths.amin().item()),
-                        float(valid_depths.amax().item()),
+                depth_span = (trace_id, start, stop)
+                if depth_span not in depths_by_span:
+                    trace_depths = dense[trace_id, start:stop, 2]
+                    valid = dense[trace_id, start:stop, 3] != 0.0
+                    valid_depths = trace_depths[valid]
+                    depths_by_span[depth_span] = (
+                        (float(valid_depths.amin().item()), float(valid_depths.amax().item()))
+                        if valid_depths.numel() else (math.inf, math.inf)
                     )
-                )
+                depth_intervals.append(depths_by_span[depth_span])
             cells.append(
                 ProjectiveTraceTileTimeCell(
                     tile_u=int(cell.tile_u),
