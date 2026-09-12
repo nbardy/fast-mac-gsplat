@@ -164,17 +164,13 @@ def slice_projective_trace_cell_atlas_frames(
         if overlap_stop <= overlap_start:
             continue
         clipped_cells.append(
-            replace(
-                cell,
-                start=overlap_start - int(start),
-                stop=overlap_stop - int(start),
-            )
+            (cell, overlap_start - int(start), overlap_stop - int(start))
         )
 
     source_trace_indices = sorted(
         {
             int(trace_id)
-            for cell in clipped_cells
+            for cell, _, _ in clipped_cells
             for trace_id in (*cell.primitive_ids, *cell.ordered_primitive_ids)
         }
     )
@@ -185,6 +181,8 @@ def slice_projective_trace_cell_atlas_frames(
     cells = [
         replace(
             cell,
+            start=clipped_start,
+            stop=clipped_stop,
             primitive_ids=tuple(
                 trace_id_map[int(value)] for value in cell.primitive_ids
             ),
@@ -192,7 +190,7 @@ def slice_projective_trace_cell_atlas_frames(
                 trace_id_map[int(value)] for value in cell.ordered_primitive_ids
             ),
         )
-        for cell in clipped_cells
+        for cell, clipped_start, clipped_stop in clipped_cells
     ]
 
     active_start = []
