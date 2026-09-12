@@ -4316,8 +4316,13 @@ def render_projective_trace_cell_atlas_reference(
     transmittance_cutoff: float = 0.0,
     allow_fallback_cells: bool = False,
     fallback_sort_live_depth: bool = True,
+    fallback_tiles_only: bool = False,
 ) -> Tensor:
-    """Reference renderer for packed cell-local polynomial traces."""
+    """Reference renderer for packed cell-local polynomial traces.
+
+    ``fallback_tiles_only`` leaves other tile samples zero. Selected tiles still
+    collect every contributing cell, including cells not marked as fallback.
+    """
 
     _check_projective_trace_render_inputs(atlas.coeffs, times, atlas.color, atlas.opacity)
     if image_width <= 0 or image_height <= 0:
@@ -4371,6 +4376,8 @@ def render_projective_trace_cell_atlas_reference(
 
     ordered_by_key: dict[tuple[int, int, int], tuple[int, ...]] = {}
     for key, entries in entries_by_key.items():
+        if fallback_tiles_only and key not in fallback_keys:
+            continue
         if key in fallback_keys and fallback_sort_live_depth:
             sample_index, _tile_u, _tile_v = key
 

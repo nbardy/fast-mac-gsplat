@@ -979,7 +979,7 @@ class ProjectiveCellIntervalTrainerState:
                 dtype=self.atlas.color.dtype,
                 device=self.atlas.color.device,
             )
-        reference = self.render_reference_with_fallback().to(device=fast.device)
+        reference = self.render_reference_with_fallback(fallback_tiles_only=True).to(device=fast.device)
         fallback_mask = projective_trace_cell_atlas_fallback_tile_sample_mask(
             self.atlas,
             frames=int(self.times.numel()),
@@ -1015,7 +1015,7 @@ class ProjectiveCellIntervalTrainerState:
             max_cells_per_active_set_group=max_cells_per_active_set_group,
         )
 
-    def render_reference_with_fallback(self) -> Tensor:
+    def render_reference_with_fallback(self, *, fallback_tiles_only: bool = False) -> Tensor:
         return render_projective_trace_cell_atlas_reference(
             self.atlas,
             self.times,
@@ -1027,6 +1027,7 @@ class ProjectiveCellIntervalTrainerState:
             transmittance_cutoff=float(self.config.transmittance_threshold),
             allow_fallback_cells=True,
             fallback_sort_live_depth=True,
+            fallback_tiles_only=fallback_tiles_only,
         )
 
     def refresh(self, *, force: bool = False) -> ProjectiveCellIntervalAtlasRefresh:
