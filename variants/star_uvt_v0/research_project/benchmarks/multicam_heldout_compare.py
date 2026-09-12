@@ -351,6 +351,28 @@ def frozen_world_timing_summary(samples: list[float]) -> dict[str, float | int]:
     }
 
 
+def write_json_atomic(path: Path, payload: Any) -> Path:
+    """Durably replace one JSON artifact without exposing a partial file."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump(
+                serialize_config_value(payload),
+                handle,
+                indent=2,
+                sort_keys=True,
+            )
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return path
+
+
 def resolve_dynaworld_path(path: str | Path) -> Path:
     value = Path(path)
     if value.is_absolute():
@@ -6744,6 +6766,31 @@ def main() -> None:
         spd4_min_spatial_scale=args.uvt_spd4_min_spatial_scale,
         spd4_init_precision_z=args.uvt_spd4_init_precision_z,
     )
+    # Save the learned state and optimizer-run evidence before evaluation can
+    # fail (for example, on overflow in a previously unsampled view/time).
+    final_world_checkpoint = (
+        _save_frozen_world_checkpoint(
+            uvt_model,
+            out_dir / (
+                "world_tubes_training_final_state.pt"
+                if args.frozen_world_replay_compiled
+                else "world_tubes_frozen_final_state.pt"
+            ),
+            frame_count=int(bundle.frame_count),
+            representation=uvt_model.representation_name,
+        )
+        if args.uvt_world_representation == "legacy_tube"
+        else None
+    )
+    write_json_atomic(
+        out_dir / "world_tubes_training_result.json",
+        {
+            "meta": run_meta,
+            "training": uvt_train,
+            "final_world_checkpoint": final_world_checkpoint,
+            "evaluation_status": "not_started_at_checkpoint_save",
+        },
+    )
     uvt_eval = eval_world_tubes(
         uvt_model,
         bundle,
@@ -6908,6 +6955,7 @@ def main() -> None:
         "meta": run_meta,
         "star_uvt": {
             "tube_count": args.uvt_tubes,
+            "final_world_checkpoint": final_world_checkpoint,
             "world_representation": args.uvt_world_representation,
             "alpha_mode": render_config.alpha_mode,
             "opacity_semantics": render_config.opacity_semantics,

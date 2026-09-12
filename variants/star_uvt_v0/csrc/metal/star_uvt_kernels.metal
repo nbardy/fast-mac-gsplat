@@ -875,6 +875,54 @@ inline Bounds3i tube_bounds(
   return out;
 }
 
+// Restrict the ellipsoid to the discrete frame samples in this temporal tile.
+// Q=[A b; b^T c] gives center=m_uv-A^-1*b*dt and slice budget
+// tau-(c-b^T*A^-1*b)*dt^2. Lifetime boxes can include mostly empty slices.
+inline Bounds3i tube_slice_bounds(
+    const device float* ma, const device float* q, const device float* opacity,
+    uint tube_id, int first, int last, Bounds3i broad,
+    constant MetaI32& mi, constant MetaF32& mf) {
+  uint i = tube_id * 6u;
+  float a = q[i], b = q[i + 1u], d = q[i + 3u];
+  float det = a * d - b * b;
+  float relative_error = 8.0e-7f * (abs(a * d) + b * b) / det;
+  if (!(a > 0.0f && d > 0.0f && det > 0.0f) ||
+      !isfinite(relative_error) || relative_error > 0.01f) return broad;
+  float2 inv_diag = float2(d, a) / det;
+  float off = -b / det;
+  float2 cross = float2(q[i + 2u], q[i + 4u]);
+  float2 velocity = -float2(inv_diag.x * cross.x + off * cross.y,
+                            off * cross.x + inv_diag.y * cross.y);
+  float2 velocity_error = relative_error * float2(
+      abs(inv_diag.x * cross.x) + abs(off * cross.y),
+      abs(off * cross.x) + abs(inv_diag.y * cross.y));
+  float lambda = q[i + 5u] + dot(cross, velocity);
+  if (!(lambda > 0.0f) || !all(isfinite(velocity))) return broad;
+  float lambda_error = dot(abs(cross), velocity_error) +
+      4.0e-6f * (abs(q[i + 5u]) + dot(abs(cross), abs(velocity)));
+  float tau = -2.0f * log(max(primitive_support_numerator(mf) /
+                            max(opacity[tube_id], mf.eps), mf.eps));
+  float3 m = load3(ma, tube_id);
+  Bounds3i out = broad;
+  out.x0 = mi.width; out.x1 = -1; out.y0 = mi.height; out.y1 = -1;
+  first = max(first, broad.f0); last = min(last, broad.f1);
+  for (int f = first; f <= last; ++f) {
+    float dt = frame_time(uint(f), mi) - m.z;
+    float budget = tau - (lambda - lambda_error) * dt * dt +
+                   4.0e-6f * (abs(tau) + 1.0f);
+    if (budget < 0.0f) continue;
+    float2 center = m.xy + velocity * dt;
+    float2 radius = sqrt(max(budget * inv_diag * (1.0f + relative_error), float2(0.0f))) +
+        velocity_error * abs(dt) + 4.0e-6f * (abs(m.xy) + abs(velocity * dt) + 1.0f);
+    if (!all(isfinite(center)) || !all(isfinite(radius))) return broad;
+    out.x0 = min(out.x0, max(0, int(floor(center.x - radius.x - 0.5f))));
+    out.x1 = max(out.x1, min(mi.width - 1, int(ceil(center.x + radius.x - 0.5f))));
+    out.y0 = min(out.y0, max(0, int(floor(center.y - radius.y - 0.5f))));
+    out.y1 = max(out.y1, min(mi.height - 1, int(ceil(center.y + radius.y - 0.5f))));
+  }
+  return out;
+}
+
 inline uint encode_tile(uint tx, uint ty, uint tz, constant MetaI32& mi) {
   return (tz * uint(mi.tiles_y) + ty) * uint(mi.tiles_x) + tx;
 }
@@ -1842,14 +1890,15 @@ kernel void bin_screen_tubes_to_uvt_tiles(
   Bounds3i b = tube_bounds(ma, q_uvt, opacity, tube_id, mi, mf);
   if (b.x0 > b.x1 || b.y0 > b.y1 || b.f0 > b.f1) return;
 
-  uint tx0 = uint(b.x0 / mi.tile_x);
-  uint tx1 = uint(b.x1 / mi.tile_x);
-  uint ty0 = uint(b.y0 / mi.tile_y);
-  uint ty1 = uint(b.y1 / mi.tile_y);
   uint tz0 = uint(b.f0 / mi.tile_t);
   uint tz1 = uint(b.f1 / mi.tile_t);
 
   for (uint tz = tz0; tz <= tz1; ++tz) {
+    Bounds3i slice = tube_slice_bounds(ma, q_uvt, opacity, tube_id,
+        int(tz) * mi.tile_t, (int(tz) + 1) * mi.tile_t - 1, b, mi, mf);
+    if (slice.x0 > slice.x1 || slice.y0 > slice.y1) continue;
+    uint tx0 = uint(slice.x0 / mi.tile_x), tx1 = uint(slice.x1 / mi.tile_x);
+    uint ty0 = uint(slice.y0 / mi.tile_y), ty1 = uint(slice.y1 / mi.tile_y);
     for (uint ty = ty0; ty <= ty1; ++ty) {
       for (uint tx = tx0; tx <= tx1; ++tx) {
         uint tile_id = encode_tile(tx, ty, tz, mi);
@@ -1891,14 +1940,15 @@ kernel void bin_screen_tubes_to_uvt_tiles_gated(
   b.f1 = min(b.f1, stop - 1);
   if (b.x0 > b.x1 || b.y0 > b.y1 || b.f0 > b.f1) return;
 
-  uint tx0 = uint(b.x0 / mi.tile_x);
-  uint tx1 = uint(b.x1 / mi.tile_x);
-  uint ty0 = uint(b.y0 / mi.tile_y);
-  uint ty1 = uint(b.y1 / mi.tile_y);
   uint tz0 = uint(b.f0 / mi.tile_t);
   uint tz1 = uint(b.f1 / mi.tile_t);
 
   for (uint tz = tz0; tz <= tz1; ++tz) {
+    Bounds3i slice = tube_slice_bounds(ma, q_uvt, opacity, tube_id,
+        int(tz) * mi.tile_t, (int(tz) + 1) * mi.tile_t - 1, b, mi, mf);
+    if (slice.x0 > slice.x1 || slice.y0 > slice.y1) continue;
+    uint tx0 = uint(slice.x0 / mi.tile_x), tx1 = uint(slice.x1 / mi.tile_x);
+    uint ty0 = uint(slice.y0 / mi.tile_y), ty1 = uint(slice.y1 / mi.tile_y);
     for (uint ty = ty0; ty <= ty1; ++ty) {
       for (uint tx = tx0; tx <= tx1; ++tx) {
         uint tile_id = encode_tile(tx, ty, tz, mi);
