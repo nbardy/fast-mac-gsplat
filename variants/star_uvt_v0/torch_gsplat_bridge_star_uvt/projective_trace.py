@@ -1669,8 +1669,9 @@ def uvt_tubes_to_projective_trace_cell_atlas(
     isotropic ``sigma_px`` shape, but callers may opt into anisotropic spatial
     lowering by setting ``require_isotropic_spatial=False``. When
     ``auto_support_padding_from_alpha`` is enabled with a positive
-    ``alpha_threshold``, the support index is padded by the conservative square
-    bound of the anisotropic alpha ellipse. Temporal opacity is stored as a
+    ``alpha_threshold``, each trace is padded by its own conservative axis
+    bounds of the anisotropic alpha ellipse over the supplied sample times.
+    Temporal opacity is stored as a
     per-trace quadratic envelope so spacetime tubes do not have to collapse
     their time support into a hard interval gate.
     """
@@ -1783,7 +1784,7 @@ def uvt_tubes_to_projective_trace_cell_atlas(
         -0.5 * temporal_precision.reshape(-1, 1) * (time_grid - ma[:, 2:3]).square()
     )
     effective_opacity = opacity.reshape(-1, 1) * temporal_envelope
-    support_uv_padding = float(uv_padding)
+    trace_uv_padding = None
     if auto_support_padding_from_alpha and alpha_threshold > 0.0 and tube_count > 0:
         max_effective_opacity = effective_opacity.detach().amax(dim=1)
         radius2 = (
@@ -1794,8 +1795,7 @@ def uvt_tubes_to_projective_trace_cell_atlas(
         ).clamp_min(0.0)
         support_u = torch.sqrt((radius2 * inv00.detach().clamp_min(0.0)).clamp_min(0.0))
         support_v = torch.sqrt((radius2 * inv11.detach().clamp_min(0.0)).clamp_min(0.0))
-        auto_padding = torch.stack((support_u, support_v), dim=0).amax()
-        support_uv_padding = max(support_uv_padding, float(auto_padding.detach().cpu().item()))
+        trace_uv_padding = torch.stack((support_u, support_v), dim=1)
 
     for tube_id in range(tube_count):
         if alpha_threshold > 0.0:
@@ -1899,7 +1899,8 @@ def uvt_tubes_to_projective_trace_cell_atlas(
         image_width=image_width,
         image_height=image_height,
         tile_size=tile_size,
-        uv_padding=support_uv_padding,
+        uv_padding=uv_padding,
+        trace_uv_padding=None if trace_uv_padding is None else trace_uv_padding[source_rows],
         depth_padding=depth_padding,
         root_epsilon=root_epsilon,
     )
@@ -4130,10 +4131,16 @@ def rebin_projective_trace_cell_atlas_support_events(
     image_height: int,
     tile_size: int,
     uv_padding: float = 0.0,
+    trace_uv_padding: Tensor | None = None,
     depth_padding: float = 0.0,
     root_epsilon: float = 1.0e-6,
 ) -> ProjectiveTraceCellTraceAtlas:
-    """Rebuild support cells with continuous tile-boundary split points."""
+    """Rebuild support cells with continuous tile-boundary split points.
+
+    Optional [N,2] UV radii bound each trace separately; ``uv_padding`` remains
+    a minimum on both axes. A wide trace must not inflate every other trace's
+    tile list. The same radii drive event roots and interval support boxes.
+    """
 
     if image_width <= 0 or image_height <= 0:
         raise ValueError("image dimensions must be positive")
@@ -4148,6 +4155,15 @@ def rebin_projective_trace_cell_atlas_support_events(
     _validate_projective_trace_cell_atlas_metadata(atlas)
 
     coeffs_cpu = atlas.coeffs.detach().cpu().contiguous()
+    if trace_uv_padding is None:
+        padding = [(float(uv_padding), float(uv_padding))] * int(coeffs_cpu.shape[0])
+    else:
+        if trace_uv_padding.shape != (int(coeffs_cpu.shape[0]), 2):
+            raise ValueError("trace_uv_padding must have shape [N,2]")
+        radii = trace_uv_padding.detach().cpu()
+        if not bool(torch.all(torch.isfinite(radii) & (radii >= 0.0))):
+            raise ValueError("trace_uv_padding must be finite and non-negative")
+        padding = radii.clamp_min(float(uv_padding)).tolist()
     times_cpu = times.detach().cpu().contiguous()
     if times_cpu.ndim != 1:
         raise ValueError("times must have shape [S]")
@@ -4164,6 +4180,7 @@ def rebin_projective_trace_cell_atlas_support_events(
     records: list[ProjectiveTraceTileTimeRecord] = []
 
     for trace_id in range(int(coeffs_cpu.shape[0])):
+        padding_u, padding_v = padding[trace_id]
         active_start = int(atlas.active_start[trace_id])
         active_stop = int(atlas.active_stop[trace_id])
         if active_start < 0 or active_stop > frame_count or active_start >= active_stop:
@@ -4173,8 +4190,8 @@ def rebin_projective_trace_cell_atlas_support_events(
         if active_stop - active_start >= 2:
             t_min = float(times_cpu[active_start].item())
             t_max = float(times_cpu[active_stop - 1].item())
-            for axis_offset, tile_boundaries in axes:
-                for _side, signed_padding in _axis_support_sides(float(uv_padding)):
+            for (axis_offset, tile_boundaries), axis_padding in zip(axes, (padding_u, padding_v)):
+                for _side, signed_padding in _axis_support_sides(axis_padding):
                     for boundary in tile_boundaries:
                         for root in _cell_trace_axis_roots_for_boundary(
                             coeffs_cpu,
@@ -4204,10 +4221,10 @@ def rebin_projective_trace_cell_atlas_support_events(
             v_min, v_max = _quadratic_value_range_over_interval(coeffs_cpu[trace_id, 3:6], t_min=t_min, t_max=t_max)
             depth_min, depth_max = _quadratic_value_range_over_interval(coeffs_cpu[trace_id, 6:9], t_min=t_min, t_max=t_max)
             tile_range = _projective_trace_support_tiles(
-                u_min=u_min - float(uv_padding),
-                u_max=u_max + float(uv_padding),
-                v_min=v_min - float(uv_padding),
-                v_max=v_max + float(uv_padding),
+                u_min=u_min - padding_u,
+                u_max=u_max + padding_u,
+                v_min=v_min - padding_v,
+                v_max=v_max + padding_v,
                 image_width=image_width,
                 image_height=image_height,
                 tile_size=tile_size,
