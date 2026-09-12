@@ -558,10 +558,14 @@ inline void composite_projective_cell_trace(
 inline float projective_cell_opacity_time_scale(
     const device float* opacity_time_coeffs,
     uint trace_id,
-    float t) {
+    float t,
+    bool centered) {
   float t2 = t * t;
   uint c = trace_id * 3u;
-  float qv = opacity_time_coeffs[c + 0u] + opacity_time_coeffs[c + 1u] * t + opacity_time_coeffs[c + 2u] * t2;
+  float dt = t - opacity_time_coeffs[c + 1u];
+  float qv = centered
+      ? opacity_time_coeffs[c + 0u] + opacity_time_coeffs[c + 2u] * dt * dt
+      : opacity_time_coeffs[c + 0u] + opacity_time_coeffs[c + 1u] * t + opacity_time_coeffs[c + 2u] * t2;
   return exp(-0.5f * qv);
 }
 
@@ -598,13 +602,14 @@ inline void composite_projective_cell_trace_with_time_opacity(
     const device float* color,
     constant MetaF32& mf,
     thread float3& accum,
-    thread float& transmittance) {
+    thread float& transmittance,
+    bool centered) {
   float u;
   float v;
   float depth;
   if (!eval_projective_cell_trace_point(coeffs, trace_id, t, u, v, depth)) return;
   float2 d = pixel_center - float2(u, v);
-  float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, trace_id, t);
+  float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, trace_id, t, centered);
   float radius2 = projective_cell_precision_radius2(spatial_precision_uv, trace_id, d);
   float density = time_scale * exp(-0.5f * radius2);
   float alpha = min(mf.max_alpha, primitive_alpha_raw(opacity[trace_id], density, mf));
@@ -762,7 +767,7 @@ inline void composite_projective_family_cell_trace_with_time_opacity(
           family_coeffs, q_basis, global_trace_id, base_trace_count, basis_count, t, u, v, depth)) return;
   uint base_trace_id = global_trace_id % base_trace_count;
   float2 d = pixel_center - float2(u, v);
-  float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, base_trace_id, t);
+  float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, base_trace_id, t, false);
   float radius2 = projective_cell_precision_radius2(spatial_precision_uv, base_trace_id, d);
   float density = time_scale * exp(-0.5f * radius2);
   float alpha = min(mf.max_alpha, primitive_alpha_raw(opacity[base_trace_id], density, mf));
@@ -2316,7 +2321,7 @@ kernel void render_projective_trace_cell_interval_tiles(
     uint trace_id = select_projective_cell_order_id_interval(
         tile_trace_ids, tile_active_start, tile_active_stop, tile_id, count, coeffs, depth_affine_uv, pixel_center, f, t, last_depth, last_id, selected_depth);
     if (trace_id == 0xFFFFFFFFu || trace_id >= uint(mi.tube_count)) break;
-    composite_projective_cell_trace_with_time_opacity(trace_id, pixel_center, t, coeffs, opacity, opacity_time_coeffs, spatial_precision_uv, color, mf, accum, T);
+    composite_projective_cell_trace_with_time_opacity(trace_id, pixel_center, t, coeffs, opacity, opacity_time_coeffs, spatial_precision_uv, color, mf, accum, T, mi.reserved0 != 0);
     last_depth = selected_depth;
     last_id = trace_id;
     if (T <= mf.transmittance_threshold) break;
@@ -2465,7 +2470,7 @@ kernel void render_projective_trace_cell_interval_rows(
       uint trace_id = select_projective_cell_order_id_interval(
           tile_trace_ids, tile_active_start, tile_active_stop, tile_id, count, coeffs, depth_affine_uv, pixel_center, f, t, last_depth, last_id, selected_depth);
       if (trace_id == 0xFFFFFFFFu || trace_id >= uint(mi.tube_count)) break;
-      composite_projective_cell_trace_with_time_opacity(trace_id, pixel_center, t, coeffs, opacity, opacity_time_coeffs, spatial_precision_uv, color, mf, accum, T);
+      composite_projective_cell_trace_with_time_opacity(trace_id, pixel_center, t, coeffs, opacity, opacity_time_coeffs, spatial_precision_uv, color, mf, accum, T, mi.reserved0 != 0);
       last_depth = selected_depth;
       last_id = trace_id;
       if (T <= mf.transmittance_threshold) break;
@@ -2559,7 +2564,7 @@ kernel void direct_atomic_projective_cell_interval_backward(
     float2 d = pixel_center - float2(u, v);
     float radius2 = projective_cell_precision_radius2(spatial_precision_uv, trace_id, d);
     float exp_term = exp(-0.5f * radius2);
-    float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, trace_id, t);
+    float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, trace_id, t, mi.reserved0 != 0);
     float alpha_raw = primitive_alpha_raw(opacity[trace_id], time_scale * exp_term, mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
@@ -2598,7 +2603,7 @@ kernel void direct_atomic_projective_cell_interval_backward(
     float2 d = pixel_center - float2(u, v);
     float radius2 = projective_cell_precision_radius2(spatial_precision_uv, trace_id, d);
     float exp_term = exp(-0.5f * radius2);
-    float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, trace_id, t);
+    float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, trace_id, t, mi.reserved0 != 0);
     float density = time_scale * exp_term;
     float alpha_shape_scale = -2.0f * d_alpha * primitive_alpha_d_qv(opacity[trace_id], density, mf);
     float2 center_grad = projective_cell_precision_center_grad(spatial_precision_uv, trace_id, d);
@@ -2618,9 +2623,13 @@ kernel void direct_atomic_projective_cell_interval_backward(
         d_alpha * primitive_alpha_d_opacity(opacity[trace_id], density, mf),
         memory_order_relaxed);
     uint time_coeff_base = trace_id * 3u;
-    atomic_fetch_add_explicit(&grad_opacity_time_coeffs[time_coeff_base + 0u], grad_time * basis0, memory_order_relaxed);
-    atomic_fetch_add_explicit(&grad_opacity_time_coeffs[time_coeff_base + 1u], grad_time * basis1, memory_order_relaxed);
-    atomic_fetch_add_explicit(&grad_opacity_time_coeffs[time_coeff_base + 2u], grad_time * basis2, memory_order_relaxed);
+    // Contract in the centered basis before atomic accumulation. Recovering
+    // lambda via t0^2*g0 - 2*t0*g1 + g2 amplifies independent rounding noise.
+    float dt = t - opacity_time_coeffs[time_coeff_base + 1u];
+    float3 time_basis = mi.reserved0 != 0
+        ? float3(1.0f, -2.0f * opacity_time_coeffs[time_coeff_base + 2u] * dt, dt * dt)
+        : float3(basis0, basis1, basis2);
+    atomic_add3(grad_opacity_time_coeffs, time_coeff_base, grad_time * time_basis);
     uint precision_base = trace_id * 3u;
     atomic_fetch_add_explicit(&grad_spatial_precision_uv[precision_base + 0u], -0.5f * grad_precision_scale * d.x * d.x, memory_order_relaxed);
     atomic_fetch_add_explicit(&grad_spatial_precision_uv[precision_base + 1u], -grad_precision_scale * d.x * d.y, memory_order_relaxed);
@@ -2730,7 +2739,7 @@ kernel void direct_atomic_projective_family_cell_interval_backward(
     float2 d = pixel_center - float2(u, v);
     float radius2 = projective_cell_precision_radius2(spatial_precision_uv, base_trace_id, d);
     float exp_term = exp(-0.5f * radius2);
-    float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, base_trace_id, t);
+    float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, base_trace_id, t, false);
     float alpha_raw = primitive_alpha_raw(opacity[base_trace_id], time_scale * exp_term, mf);
     float alpha = min(mf.max_alpha, alpha_raw);
     if (!(alpha >= mf.alpha_threshold)) continue;
@@ -2776,7 +2785,7 @@ kernel void direct_atomic_projective_family_cell_interval_backward(
     float2 d = pixel_center - float2(u, v);
     float radius2 = projective_cell_precision_radius2(spatial_precision_uv, base_trace_id, d);
     float exp_term = exp(-0.5f * radius2);
-    float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, base_trace_id, t);
+    float time_scale = projective_cell_opacity_time_scale(opacity_time_coeffs, base_trace_id, t, false);
     float density = time_scale * exp_term;
     float alpha_shape_scale = -2.0f * d_alpha * primitive_alpha_d_qv(opacity[base_trace_id], density, mf);
     float2 center_grad = projective_cell_precision_center_grad(spatial_precision_uv, base_trace_id, d);

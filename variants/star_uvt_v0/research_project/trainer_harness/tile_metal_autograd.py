@@ -840,6 +840,7 @@ class ProjectiveCellIntervalStaticAtlas:
     spatial_precision_uv: Tensor | None = None
     depth_affine_uv: Tensor | None = None
     depth_reference_uvt: Tensor | None = None
+    opacity_time_centered: bool = False
 
 
 @dataclass(frozen=True)
@@ -1077,6 +1078,7 @@ def _static_projective_cell_atlas(atlas: ProjectiveTraceCellTraceAtlas) -> Proje
         spatial_precision_uv=atlas.spatial_precision_uv,
         depth_affine_uv=atlas.depth_affine_uv,
         depth_reference_uvt=atlas.depth_reference_uvt,
+        opacity_time_centered=atlas.opacity_time_centered,
     )
 
 
@@ -1220,6 +1222,7 @@ def refresh_projective_cell_interval_atlas_if_stale(
             spatial_precision_uv=template_atlas.spatial_precision_uv,
             depth_affine_uv=template_atlas.depth_affine_uv,
             depth_reference_uvt=template_atlas.depth_reference_uvt,
+            opacity_time_centered=template_atlas.opacity_time_centered,
         )
 
     def _mix_target_and_base_tiles(
@@ -1470,7 +1473,11 @@ def refresh_projective_cell_interval_atlas_if_stale(
         coeffs = current_atlas.opacity_time_coeffs.detach().cpu().to(dtype=torch.float32).contiguous()
         times_cpu = times.detach().cpu().to(dtype=torch.float32).contiguous()
         t = times_cpu.reshape(1, -1)
-        qv = coeffs[:, 0:1] + coeffs[:, 1:2] * t + coeffs[:, 2:3] * t.square()
+        qv = (
+            coeffs[:, 0:1] + coeffs[:, 2:3] * (t - coeffs[:, 1:2]).square()
+            if current_atlas.opacity_time_centered
+            else coeffs[:, 0:1] + coeffs[:, 1:2] * t + coeffs[:, 2:3] * t.square()
+        )
         scale = torch.exp(-0.5 * qv).amax(dim=1)
         return (opacity * scale).clamp(max=1.0)
 
@@ -1862,6 +1869,7 @@ def _materialize_projective_cell_atlas(
         spatial_precision_uv=spatial_precision_uv if static_atlas.spatial_precision_uv is not None else None,
         depth_affine_uv=static_atlas.depth_affine_uv,
         depth_reference_uvt=static_atlas.depth_reference_uvt,
+        opacity_time_centered=static_atlas.opacity_time_centered,
     )
 
 

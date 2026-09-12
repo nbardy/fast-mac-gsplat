@@ -140,6 +140,8 @@ class ProjectiveTraceCellTraceAtlas:
     # Original [ma_u,ma_v,ma_t,depth0,beta_u,beta_v,beta_t] for UVT fallback ordering.
     # It must be regenerated with the UVT projection when the world changes.
     depth_reference_uvt: Tensor | None = None
+    # False: c0+c1*t+c2*t^2. True: c0+c2*(t-c1)^2.
+    opacity_time_centered: bool = False
 
 
 def slice_projective_trace_cell_atlas_frames(
@@ -1713,8 +1715,8 @@ def uvt_tubes_to_projective_trace_cell_atlas(
         raise ValueError("temporal_precision_atol must be non-negative")
     if not isinstance(allow_depth_affine_uv, bool):
         raise ValueError("allow_depth_affine_uv must be boolean")
-    if temporal_mode not in {"trace", "gate", "require_zero"}:
-        raise ValueError("temporal_mode must be one of: trace, gate, require_zero")
+    if temporal_mode not in {"trace", "gate", "require_zero", "centered"}:
+        raise ValueError("temporal_mode must be one of: trace, gate, require_zero, centered")
 
     tensors = (q_uvt, depth0, depth_beta, opacity, color, times)
     for name, tensor in zip(("q_uvt", "depth0", "depth_beta", "opacity", "color", "times"), tensors):
@@ -1836,8 +1838,8 @@ def uvt_tubes_to_projective_trace_cell_atlas(
         opacity_time_coeff_parts.append(
             torch.stack(
                 (
-                    temporal_lambda * t_center.square(),
-                    -2.0 * temporal_lambda * t_center,
+                    torch.zeros_like(t_center) if temporal_mode == "centered" else temporal_lambda * t_center.square(),
+                    t_center if temporal_mode == "centered" else -2.0 * temporal_lambda * t_center,
                     temporal_lambda,
                 )
             ).reshape(1, 3)
@@ -1887,6 +1889,7 @@ def uvt_tubes_to_projective_trace_cell_atlas(
         active_start=tuple(active_start),
         active_stop=tuple(active_stop),
         opacity_time_coeffs=opacity_time_coeffs,
+        opacity_time_centered=temporal_mode == "centered",
         spatial_precision_uv=spatial_precision_uv,
         depth_affine_uv=depth_affine_uv,
         depth_reference_uvt=torch.cat((ma, depth0[:, None], depth_beta), dim=1).index_select(
@@ -1924,6 +1927,8 @@ def uvt_tubes_to_projective_trace_cell_atlas(
 
 def _validate_projective_trace_cell_atlas_metadata(atlas: ProjectiveTraceCellTraceAtlas) -> None:
     trace_count = int(atlas.coeffs.shape[0])
+    if not isinstance(atlas.opacity_time_centered, bool):
+        raise ValueError("opacity_time_centered must be boolean")
     for name, values in (
         ("source_window_indices", atlas.source_window_indices),
         ("source_primitive_ids", atlas.source_primitive_ids),
@@ -2043,7 +2048,11 @@ def _cell_opacity_time_scale(atlas: ProjectiveTraceCellTraceAtlas, times: Tensor
     if times.dtype != torch.float32 or times.device != coeffs.device:
         raise ValueError("times must be float32 and on the same device as opacity_time_coeffs")
     t = times.reshape(1, -1)
-    qv = coeffs[:, 0:1] + coeffs[:, 1:2] * t + coeffs[:, 2:3] * t.square()
+    qv = (
+        coeffs[:, 0:1] + coeffs[:, 2:3] * (t - coeffs[:, 1:2]).square()
+        if atlas.opacity_time_centered
+        else coeffs[:, 0:1] + coeffs[:, 1:2] * t + coeffs[:, 2:3] * t.square()
+    )
     return torch.exp(-0.5 * qv)
 
 
@@ -2294,6 +2303,8 @@ def _cell_atlas_has_nonzero_temporal_opacity(atlas: ProjectiveTraceCellTraceAtla
     coeffs = _cell_opacity_time_coeffs(atlas)
     if coeffs is None:
         return False
+    if atlas.opacity_time_centered:
+        coeffs = coeffs[:, [0, 2]]
     return bool(torch.any(coeffs.detach().abs() > 0.0).cpu().item())
 
 
@@ -5030,6 +5041,7 @@ def _projective_trace_cell_atlas_detached_cpu(atlas: ProjectiveTraceCellTraceAtl
         opacity=atlas.opacity.detach().cpu().contiguous(),
         color=atlas.color.detach().cpu().contiguous(),
         cells=atlas.cells,
+        opacity_time_centered=atlas.opacity_time_centered,
         source_window_indices=atlas.source_window_indices,
         source_primitive_ids=atlas.source_primitive_ids,
         active_start=atlas.active_start,
@@ -5631,7 +5643,7 @@ def _require_peak_splat_projective_alpha(config) -> None:
         )
 
 
-def _make_projective_interval_meta(config, device: torch.device, trace_count: int) -> tuple[Tensor, Tensor]:
+def _make_projective_interval_meta(config, device: torch.device, trace_count: int, *, opacity_time_centered: bool = False) -> tuple[Tensor, Tensor]:
     _require_peak_splat_projective_alpha(config)
     if int(config.height) <= 0 or int(config.width) <= 0 or int(config.frames) <= 0:
         raise ValueError("height, width, and frames must be positive")
@@ -5658,7 +5670,7 @@ def _make_projective_interval_meta(config, device: torch.device, trace_count: in
             tile_count,
             int(trace_count),
             int(config.tile_capacity),
-            0,
+            int(opacity_time_centered),
             0,
         ],
         device=device,
@@ -5871,7 +5883,7 @@ def render_projective_trace_cell_interval_atlas_metal(
     if bool(torch.any(bins.tile_overflow > 0).item()):
         raise ValueError("packed projective interval atlas tile capacity overflow")
 
-    meta_i32, meta_f32 = _make_projective_interval_meta(config, atlas.coeffs.device, int(atlas.coeffs.shape[0]))
+    meta_i32, meta_f32 = _make_projective_interval_meta(config, atlas.coeffs.device, int(atlas.coeffs.shape[0]), opacity_time_centered=atlas.opacity_time_centered)
     return torch.ops.star_uvt_v0.render_projective_trace_cell_interval_tiles(
         atlas.coeffs.contiguous(),
         times.contiguous(),
@@ -6166,7 +6178,7 @@ def render_projective_trace_cell_interval_atlas_rows_metal(
     if bool(torch.any(bins.tile_overflow > 0).item()):
         raise ValueError("packed projective interval row atlas tile capacity overflow")
 
-    meta_i32, meta_f32 = _make_projective_interval_meta(config, atlas.coeffs.device, int(atlas.coeffs.shape[0]))
+    meta_i32, meta_f32 = _make_projective_interval_meta(config, atlas.coeffs.device, int(atlas.coeffs.shape[0]), opacity_time_centered=atlas.opacity_time_centered)
     return torch.ops.star_uvt_v0.render_projective_trace_cell_interval_rows(
         atlas.coeffs.contiguous(),
         times.contiguous(),
@@ -6314,7 +6326,7 @@ def direct_backward_projective_trace_cell_interval_atlas_metal(
     if bool(torch.any(bins.tile_overflow > 0).item()):
         raise ValueError("packed projective interval atlas tile capacity overflow")
 
-    meta_i32, meta_f32 = _make_projective_interval_meta(config, atlas.coeffs.device, int(atlas.coeffs.shape[0]))
+    meta_i32, meta_f32 = _make_projective_interval_meta(config, atlas.coeffs.device, int(atlas.coeffs.shape[0]), opacity_time_centered=atlas.opacity_time_centered)
     grad_coeffs, grad_opacity, grad_opacity_time_coeffs, grad_spatial_precision_uv, grad_color = torch.ops.star_uvt_v0.direct_projective_trace_cell_interval_backward(
         atlas.coeffs.contiguous(),
         times.contiguous(),

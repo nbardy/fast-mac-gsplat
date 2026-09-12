@@ -3592,6 +3592,7 @@ def _tensor_storage_descriptor(
 
 def _atlas_topology_payload(atlas) -> dict[str, Any]:
     return {
+        **({"opacity_time_centered": True} if atlas.opacity_time_centered else {}),
         "source_window_indices": list(atlas.source_window_indices),
         "source_primitive_ids": list(atlas.source_primitive_ids),
         "active_start": list(atlas.active_start),
@@ -4038,6 +4039,7 @@ def _frozen_compiled_full_vs_sliced_parity(
         tile_size=int(config.tile_x),
         alpha_threshold=float(config.alpha_threshold),
         require_isotropic_spatial=False,
+        temporal_mode="centered",
         auto_support_padding_from_alpha=True,
         allow_depth_affine_uv=True,
         stratify_visibility=True,
@@ -4536,6 +4538,7 @@ def frozen_world_replay_compiled_report(
         tile_size=int(config.tile_x),
         alpha_threshold=float(config.alpha_threshold),
         require_isotropic_spatial=False,
+        temporal_mode="centered",
         auto_support_padding_from_alpha=True,
         allow_depth_affine_uv=True,
         stratify_visibility=True,
@@ -4894,6 +4897,7 @@ def frozen_world_replay_compiled_report(
             tile_size=int(config.tile_x),
             alpha_threshold=float(config.alpha_threshold),
             require_isotropic_spatial=False,
+            temporal_mode="centered",
             auto_support_padding_from_alpha=True,
             allow_depth_affine_uv=True,
             stratify_visibility=True,
