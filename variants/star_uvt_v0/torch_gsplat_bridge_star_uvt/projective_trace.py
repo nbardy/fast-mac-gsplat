@@ -137,6 +137,9 @@ class ProjectiveTraceCellTraceAtlas:
     opacity_time_coeffs: Tensor | None = None
     spatial_precision_uv: Tensor | None = None
     depth_affine_uv: Tensor | None = None
+    # Original [ma_u,ma_v,ma_t,depth0,beta_u,beta_v,beta_t] for UVT fallback ordering.
+    # It must be regenerated with the UVT projection when the world changes.
+    depth_reference_uvt: Tensor | None = None
 
 
 def slice_projective_trace_cell_atlas_frames(
@@ -227,6 +230,7 @@ def slice_projective_trace_cell_atlas_frames(
         opacity_time_coeffs=select_optional(atlas.opacity_time_coeffs),
         spatial_precision_uv=select_optional(atlas.spatial_precision_uv),
         depth_affine_uv=select_optional(atlas.depth_affine_uv),
+        depth_reference_uvt=select_optional(atlas.depth_reference_uvt),
     )
 
 
@@ -1765,6 +1769,7 @@ def uvt_tubes_to_projective_trace_cell_atlas(
     spatial_precision_parts: list[Tensor] = []
     depth_affine_parts: list[Tensor] = []
     source_ids: list[int] = []
+    source_rows: list[int] = []
     active_start: list[int] = []
     active_stop: list[int] = []
 
@@ -1847,6 +1852,7 @@ def uvt_tubes_to_projective_trace_cell_atlas(
                 ).reshape(1, 6)
             )
         source_ids.append(ids[tube_id])
+        source_rows.append(tube_id)
         active_start.append(start)
         active_stop.append(stop)
 
@@ -1878,6 +1884,9 @@ def uvt_tubes_to_projective_trace_cell_atlas(
         opacity_time_coeffs=opacity_time_coeffs,
         spatial_precision_uv=spatial_precision_uv,
         depth_affine_uv=depth_affine_uv,
+        depth_reference_uvt=torch.cat((ma, depth0[:, None], depth_beta), dim=1).index_select(
+            0, torch.tensor(source_rows, dtype=torch.long, device=ma.device)
+        ).contiguous(),
     )
     atlas = rebin_projective_trace_cell_atlas_support_events(
         atlas,
@@ -1949,6 +1958,44 @@ def _validate_projective_trace_cell_atlas_metadata(atlas: ProjectiveTraceCellTra
             raise ValueError("depth_affine_uv must be on the same device as coeffs")
         if not atlas.depth_affine_uv.is_contiguous():
             raise ValueError("depth_affine_uv must be contiguous")
+
+    if atlas.depth_reference_uvt is not None:
+        value = atlas.depth_reference_uvt
+        if value.shape != (trace_count, 7) or value.dtype != torch.float32:
+            raise ValueError("depth_reference_uvt must be float32 [N,7]")
+        if value.device != atlas.coeffs.device or not value.is_contiguous():
+            raise ValueError("depth_reference_uvt must be contiguous on the coeffs device")
+
+
+def _uvt_reference_depth(reference: Tensor, times: Tensor, u, v) -> Tensor:
+    """Use the source-centered expression; expansion can change float32 ties."""
+    delta = torch.stack(torch.broadcast_tensors(
+        torch.as_tensor(u, dtype=reference.dtype, device=reference.device) - reference[:, 0:1],
+        torch.as_tensor(v, dtype=reference.dtype, device=reference.device) - reference[:, 1:2],
+        times.reshape(1, -1) - reference[:, 2:3],
+    ), dim=-1)
+    return reference[:, 3:4] + (reference[:, None, 4:] * delta).sum(dim=-1)
+
+
+def _validate_uvt_reference_depth_coefficients(atlas: ProjectiveTraceCellTraceAtlas) -> None:
+    reference = atlas.depth_reference_uvt
+    if reference is None:
+        return
+    # Direct polynomial optimization must not silently keep old UVT ordering.
+    # Source-world optimization rebuilds these two linked representations.
+    slope = reference[:, 6] + reference[:, 4] * atlas.coeffs[:, 1] + reference[:, 5] * atlas.coeffs[:, 4]
+    zero = torch.zeros_like(slope)
+    expected = torch.stack((
+        reference[:, 0] - atlas.coeffs[:, 1] * reference[:, 2], atlas.coeffs[:, 1], zero,
+        reference[:, 1] - atlas.coeffs[:, 4] * reference[:, 2], atlas.coeffs[:, 4], zero,
+        reference[:, 3] - slope * reference[:, 2], slope, zero,
+    ), dim=-1)
+    matches = torch.equal(expected.detach(), atlas.coeffs.detach())
+    if atlas.depth_affine_uv is not None:
+        spatial = torch.stack((reference[:, 4], zero, zero, reference[:, 5], zero, zero), dim=-1)
+        matches = matches and torch.equal(spatial.detach(), atlas.depth_affine_uv.detach())
+    if not matches:
+        raise ValueError("UVT depth reference is stale; regenerate the UVT projection, or explicitly remove depth_reference_uvt when changing to polynomial depth")
 
 
 def _cell_opacity_time_coeffs(atlas: ProjectiveTraceCellTraceAtlas) -> Tensor | None:
@@ -2069,6 +2116,9 @@ def eval_projective_trace_cell_depth_at_uv_torch(
     """
 
     _validate_projective_trace_cell_atlas_metadata(atlas)
+    if atlas.depth_reference_uvt is not None:
+        _validate_uvt_reference_depth_coefficients(atlas)
+        return _uvt_reference_depth(atlas.depth_reference_uvt, times, u, v)
     dense = eval_projective_trace_cell_torch(atlas.coeffs, times)
     center_u = dense[:, :, 0]
     center_v = dense[:, :, 1]
@@ -2086,6 +2136,8 @@ def eval_projective_trace_cell_depth_at_uv_torch(
 
 
 def _cell_has_nonzero_depth_affine_uv(atlas: ProjectiveTraceCellTraceAtlas) -> bool:
+    if atlas.depth_reference_uvt is not None:
+        return bool(torch.any(atlas.depth_reference_uvt[:, 4:6].detach() != 0).cpu().item())
     coeffs = _cell_depth_affine_uv(atlas)
     if coeffs is None:
         return False
@@ -3327,19 +3379,7 @@ def split_projective_trace_cell_atlas_uv_visibility_events(
                     )
                 )
 
-    return ProjectiveTraceCellTraceAtlas(
-        coeffs=atlas.coeffs,
-        opacity=atlas.opacity,
-        color=atlas.color,
-        cells=sorted(cells, key=lambda cell: (cell.start, cell.stop, cell.tile_v, cell.tile_u)),
-        source_window_indices=atlas.source_window_indices,
-        source_primitive_ids=atlas.source_primitive_ids,
-        active_start=atlas.active_start,
-        active_stop=atlas.active_stop,
-        opacity_time_coeffs=atlas.opacity_time_coeffs,
-        spatial_precision_uv=atlas.spatial_precision_uv,
-        depth_affine_uv=atlas.depth_affine_uv,
-    )
+    return replace(atlas, cells=sorted(cells, key=lambda cell: (cell.start, cell.stop, cell.tile_v, cell.tile_u)))
 
 
 def _uv_visibility_child_tile_candidates(
@@ -3809,19 +3849,7 @@ def stratify_projective_trace_cell_atlas_visibility_events(
                 )
             )
 
-    return ProjectiveTraceCellTraceAtlas(
-        coeffs=atlas.coeffs,
-        opacity=atlas.opacity,
-        color=atlas.color,
-        cells=sorted(cells, key=lambda cell: (cell.start, cell.stop, cell.tile_v, cell.tile_u)),
-        source_window_indices=atlas.source_window_indices,
-        source_primitive_ids=atlas.source_primitive_ids,
-        active_start=atlas.active_start,
-        active_stop=atlas.active_stop,
-        opacity_time_coeffs=atlas.opacity_time_coeffs,
-        spatial_precision_uv=atlas.spatial_precision_uv,
-        depth_affine_uv=atlas.depth_affine_uv,
-    )
+    return replace(atlas, cells=sorted(cells, key=lambda cell: (cell.start, cell.stop, cell.tile_v, cell.tile_u)))
 
 
 def mark_projective_trace_cell_visibility_fallbacks(
@@ -3927,19 +3955,7 @@ def mark_projective_trace_cell_visibility_fallbacks(
         reasons = tuple(sorted((*cell.fallback_reasons, *fallback_reasons_by_cell[cell_index])))
         cells.append(replace(cell, fallback=True, fallback_reasons=reasons))
 
-    return ProjectiveTraceCellTraceAtlas(
-        coeffs=atlas.coeffs,
-        opacity=atlas.opacity,
-        color=atlas.color,
-        cells=cells,
-        source_window_indices=atlas.source_window_indices,
-        source_primitive_ids=atlas.source_primitive_ids,
-        active_start=atlas.active_start,
-        active_stop=atlas.active_stop,
-        opacity_time_coeffs=atlas.opacity_time_coeffs,
-        spatial_precision_uv=atlas.spatial_precision_uv,
-        depth_affine_uv=atlas.depth_affine_uv,
-    )
+    return replace(atlas, cells=cells)
 
 
 def stratify_projective_trace_cell_atlas_visibility(
@@ -4069,19 +4085,7 @@ def stratify_projective_trace_cell_atlas_visibility(
             run_reasons = reasons
         _flush_run()
 
-    return ProjectiveTraceCellTraceAtlas(
-        coeffs=atlas.coeffs,
-        opacity=atlas.opacity,
-        color=atlas.color,
-        cells=sorted(cells, key=lambda cell: (cell.start, cell.stop, cell.tile_v, cell.tile_u)),
-        source_window_indices=atlas.source_window_indices,
-        source_primitive_ids=atlas.source_primitive_ids,
-        active_start=atlas.active_start,
-        active_stop=atlas.active_stop,
-        opacity_time_coeffs=atlas.opacity_time_coeffs,
-        spatial_precision_uv=atlas.spatial_precision_uv,
-        depth_affine_uv=atlas.depth_affine_uv,
-    )
+    return replace(atlas, cells=sorted(cells, key=lambda cell: (cell.start, cell.stop, cell.tile_v, cell.tile_u)))
 
 
 def rebin_projective_trace_cell_atlas_support_events(
@@ -4194,19 +4198,7 @@ def rebin_projective_trace_cell_atlas_support_events(
                 )
             )
 
-    return ProjectiveTraceCellTraceAtlas(
-        coeffs=atlas.coeffs,
-        opacity=atlas.opacity,
-        color=atlas.color,
-        cells=assemble_projective_trace_tile_time_atlas(records),
-        source_window_indices=atlas.source_window_indices,
-        source_primitive_ids=atlas.source_primitive_ids,
-        active_start=atlas.active_start,
-        active_stop=atlas.active_stop,
-        opacity_time_coeffs=atlas.opacity_time_coeffs,
-        spatial_precision_uv=atlas.spatial_precision_uv,
-        depth_affine_uv=atlas.depth_affine_uv,
-    )
+    return replace(atlas, cells=assemble_projective_trace_tile_time_atlas(records))
 
 
 def rebin_projective_trace_cell_atlas(
@@ -4286,19 +4278,7 @@ def rebin_projective_trace_cell_atlas(
             )
         )
 
-    return ProjectiveTraceCellTraceAtlas(
-        coeffs=atlas.coeffs,
-        opacity=atlas.opacity,
-        color=atlas.color,
-        cells=assemble_projective_trace_tile_time_atlas(records),
-        source_window_indices=atlas.source_window_indices,
-        source_primitive_ids=atlas.source_primitive_ids,
-        active_start=atlas.active_start,
-        active_stop=atlas.active_stop,
-        opacity_time_coeffs=atlas.opacity_time_coeffs,
-        spatial_precision_uv=atlas.spatial_precision_uv,
-        depth_affine_uv=atlas.depth_affine_uv,
-    )
+    return replace(atlas, cells=assemble_projective_trace_tile_time_atlas(records))
 
 
 def render_projective_trace_cell_atlas_reference(
@@ -4328,12 +4308,20 @@ def render_projective_trace_cell_atlas_reference(
     if transmittance_cutoff < 0.0:
         raise ValueError("transmittance_cutoff must be non-negative")
     _validate_projective_trace_cell_atlas_metadata(atlas)
+    _validate_uvt_reference_depth_coefficients(atlas)
 
     trace_count = int(atlas.coeffs.shape[0])
     dense = eval_projective_trace_cell_torch(atlas.coeffs, times)
     opacity_time_scale = _cell_opacity_time_scale(atlas, times)
     depth_affine_uv = _cell_depth_affine_uv(atlas)
     use_pixel_depth_fallback_sort = fallback_sort_live_depth and _cell_has_nonzero_depth_affine_uv(atlas)
+    reference_depth = (
+        None if atlas.depth_reference_uvt is None or use_pixel_depth_fallback_sort
+        else _uvt_reference_depth(atlas.depth_reference_uvt, times, 0.0, 0.0)
+    )
+    def source_order_key(trace_id: int) -> tuple[int, int]:
+        return (int(atlas.source_primitive_ids[trace_id]), int(trace_id))
+
     entries_by_key: dict[tuple[int, int, int], list[tuple[int, float, float]]] = {}
     fallback_keys: set[tuple[int, int, int]] = set()
     for cell in atlas.cells:
@@ -4363,11 +4351,12 @@ def render_projective_trace_cell_atlas_reference(
         if key in fallback_keys and fallback_sort_live_depth:
             sample_index, _tile_u, _tile_v = key
 
-            def _live_depth_key(item: tuple[int, float, float]) -> tuple[float, int]:
+            def _live_depth_key(item: tuple[int, float, float]) -> tuple[float, int, int]:
                 valid_sign = dense[item[0], sample_index, 3]
                 if float(valid_sign.item()) == 0.0:
-                    return (math.inf, int(item[0]))
-                return (float(dense[item[0], sample_index, 2].item()), int(item[0]))
+                    return (math.inf, *source_order_key(item[0]))
+                depth = dense[item[0], sample_index, 2] if reference_depth is None else reference_depth[item[0], sample_index]
+                return (float(depth.item()), *source_order_key(item[0]))
 
             entries.sort(key=_live_depth_key)
         else:
@@ -4410,10 +4399,14 @@ def render_projective_trace_cell_atlas_reference(
                     pixel_u_values = pixel_u.detach().cpu().tolist()
                     for local_v, pixel_v_value in enumerate(pixel_v_values):
                         for local_u, pixel_u_value in enumerate(pixel_u_values):
+                            source_depths = (
+                                None if atlas.depth_reference_uvt is None else
+                                _uvt_reference_depth(atlas.depth_reference_uvt, times[sample_index:sample_index+1], pixel_u_value, pixel_v_value)[:, 0].detach().cpu().tolist()
+                            )
                             pixel_order = sorted(
                                 ordered_ids,
                                 key=lambda trace_id: (
-                                    _cell_trace_depth_at_uv_sample(
+                                    float(source_depths[trace_id]) if source_depths is not None else _cell_trace_depth_at_uv_sample(
                                         dense,
                                         depth_affine_uv,
                                         times,
@@ -4422,7 +4415,7 @@ def render_projective_trace_cell_atlas_reference(
                                         u=float(pixel_u_value),
                                         v=float(pixel_v_value),
                                     ),
-                                    int(trace_id),
+                                    *source_order_key(trace_id),
                                 ),
                             )
                             pixel_transmittance = torch.ones((), dtype=atlas.color.dtype, device=atlas.color.device)
@@ -4797,6 +4790,7 @@ def lower_projective_trace_cell_atlas_quadrature(
                 opacity_time_coeffs=_index_select_cell_opacity_time_coeffs(atlas, empty_indices),
                 spatial_precision_uv=_index_select_cell_spatial_precision_uv(atlas, empty_indices),
                 depth_affine_uv=_index_select_cell_depth_affine_uv(atlas, empty_indices),
+                depth_reference_uvt=(None if atlas.depth_reference_uvt is None else atlas.depth_reference_uvt.index_select(0, empty_indices)),
             ),
             times=sample_times,
             weights=sample_weights,
@@ -4834,6 +4828,7 @@ def lower_projective_trace_cell_atlas_quadrature(
         opacity_time_coeffs=_index_select_cell_opacity_time_coeffs(atlas, index),
         spatial_precision_uv=_index_select_cell_spatial_precision_uv(atlas, index),
         depth_affine_uv=_index_select_cell_depth_affine_uv(atlas, index),
+        depth_reference_uvt=(None if atlas.depth_reference_uvt is None else atlas.depth_reference_uvt.index_select(0, index)),
     )
     if not source_trace_indices:
         return ProjectiveTraceCellQuadratureLowering(
@@ -4923,6 +4918,7 @@ def projective_trace_cell_atlas_fallback_tile_sample_mask(
 def _projective_trace_cell_atlas_detached_cpu(atlas: ProjectiveTraceCellTraceAtlas) -> ProjectiveTraceCellTraceAtlas:
     return ProjectiveTraceCellTraceAtlas(
         coeffs=atlas.coeffs.detach().cpu().contiguous(),
+        depth_reference_uvt=(None if atlas.depth_reference_uvt is None else atlas.depth_reference_uvt.detach().cpu().contiguous()),
         opacity=atlas.opacity.detach().cpu().contiguous(),
         color=atlas.color.detach().cpu().contiguous(),
         cells=atlas.cells,

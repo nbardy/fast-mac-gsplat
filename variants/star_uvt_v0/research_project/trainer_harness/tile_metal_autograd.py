@@ -839,6 +839,7 @@ class ProjectiveCellIntervalStaticAtlas:
     active_stop: tuple[int, ...]
     spatial_precision_uv: Tensor | None = None
     depth_affine_uv: Tensor | None = None
+    depth_reference_uvt: Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -1074,6 +1075,7 @@ def _static_projective_cell_atlas(atlas: ProjectiveTraceCellTraceAtlas) -> Proje
         active_stop=atlas.active_stop,
         spatial_precision_uv=atlas.spatial_precision_uv,
         depth_affine_uv=atlas.depth_affine_uv,
+        depth_reference_uvt=atlas.depth_reference_uvt,
     )
 
 
@@ -1216,6 +1218,7 @@ def refresh_projective_cell_interval_atlas_if_stale(
             opacity_time_coeffs=template_atlas.opacity_time_coeffs,
             spatial_precision_uv=template_atlas.spatial_precision_uv,
             depth_affine_uv=template_atlas.depth_affine_uv,
+            depth_reference_uvt=template_atlas.depth_reference_uvt,
         )
 
     def _mix_target_and_base_tiles(
@@ -1857,6 +1860,7 @@ def _materialize_projective_cell_atlas(
         opacity_time_coeffs=opacity_time_coeffs,
         spatial_precision_uv=spatial_precision_uv if static_atlas.spatial_precision_uv is not None else None,
         depth_affine_uv=static_atlas.depth_affine_uv,
+        depth_reference_uvt=static_atlas.depth_reference_uvt,
     )
 
 

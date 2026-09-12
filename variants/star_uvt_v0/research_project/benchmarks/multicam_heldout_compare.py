@@ -4569,6 +4569,7 @@ def frozen_world_replay_compiled_report(
             atlas.opacity_time_coeffs,
             atlas.spatial_precision_uv,
             atlas.depth_affine_uv,
+            atlas.depth_reference_uvt,
             atlas.color,
         )
     )
