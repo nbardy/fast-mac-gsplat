@@ -1407,11 +1407,13 @@ def pack_projective_trace_tile_time_bins(
     tiles_y = (image_height + tile_y - 1) // tile_y
     tiles_t = (frames + tile_t - 1) // tile_t
     tile_count = tiles_x * tiles_y * tiles_t
-    counts = torch.zeros((tile_count,), dtype=torch.int32)
-    primitive_ids = torch.full((tile_count * tile_capacity,), -1, dtype=torch.int32)
-    active_start = torch.zeros((tile_count * tile_capacity,), dtype=torch.int32)
-    active_stop = torch.zeros((tile_count * tile_capacity,), dtype=torch.int32)
-    overflow = torch.zeros((tile_count,), dtype=torch.int32)
+    # Fill ordinary host buffers before tensor construction: assigning each
+    # entry through Tensor.__setitem__ dominated the retained-world CPU packer.
+    counts = [0] * tile_count
+    primitive_ids = [-1] * (tile_count * tile_capacity)
+    active_start = [0] * (tile_count * tile_capacity)
+    active_stop = [0] * (tile_count * tile_capacity)
+    overflow = [0] * tile_count
     ranges: list[dict[int, list[tuple[int, int]]]] = [{} for _ in range(tile_count)]
 
     for cell in cells:
@@ -1447,20 +1449,14 @@ def pack_projective_trace_tile_time_bins(
             active_start[offset] = start
             active_stop[offset] = stop
 
-    if device is not None:
-        counts = counts.to(device=device)
-        primitive_ids = primitive_ids.to(device=device)
-        active_start = active_start.to(device=device)
-        active_stop = active_stop.to(device=device)
-        overflow = overflow.to(device=device)
-
-    return ProjectiveTraceTileBins(
-        tile_counts=counts.contiguous(),
-        tile_primitive_ids=primitive_ids.contiguous(),
-        tile_active_start=active_start.contiguous(),
-        tile_active_stop=active_stop.contiguous(),
-        tile_overflow=overflow.contiguous(),
-    )
+    return ProjectiveTraceTileBins(**{
+        name: torch.tensor(values, dtype=torch.int32, device=device)
+        for name, values in (
+            ("tile_counts", counts), ("tile_primitive_ids", primitive_ids),
+            ("tile_active_start", active_start), ("tile_active_stop", active_stop),
+            ("tile_overflow", overflow),
+        )
+    })
 
 
 def count_projective_trace_dense_per_frame_tile_pairs(
