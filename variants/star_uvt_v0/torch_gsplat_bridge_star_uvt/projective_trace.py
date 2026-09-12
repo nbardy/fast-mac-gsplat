@@ -2977,6 +2977,32 @@ def _quadratic_value_range_over_interval(
     return min(values), max(values)
 
 
+def _quadratic_value_ranges_over_intervals(
+    coeffs: Tensor,
+    *,
+    t_min: Tensor,
+    t_max: Tensor,
+) -> Tensor:
+    """Batch scalar-helper arithmetic, including vertex precision and tie order."""
+
+    c0, c1, c2 = coeffs.unbind(-1)
+
+    def evaluate(time: Tensor) -> Tensor:
+        time = time.to(dtype=coeffs.dtype)
+        return c0 + c1 * time + c2 * time * time
+
+    first, last = evaluate(t_min), evaluate(t_max)
+    # Python min/max keep their first argument on ties or unordered comparisons.
+    minimum = torch.where(last < first, last, first)
+    maximum = torch.where(last > first, last, first)
+    vertex = -c1.to(torch.float64) / (2.0 * c2.to(torch.float64))
+    included = (c2 != 0.0) & (t_min <= vertex) & (vertex <= t_max)
+    value = evaluate(vertex)
+    minimum = torch.where(included & (value < minimum), value, minimum)
+    maximum = torch.where(included & (value > maximum), value, maximum)
+    return torch.stack((minimum, maximum), dim=-1)
+
+
 def _add_sample_boundary_from_root(
     boundaries: set[int],
     times_cpu: Tensor,
@@ -4203,7 +4229,7 @@ def rebin_projective_trace_cell_atlas_support_events(
         (0, _axis_tile_boundaries(image_extent=image_width, tile_size=tile_size)),
         (3, _axis_tile_boundaries(image_extent=image_height, tile_size=tile_size)),
     )
-    records: list[ProjectiveTraceTileTimeRecord] = []
+    spans: list[tuple[int, int, int]] = []
 
     for trace_id in range(int(coeffs_cpu.shape[0])):
         padding_u, padding_v = padding[trace_id]
@@ -4241,39 +4267,45 @@ def rebin_projective_trace_cell_atlas_support_events(
         for start, stop in zip(sorted(boundaries), sorted(boundaries)[1:]):
             if stop <= start:
                 continue
-            t_min = float(times_cpu[start].item())
-            t_max = float(times_cpu[stop - 1].item())
-            u_min, u_max = _quadratic_value_range_over_interval(coeffs_cpu[trace_id, 0:3], t_min=t_min, t_max=t_max)
-            v_min, v_max = _quadratic_value_range_over_interval(coeffs_cpu[trace_id, 3:6], t_min=t_min, t_max=t_max)
-            depth_min, depth_max = _quadratic_value_range_over_interval(coeffs_cpu[trace_id, 6:9], t_min=t_min, t_max=t_max)
-            tile_range = _projective_trace_support_tiles(
-                u_min=u_min - padding_u,
-                u_max=u_max + padding_u,
-                v_min=v_min - padding_v,
-                v_max=v_max + padding_v,
-                image_width=image_width,
-                image_height=image_height,
-                tile_size=tile_size,
+            spans.append((trace_id, start, stop))
+
+    span_indices = torch.tensor(spans, dtype=torch.long).reshape(-1, 3)
+    bounds = _quadratic_value_ranges_over_intervals(
+        coeffs_cpu.index_select(0, span_indices[:, 0]).reshape(-1, 3, 3),
+        t_min=times_cpu[span_indices[:, 1]].to(torch.float64).unsqueeze(-1),
+        t_max=times_cpu[span_indices[:, 2] - 1].to(torch.float64).unsqueeze(-1),
+    ).tolist()
+    records: list[ProjectiveTraceTileTimeRecord] = []
+    for (trace_id, start, stop), ((u_min, u_max), (v_min, v_max), (depth_min, depth_max)) in zip(spans, bounds):
+        padding_u, padding_v = padding[trace_id]
+        tile_range = _projective_trace_support_tiles(
+            u_min=u_min - padding_u,
+            u_max=u_max + padding_u,
+            v_min=v_min - padding_v,
+            v_max=v_max + padding_v,
+            image_width=image_width,
+            image_height=image_height,
+            tile_size=tile_size,
+        )
+        if tile_range is None:
+            continue
+        tile_u_min, tile_u_max, tile_v_min, tile_v_max = tile_range
+        records.append(
+            ProjectiveTraceTileTimeRecord(
+                primitive_id=trace_id,
+                window_index=int(atlas.source_window_indices[trace_id]),
+                start=start,
+                stop=stop,
+                tile_u_min=tile_u_min,
+                tile_u_max=tile_u_max,
+                tile_v_min=tile_v_min,
+                tile_v_max=tile_v_max,
+                depth_min=float(depth_min) - float(depth_padding),
+                depth_max=float(depth_max) + float(depth_padding),
+                fallback=False,
+                fallback_reason="",
             )
-            if tile_range is None:
-                continue
-            tile_u_min, tile_u_max, tile_v_min, tile_v_max = tile_range
-            records.append(
-                ProjectiveTraceTileTimeRecord(
-                    primitive_id=trace_id,
-                    window_index=int(atlas.source_window_indices[trace_id]),
-                    start=start,
-                    stop=stop,
-                    tile_u_min=tile_u_min,
-                    tile_u_max=tile_u_max,
-                    tile_v_min=tile_v_min,
-                    tile_v_max=tile_v_max,
-                    depth_min=float(depth_min) - float(depth_padding),
-                    depth_max=float(depth_max) + float(depth_padding),
-                    fallback=False,
-                    fallback_reason="",
-                )
-            )
+        )
 
     return replace(atlas, cells=assemble_projective_trace_tile_time_atlas(records))
 
