@@ -1770,17 +1770,6 @@ def uvt_tubes_to_projective_trace_cell_atlas(
     ):
         raise ValueError("temporal_mode='require_zero' requires zero residual temporal precision")
 
-    coeff_parts: list[Tensor] = []
-    opacity_parts: list[Tensor] = []
-    color_parts: list[Tensor] = []
-    opacity_time_coeff_parts: list[Tensor] = []
-    spatial_precision_parts: list[Tensor] = []
-    depth_affine_parts: list[Tensor] = []
-    source_ids: list[int] = []
-    source_rows: list[int] = []
-    active_start: list[int] = []
-    active_stop: list[int] = []
-
     time_grid = times.reshape(1, -1)
     temporal_envelope = torch.exp(
         -0.5 * temporal_precision.reshape(-1, 1) * (time_grid - ma[:, 2:3]).square()
@@ -1799,102 +1788,62 @@ def uvt_tubes_to_projective_trace_cell_atlas(
         support_v = torch.sqrt((radius2 * inv11.detach().clamp_min(0.0)).clamp_min(0.0))
         trace_uv_padding = torch.stack((support_u, support_v), dim=1)
 
-    for tube_id in range(tube_count):
-        if alpha_threshold > 0.0:
-            active = effective_opacity[tube_id] >= float(alpha_threshold)
-        else:
-            active = opacity[tube_id] > 0.0
-            active = active.expand_as(times).to(dtype=torch.bool)
-        active_indices = torch.nonzero(active, as_tuple=False).flatten()
-        if int(active_indices.numel()) == 0:
-            continue
-        start = int(active_indices[0].item())
-        stop = int(active_indices[-1].item()) + 1
-        if stop <= start:
-            continue
+    # Membership is discrete metadata: transfer it once, then lower every
+    # retained tube in a batched graph instead of thousands of scalar graphs.
+    active = (
+        effective_opacity >= float(alpha_threshold)
+        if alpha_threshold > 0.0
+        else (opacity[:, None] > 0.0).expand(-1, times.numel())
+    ).detach().cpu()
+    source_rows = torch.nonzero(active.any(dim=1), as_tuple=False).flatten()
+    active_rows = active.index_select(0, source_rows).to(dtype=torch.int8)
+    active_start = active_rows.argmax(dim=1).tolist()
+    active_stop = (times.numel() - active_rows.flip(1).argmax(dim=1)).tolist()
+    row_ids = source_rows.to(device=ma.device)
 
-        u_slope = velocity_u[tube_id]
-        v_slope = velocity_v[tube_id]
-        t_center = ma[tube_id, 2]
-        depth_slope = depth_beta[tube_id, 2] + depth_beta[tube_id, 0] * u_slope + depth_beta[tube_id, 1] * v_slope
-        coeff_parts.append(
-            torch.stack(
-                (
-                    ma[tube_id, 0] - u_slope * t_center,
-                    u_slope,
-                    torch.zeros((), dtype=torch.float32, device=ma.device),
-                    ma[tube_id, 1] - v_slope * t_center,
-                    v_slope,
-                    torch.zeros((), dtype=torch.float32, device=ma.device),
-                    depth0[tube_id] - depth_slope * t_center,
-                    depth_slope,
-                    torch.zeros((), dtype=torch.float32, device=ma.device),
-                )
-            ).reshape(1, 9)
-        )
-        opacity_parts.append(opacity[tube_id : tube_id + 1])
-        color_parts.append(color[tube_id : tube_id + 1])
-        temporal_lambda = temporal_precision[tube_id]
-        opacity_time_coeff_parts.append(
-            torch.stack(
-                (
-                    torch.zeros_like(t_center) if temporal_mode == "centered" else temporal_lambda * t_center.square(),
-                    t_center if temporal_mode == "centered" else -2.0 * temporal_lambda * t_center,
-                    temporal_lambda,
-                )
-            ).reshape(1, 3)
-        )
-        spatial_precision_parts.append(torch.stack((q_uu[tube_id], q_uv[tube_id], q_vv[tube_id])).reshape(1, 3))
-        if allow_depth_affine_uv:
-            depth_affine_parts.append(
-                torch.stack(
-                    (
-                        depth_beta[tube_id, 0],
-                        torch.zeros((), dtype=torch.float32, device=ma.device),
-                        torch.zeros((), dtype=torch.float32, device=ma.device),
-                        depth_beta[tube_id, 1],
-                        torch.zeros((), dtype=torch.float32, device=ma.device),
-                        torch.zeros((), dtype=torch.float32, device=ma.device),
-                    )
-                ).reshape(1, 6)
-            )
-        source_ids.append(ids[tube_id])
-        source_rows.append(tube_id)
-        active_start.append(start)
-        active_stop.append(stop)
-
-    channels = int(color.shape[1])
-    if coeff_parts:
-        coeffs = torch.cat(coeff_parts, dim=0).contiguous()
-        atlas_opacity = torch.cat(opacity_parts, dim=0).contiguous()
-        atlas_color = torch.cat(color_parts, dim=0).contiguous()
-        opacity_time_coeffs = torch.cat(opacity_time_coeff_parts, dim=0).contiguous()
-        spatial_precision_uv = torch.cat(spatial_precision_parts, dim=0).contiguous()
-        depth_affine_uv = torch.cat(depth_affine_parts, dim=0).contiguous() if allow_depth_affine_uv else None
-    else:
-        coeffs = torch.empty((0, 9), dtype=torch.float32, device=ma.device)
-        atlas_opacity = torch.empty((0,), dtype=torch.float32, device=ma.device)
-        atlas_color = torch.empty((0, channels), dtype=torch.float32, device=ma.device)
-        opacity_time_coeffs = torch.empty((0, 3), dtype=torch.float32, device=ma.device)
-        spatial_precision_uv = torch.empty((0, 3), dtype=torch.float32, device=ma.device)
-        depth_affine_uv = torch.empty((0, 6), dtype=torch.float32, device=ma.device) if allow_depth_affine_uv else None
-
+    selected_ma = ma.index_select(0, row_ids)
+    selected_depth0 = depth0.index_select(0, row_ids)
+    selected_depth_beta = depth_beta.index_select(0, row_ids)
+    u_slope = velocity_u.index_select(0, row_ids)
+    v_slope = velocity_v.index_select(0, row_ids)
+    t_center = selected_ma[:, 2]
+    temporal_lambda = temporal_precision.index_select(0, row_ids)
+    zeros = torch.zeros_like(t_center)
+    depth_slope = selected_depth_beta[:, 2] + selected_depth_beta[:, 0] * u_slope + selected_depth_beta[:, 1] * v_slope
+    coeffs = torch.stack(
+        (
+            selected_ma[:, 0] - u_slope * t_center, u_slope, zeros,
+            selected_ma[:, 1] - v_slope * t_center, v_slope, zeros,
+            selected_depth0 - depth_slope * t_center, depth_slope, zeros,
+        ),
+        dim=1,
+    ).contiguous()
+    opacity_time_coeffs = torch.stack(
+        (
+            zeros if temporal_mode == "centered" else temporal_lambda * t_center.square(),
+            t_center if temporal_mode == "centered" else -2.0 * temporal_lambda * t_center,
+            temporal_lambda,
+        ),
+        dim=1,
+    ).contiguous()
+    depth_affine_uv = (
+        torch.stack((selected_depth_beta[:, 0], zeros, zeros, selected_depth_beta[:, 1], zeros, zeros), dim=1).contiguous()
+        if allow_depth_affine_uv else None
+    )
     atlas = ProjectiveTraceCellTraceAtlas(
         coeffs=coeffs,
-        opacity=atlas_opacity,
-        color=atlas_color,
+        opacity=opacity.index_select(0, row_ids).contiguous(),
+        color=color.index_select(0, row_ids).contiguous(),
         cells=[],
-        source_window_indices=tuple(0 for _ in range(int(coeffs.shape[0]))),
-        source_primitive_ids=tuple(source_ids),
+        source_window_indices=(0,) * int(row_ids.numel()),
+        source_primitive_ids=tuple(ids[row] for row in source_rows.tolist()),
         active_start=tuple(active_start),
         active_stop=tuple(active_stop),
         opacity_time_coeffs=opacity_time_coeffs,
         opacity_time_centered=temporal_mode == "centered",
-        spatial_precision_uv=spatial_precision_uv,
+        spatial_precision_uv=q_uvt.index_select(0, row_ids)[:, [0, 1, 3]].contiguous(),
         depth_affine_uv=depth_affine_uv,
-        depth_reference_uvt=torch.cat((ma, depth0[:, None], depth_beta), dim=1).index_select(
-            0, torch.tensor(source_rows, dtype=torch.long, device=ma.device)
-        ).contiguous(),
+        depth_reference_uvt=torch.cat((selected_ma, selected_depth0[:, None], selected_depth_beta), dim=1).contiguous(),
     )
     atlas = rebin_projective_trace_cell_atlas_support_events(
         atlas,
@@ -1903,7 +1852,7 @@ def uvt_tubes_to_projective_trace_cell_atlas(
         image_height=image_height,
         tile_size=tile_size,
         uv_padding=uv_padding,
-        trace_uv_padding=None if trace_uv_padding is None else trace_uv_padding[source_rows],
+        trace_uv_padding=None if trace_uv_padding is None else trace_uv_padding.index_select(0, row_ids),
         depth_padding=depth_padding,
         root_epsilon=root_epsilon,
     )
