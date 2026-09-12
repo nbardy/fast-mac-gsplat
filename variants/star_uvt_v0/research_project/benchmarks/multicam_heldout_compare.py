@@ -1183,7 +1183,15 @@ def initialize_world_tubes_from_train_views(
             points.append(x0)
             colors.append(rgb)
             t0_values.append(t0)
-    return torch.cat(points, dim=0).contiguous(), torch.cat(colors, dim=0).contiguous(), torch.cat(t0_values, dim=0).contiguous()
+    # Progressive budgets select a prefix. Interleave source groups so that a
+    # coarse stage covers cameras and times instead of exhausting camera zero.
+    order = torch.argsort(
+        torch.cat([torch.arange(group.shape[0]) for group in points]), stable=True,
+    ).to(points[0].device)
+    return tuple(
+        torch.cat(groups, dim=0).index_select(0, order).contiguous()
+        for groups in (points, colors, t0_values)
+    )
 
 
 def initialize_world_tubes_with_static_fraction(
