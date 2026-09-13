@@ -3801,7 +3801,7 @@ def stratify_projective_trace_cell_atlas_visibility_events(
     # Spatial tiles often repeat the same trace/time queries. Keep results
     # local to this compilation so later geometry updates cannot reuse them.
     roots_by_span: dict[tuple[int, int, int, int], tuple[float, ...]] = {}
-    depths_by_span: dict[tuple[int, int, int], tuple[float, float]] = {}
+    depths_by_span: dict[tuple[int, int, int], tuple[float, tuple[float, float]]] = {}
 
     def _add_boundary(boundaries: set[int], cell: ProjectiveTraceTileTimeCell, boundary: int) -> None:
         if int(cell.start) < boundary < int(cell.stop):
@@ -3875,25 +3875,28 @@ def stratify_projective_trace_cell_atlas_visibility_events(
             )
             if not active_trace_ids:
                 continue
-            t_mid = 0.5 * (float(times_cpu[start].item()) + float(times_cpu[stop - 1].item()))
-            depth_coeffs = coeffs_cpu[list(active_trace_ids), 6:9]
-            # Preserve the scalar float32 operation order, including (z2*t)*t.
-            midpoint_depths = depth_coeffs[:, 0] + depth_coeffs[:, 1] * t_mid + depth_coeffs[:, 2] * t_mid * t_mid
-            ordered = tuple(
-                trace_id for _depth, trace_id in sorted(zip(midpoint_depths.tolist(), active_trace_ids))
-            )
-            depth_intervals: list[tuple[float, float]] = []
-            for trace_id in ordered:
-                depth_span = (trace_id, start, stop)
-                if depth_span not in depths_by_span:
+            missing = [trace_id for trace_id in active_trace_ids if (trace_id, start, stop) not in depths_by_span]
+            if missing:
+                t_mid = 0.5 * (float(times_cpu[start].item()) + float(times_cpu[stop - 1].item()))
+                depth_coeffs = coeffs_cpu[missing, 6:9]
+                # Preserve float32 operation order; cache only queried trace/spans.
+                midpoint_depths = depth_coeffs[:, 0] + depth_coeffs[:, 1] * t_mid + depth_coeffs[:, 2] * t_mid * t_mid
+                for trace_id, midpoint_depth in zip(missing, midpoint_depths.tolist()):
                     trace_depths = dense[trace_id, start:stop, 2]
                     valid = dense[trace_id, start:stop, 3] != 0.0
                     valid_depths = trace_depths[valid]
-                    depths_by_span[depth_span] = (
+                    depths_by_span[(trace_id, start, stop)] = (
+                        midpoint_depth,
                         (float(valid_depths.amin().item()), float(valid_depths.amax().item()))
-                        if valid_depths.numel() else (math.inf, math.inf)
+                        if valid_depths.numel() else (math.inf, math.inf),
                     )
-                depth_intervals.append(depths_by_span[depth_span])
+            ordered = tuple(
+                trace_id for _depth, trace_id in sorted(
+                    (depths_by_span[(trace_id, start, stop)][0], trace_id)
+                    for trace_id in active_trace_ids
+                )
+            )
+            depth_intervals = tuple(depths_by_span[(trace_id, start, stop)][1] for trace_id in ordered)
             cells.append(
                 ProjectiveTraceTileTimeCell(
                     tile_u=int(cell.tile_u),
@@ -3902,7 +3905,7 @@ def stratify_projective_trace_cell_atlas_visibility_events(
                     stop=stop,
                     primitive_ids=tuple(sorted(active_trace_ids)),
                     ordered_primitive_ids=ordered,
-                    depth_intervals=tuple(depth_intervals),
+                    depth_intervals=depth_intervals,
                     fallback=bool(cell.fallback),
                     fallback_reasons=cell.fallback_reasons,
                 )
