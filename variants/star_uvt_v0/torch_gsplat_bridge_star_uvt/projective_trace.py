@@ -181,8 +181,9 @@ def slice_projective_trace_cell_atlas_frames(
         for local_trace_id, source_trace_id in enumerate(source_trace_indices)
     }
     cells = [
-        replace(
-            cell,
+        ProjectiveTraceTileTimeCell(
+            tile_u=cell.tile_u,
+            tile_v=cell.tile_v,
             start=clipped_start,
             stop=clipped_stop,
             primitive_ids=tuple(
@@ -191,6 +192,9 @@ def slice_projective_trace_cell_atlas_frames(
             ordered_primitive_ids=tuple(
                 trace_id_map[int(value)] for value in cell.ordered_primitive_ids
             ),
+            depth_intervals=cell.depth_intervals,
+            fallback=cell.fallback,
+            fallback_reasons=cell.fallback_reasons,
         )
         for cell, clipped_start, clipped_stop in clipped_cells
     ]
