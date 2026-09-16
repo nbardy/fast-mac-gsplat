@@ -11,7 +11,7 @@ import sys
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable, Mapping
 
 import torch
 from torch import Tensor, nn
@@ -38,6 +38,8 @@ for path in (DYNAWORLD_ROOT, TRAIN_SRC, GAUGE_EXPERIMENTS):
 
 from torch_gsplat_bridge_star_uvt import (  # noqa: E402
     UVTRenderConfig,
+    pack_projective_trace_tile_time_bins,
+    projective_trace_cell_sensor_time_event_partition,
     render_uvt_tubes,
     slice_projective_trace_cell_atlas_frames,
     iter_projective_trace_cell_atlas_frame_slices,
@@ -48,6 +50,7 @@ from config_utils import load_config_file, serialize_config_value  # noqa: E402
 from common import prefix_metrics, robust_l1, save_preview_strip, save_side_by_side_mp4, video_metrics, write_json  # noqa: E402
 from device_memory import DeviceMemorySampler, device_memory_stats  # noqa: E402
 from multicam_video_data import load_multicam_video_bundle  # noqa: E402
+from paper_multicam_targets import PaperMulticamTargetProvider, load_grouped_frozen_target_frames  # noqa: E402
 from paper_training_protocol import (  # noqa: E402
     PaperCostTracker,
     PaperPhaseTimer,
@@ -83,6 +86,17 @@ from research_experiments.spd4_world_tubes.hybrid_transfer import (  # noqa: E40
 )
 from research_experiments.spd4_world_tubes.retained_fiber_metal import (  # noqa: E402
     render_retained_fiber_metal,
+)
+from research_project.benchmarks.frozen_world_contracts import (  # noqa: E402
+    BOUNDED_YAW_CAMERA_PROGRAM_MODE,
+    BOUNDED_YAW_FRAME_COUNTS,
+    BOUNDED_YAW_IMAGE_SIZE,
+    BOUNDED_YAW_TOTAL_DEGREES,
+    STATIC_CAMERA_PROGRAM_MODE,
+    bounded_yaw_camera_program_contract,
+    canonical_json_sha256,
+    validate_expected_sha256,
+    validate_frozen_world_camera_program_request,
 )
 from research_experiments.paper_runner_suite.frozen_atlas_storage import (  # noqa: E402
     LOGICAL_PAYLOAD_DEFINITION,
@@ -352,28 +366,6 @@ def frozen_world_timing_summary(samples: list[float]) -> dict[str, float | int]:
     }
 
 
-def write_json_atomic(path: Path, payload: Any) -> Path:
-    """Durably replace one JSON artifact without exposing a partial file."""
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    try:
-        with temporary.open("w", encoding="utf-8") as handle:
-            json.dump(
-                serialize_config_value(payload),
-                handle,
-                indent=2,
-                sort_keys=True,
-            )
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return path
-
-
 def resolve_dynaworld_path(path: str | Path) -> Path:
     value = Path(path)
     if value.is_absolute():
@@ -394,6 +386,28 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def write_json_atomic(path: Path, payload: Any) -> Path:
+    """Durably replace one JSON artifact without exposing a partial file."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump(
+                serialize_config_value(payload),
+                handle,
+                indent=2,
+                sort_keys=True,
+            )
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return path
 
 
 def star_uvt_native_extension_identity() -> dict[str, Any]:
@@ -798,9 +812,70 @@ def camera_sequences_for_view(
     synthetic_zoom: float,
     synthetic_principal_x: float,
     synthetic_principal_y: float,
+    camera_program: Mapping[str, Any] | None = None,
 ) -> tuple[Tensor, Tensor]:
     K_seq = select_view_K_sequence(K, view=view, frames=frames, view_count=view_count)
     w2c_seq = select_view_w2c_sequence(w2c, view=view, frames=frames)
+    if camera_program is not None:
+        if camera_program != bounded_yaw_camera_program_contract():
+            raise ValueError("bounded-yaw camera program contract drifted")
+        if frames < 2:
+            raise ValueError(
+                "bounded-yaw camera program requires at least two frames"
+            )
+        if any(
+            (
+                synthetic_pan_x,
+                synthetic_pan_y,
+                synthetic_dolly_z,
+                synthetic_zoom,
+                synthetic_principal_x,
+                synthetic_principal_y,
+            )
+        ):
+            raise ValueError(
+                "bounded-yaw camera program cannot be combined with synthetic motion"
+            )
+        if K_seq.dtype != torch.float32 or w2c_seq.dtype != torch.float32:
+            raise ValueError("bounded-yaw camera tensors must be float32")
+        if K_seq.device != w2c_seq.device:
+            raise ValueError("bounded-yaw camera tensors must share one device")
+        angles = torch.linspace(
+            math.radians(float(camera_program["yaw_start_degrees"])),
+            math.radians(float(camera_program["yaw_end_degrees"])),
+            frames,
+            dtype=torch.float32,
+            device=w2c_seq.device,
+        )
+        cosine = torch.cos(angles)
+        sine = torch.sin(angles)
+        zeros = torch.zeros_like(cosine)
+        ones = torch.ones_like(cosine)
+        yaw = torch.stack(
+            (
+                cosine,
+                zeros,
+                sine,
+                zeros,
+                ones,
+                zeros,
+                -sine,
+                zeros,
+                cosine,
+            ),
+            dim=-1,
+        ).reshape(frames, 3, 3)
+        base_rotation = w2c_seq[0, :3, :3]
+        base_translation = w2c_seq[0, :3, 3]
+        moved_w2c = (
+            torch.eye(4, dtype=torch.float32, device=w2c_seq.device)
+            .unsqueeze(0)
+            .repeat(frames, 1, 1)
+        )
+        moved_w2c[:, :3, :3] = torch.matmul(yaw, base_rotation)
+        moved_w2c[:, :3, 3] = torch.matmul(yaw, base_translation)
+        moved_K = K_seq[0].unsqueeze(0).expand(frames, -1, -1).clone()
+        return moved_K.contiguous(), moved_w2c.contiguous()
     return apply_synthetic_camera_motion(
         K_seq,
         w2c_seq,
@@ -1119,7 +1194,34 @@ def initialize_world_tubes_from_view(
     frame: int = 0,
     centered_t0: float = 0.0,
 ) -> tuple[Tensor, Tensor, Tensor]:
-    _, _, height, width = frames.shape
+    return initialize_world_tubes_from_target_frame(
+        frames[frame],
+        K,
+        w2c,
+        tube_count=tube_count,
+        init_depth=init_depth,
+        seed=seed,
+        sampling=sampling,
+        centered_t0=centered_t0,
+    )
+
+
+def initialize_world_tubes_from_target_frame(
+    target_frame: Tensor,
+    K: Tensor,
+    w2c: Tensor,
+    *,
+    tube_count: int,
+    init_depth: float,
+    seed: int,
+    sampling: str,
+    centered_t0: float = 0.0,
+) -> tuple[Tensor, Tensor, Tensor]:
+    if target_frame.ndim != 3 or int(target_frame.shape[0]) != 3:
+        raise ValueError(
+            "World Tubes initialization requires one RGB frame [3,H,W]"
+        )
+    _, height, width = target_frame.shape
     device = K.device
     ys_cpu, xs_cpu = sample_init_pixels(
         tube_count=tube_count,
@@ -1128,9 +1230,14 @@ def initialize_world_tubes_from_view(
         seed=seed,
         sampling=sampling,
     )
-    frame_ys = ys_cpu.to(frames.device)
-    frame_xs = xs_cpu.to(frames.device)
-    colors = frames[frame, :, frame_ys, frame_xs].permute(1, 0).contiguous().to(device)
+    frame_ys = ys_cpu.to(target_frame.device)
+    frame_xs = xs_cpu.to(target_frame.device)
+    colors = (
+        target_frame[:, frame_ys, frame_xs]
+        .permute(1, 0)
+        .contiguous()
+        .to(device)
+    )
     ys = ys_cpu.to(device)
     xs = xs_cpu.to(device)
     z = torch.full((tube_count,), float(init_depth), dtype=torch.float32, device=device)
@@ -1153,12 +1260,23 @@ def initialize_world_tubes_from_train_views(
     init_sampling: str,
     init_frames: str,
     init_frame_indices: list[int] | None = None,
+    target_provider: PaperMulticamTargetProvider | None = None,
 ) -> tuple[Tensor, Tensor, Tensor]:
     if init_frames not in {"first", "all", "fit"}:
         raise ValueError("init_frames must be one of: first, all, fit")
     if init_views not in {"first", "all_train"}:
         raise ValueError("init_views must be one of: first, all_train")
     if init_views == "first" and init_frames == "first":
+        if target_provider is not None:
+            return initialize_world_tubes_from_target_frame(
+                target_provider.select_view_frames((0,), (0,))[0],
+                select_view_K(bundle.train_K, 0),
+                select_view_w2c(bundle.train_w2c, 0),
+                tube_count=tube_count,
+                init_depth=init_depth,
+                seed=seed,
+                sampling=init_sampling,
+            )
         return initialize_world_tubes_from_view(
             bundle.train_frames[0],
             select_view_K(bundle.train_K, 0),
@@ -1186,26 +1304,84 @@ def initialize_world_tubes_from_train_views(
     points = []
     colors = []
     t0_values = []
-    for view in range(view_count):
-        for frame_offset, source_frame in enumerate(frame_indices):
-            group = view * frame_count + frame_offset
-            count = base_count + (1 if group < remainder else 0)
-            if count == 0:
-                continue
+    def append_group(
+        *,
+        view: int,
+        frame_offset: int,
+        source_frame: int,
+        target_frame: Tensor | None,
+    ) -> None:
+        group = view * frame_count + frame_offset
+        count = base_count + (1 if group < remainder else 0)
+        if count == 0:
+            return
+        K = select_K_for_view_time(
+            bundle.train_K,
+            view=view,
+            t=source_frame,
+            view_count=train_view_count,
+        )
+        w2c = select_w2c_for_view_time(
+            bundle.train_w2c,
+            view=view,
+            t=source_frame,
+        )
+        init_kwargs = {
+            "tube_count": count,
+            "init_depth": init_depth,
+            "seed": seed + view * 9973 + source_frame * 433,
+            "sampling": init_sampling,
+            "centered_t0": (
+                centered_frame_time(source_frame, total_frames)
+                if init_frames in {"all", "fit"}
+                else 0.0
+            ),
+        }
+        if target_frame is None:
             x0, rgb, t0 = initialize_world_tubes_from_view(
                 bundle.train_frames[view],
-                select_K_for_view_time(bundle.train_K, view=view, t=source_frame, view_count=train_view_count),
-                select_w2c_for_view_time(bundle.train_w2c, view=view, t=source_frame),
-                tube_count=count,
-                init_depth=init_depth,
-                seed=seed + view * 9973 + source_frame * 433,
-                sampling=init_sampling,
+                K,
+                w2c,
                 frame=source_frame,
-                centered_t0=centered_frame_time(source_frame, total_frames) if init_frames in {"all", "fit"} else 0.0,
+                **init_kwargs,
             )
-            points.append(x0)
-            colors.append(rgb)
-            t0_values.append(t0)
+        else:
+            x0, rgb, t0 = initialize_world_tubes_from_target_frame(
+                target_frame,
+                K,
+                w2c,
+                **init_kwargs,
+            )
+        points.append(x0)
+        colors.append(rgb)
+        t0_values.append(t0)
+
+    for view in range(view_count):
+        if target_provider is None:
+            for frame_offset, source_frame in enumerate(frame_indices):
+                append_group(
+                    view=view,
+                    frame_offset=frame_offset,
+                    source_frame=source_frame,
+                    target_frame=None,
+                )
+            continue
+        decode_chunk = target_provider.cache_capacity_frames
+        for start in range(0, frame_count, decode_chunk):
+            chunk_indices = frame_indices[start : start + decode_chunk]
+            target_frames = target_provider.select_view_frames(
+                (view,) * len(chunk_indices),
+                chunk_indices,
+            )
+            for local_offset, (source_frame, target_frame) in enumerate(
+                zip(chunk_indices, target_frames, strict=True)
+            ):
+                append_group(
+                    view=view,
+                    frame_offset=start + local_offset,
+                    source_frame=source_frame,
+                    target_frame=target_frame,
+                )
     # Progressive budgets select a prefix. Interleave source groups so that a
     # coarse stage covers cameras and times instead of exhausting camera zero.
     order = torch.argsort(
@@ -1230,6 +1406,7 @@ def initialize_world_tubes_with_static_fraction(
     init_lambda_t: float,
     static_tube_fraction: float,
     static_init_lambda_t: float,
+    target_provider: PaperMulticamTargetProvider | None = None,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, dict[str, Any]]:
     if tube_count < 1:
         raise ValueError("tube_count must be positive")
@@ -1245,6 +1422,7 @@ def initialize_world_tubes_with_static_fraction(
             init_sampling=init_sampling,
             init_frames=init_frames,
             init_frame_indices=init_frame_indices,
+            target_provider=target_provider,
         )
         init_lambda_t_values = torch.full(
             (tube_count,),
@@ -1277,6 +1455,7 @@ def initialize_world_tubes_with_static_fraction(
         init_sampling=init_sampling,
         init_frames=init_frames,
         init_frame_indices=init_frame_indices,
+        target_provider=target_provider,
     )
     static_x0, static_color, static_t0 = initialize_world_tubes_from_train_views(
         bundle,
@@ -1287,6 +1466,7 @@ def initialize_world_tubes_with_static_fraction(
         init_sampling=init_sampling,
         init_frames="first",
         init_frame_indices=None,
+        target_provider=target_provider,
     )
     init_x0 = torch.cat((dynamic_x0, static_x0), dim=0).contiguous()
     init_color = torch.cat((dynamic_color, static_color), dim=0).contiguous()
@@ -2059,6 +2239,7 @@ def train_world_tubes(
     static_init_lambda_t: float = 0.02,
     static_velocity_reg_weight: float = 0.0,
     paper_protocol: dict[str, Any] | None = None,
+    target_provider: PaperMulticamTargetProvider | None = None,
     world_representation: str = "legacy_tube",
     spd4_min_spatial_scale: float = 1.0e-4,
     spd4_init_precision_z: float | None = None,
@@ -2180,6 +2361,18 @@ def train_world_tubes(
     paper_enabled = bool(paper_values.get("enabled", False))
     if paper_enabled != (loss_scope == "paper_batch"):
         raise ValueError("paper_protocol.enabled and loss_scope='paper_batch' must be selected together")
+    if target_provider is not None and not paper_enabled:
+        raise ValueError("bounded paper targets require an enabled paper protocol")
+    if bool(bundle.deferred_target_frames) != (target_provider is not None):
+        raise ValueError(
+            "deferred train targets and the bounded paper target provider "
+            "must be enabled together"
+        )
+    if target_provider is not None and (
+        target_provider.view_count != view_count
+        or target_provider.frame_count != frames
+    ):
+        raise ValueError("bounded train target provider dimensions drifted from the bundle")
     paper_stages = normalize_paper_stages(
         paper_values.get("stages") if paper_enabled else None,
         total_steps=max_steps,
@@ -2238,6 +2431,7 @@ def train_world_tubes(
         init_lambda_t=init_lambda_t,
         static_tube_fraction=static_tube_fraction,
         static_init_lambda_t=static_init_lambda_t,
+        target_provider=target_provider,
     )
     if world_representation == "legacy_tube":
         model: WorldTubeModel | SPD4WorldAtomModel = WorldTubeModel(
@@ -2558,11 +2752,30 @@ def train_world_tubes(
             if paper_batch is None:
                 raise RuntimeError("paper_batch loss requires an active paper sampler")
             predictions = []
-            targets = []
             projected_sequences = []
             selected_frame_config = replace(
                 step_full_config,
                 frames=1,
+            )
+            sample_views = tuple(
+                sample.view_index for sample in paper_batch.samples
+            )
+            sample_frames = tuple(
+                sample.frame_index for sample in paper_batch.samples
+            )
+            target_rows = (
+                target_provider.select_view_frames(sample_views, sample_frames)
+                if target_provider is not None
+                else torch.stack(
+                    [
+                        train_frames[view_index, frame_index]
+                        for view_index, frame_index in zip(
+                            sample_views,
+                            sample_frames,
+                            strict=True,
+                        )
+                    ]
+                )
             )
             for sample in paper_batch.samples:
                 batch_lens, batch_distortion = select_lens(
@@ -2582,10 +2795,9 @@ def train_world_tubes(
                 projected_sequences.append(projected)
                 rendered = render_for_training(projected, selected_frame_config)
                 predictions.append(rendered.rgb[0])
-                targets.append(train_frames[sample.view_index, sample.frame_index])
             rendered_active = torch.stack(predictions)
             target_active = (
-                resize_video_frames(torch.stack(targets), paper_stage.image_size)
+                resize_video_frames(target_rows, paper_stage.image_size)
                 .to(device=device, dtype=torch.float32)
                 .permute(0, 2, 3, 1)
             )
@@ -2752,9 +2964,21 @@ def train_world_tubes(
                 consistency_config,
             )
             if consistency_config.frames == frames:
+                consistency_frames = tuple(active_train_frames)
+                consistency_targets = (
+                    target_provider.select_view_frames(
+                        (view,) * len(consistency_frames),
+                        consistency_frames,
+                    )
+                    if target_provider is not None
+                    else train_frames[view].index_select(
+                        0,
+                        active_train_frame_tensor.to(train_frames.device),
+                    )
+                )
                 sequence_target = (
                     resize_video_frames(
-                        train_frames[view].index_select(0, active_train_frame_tensor.to(train_frames.device)),
+                        consistency_targets,
                         paper_stage.image_size,
                     )
                     .to(device=device, dtype=torch.float32)
@@ -2765,12 +2989,27 @@ def train_world_tubes(
                     - sequence_target
                 )
             else:
+                consistency_frames = tuple(
+                    range(
+                        consistency_start,
+                        consistency_start + consistency_window_frames,
+                    )
+                )
+                consistency_targets = (
+                    target_provider.select_view_frames(
+                        (view,) * len(consistency_frames),
+                        consistency_frames,
+                    )
+                    if target_provider is not None
+                    else train_frames[
+                        view,
+                        consistency_start : consistency_start
+                        + consistency_window_frames,
+                    ]
+                )
                 sequence_target = (
                     resize_video_frames(
-                        train_frames[
-                            view,
-                            consistency_start : consistency_start + consistency_window_frames,
-                        ],
+                        consistency_targets,
                         paper_stage.image_size,
                     )
                     .to(device=device, dtype=torch.float32)
@@ -3057,6 +3296,7 @@ def train_free_splats(
     renderer: str,
     camera_projection: str,
     paper_protocol: dict[str, Any] | None = None,
+    target_provider: PaperMulticamTargetProvider | None = None,
 ) -> tuple[FreeDynamic3DGS, SplatRenderConfig, dict[str, Any]]:
     torch.manual_seed(seed)
     train_video = bundle.train_frames
@@ -3065,6 +3305,18 @@ def train_free_splats(
     source_image_size = normalize_image_size((height, width))
     paper_values = paper_protocol or {}
     paper_enabled = bool(paper_values.get("enabled", False))
+    if target_provider is not None and not paper_enabled:
+        raise ValueError("bounded paper targets require an enabled paper protocol")
+    if bool(bundle.deferred_target_frames) != (target_provider is not None):
+        raise ValueError(
+            "deferred train targets and the bounded paper target provider "
+            "must be enabled together"
+        )
+    if target_provider is not None and (
+        target_provider.view_count != view_count
+        or target_provider.frame_count != frames
+    ):
+        raise ValueError("bounded train target provider dimensions drifted from the bundle")
     paper_stages = normalize_paper_stages(
         paper_values.get("stages") if paper_enabled else None,
         total_steps=max_steps,
@@ -3076,8 +3328,13 @@ def train_free_splats(
         raise ValueError("the final paper stage image size must match the loaded multicam image size")
     if paper_stages[-1].primitive_count != splat_count:
         raise ValueError("the final paper stage primitive_count must match splat_count")
+    init_video = (
+        target_provider.select_view_frames((0,), (0,))
+        if target_provider is not None
+        else train_video[0, :1]
+    )
     init_xyz, init_rgb = initialize_material_points_from_first_frame(
-        video=train_video[0, :1].permute(0, 2, 3, 1).contiguous().to(device),
+        video=init_video.permute(0, 2, 3, 1).contiguous().to(device),
         K=bundle.train_K[0],
         num_elements=splat_count,
         init_depth=init_depth,
@@ -3181,15 +3438,23 @@ def train_free_splats(
                     int(torch.randint(0, frames, (1,), device=device).item()),
                 )
             ]
-            stage_video, stage_K, stage_render_cfg = train_video, bundle.train_K, render_cfg
+            stage_K, stage_render_cfg = bundle.train_K, render_cfg
         else:
             sample_pairs = [(sample.view_index, sample.frame_index) for sample in paper_batch.samples]
-            stage_video = train_video
             stage_K, stage_render_cfg = splat_stage_payload(paper_stage)
+        target_rows = (
+            target_provider.select_view_frames(
+                tuple(view for view, _ in sample_pairs),
+                tuple(frame for _, frame in sample_pairs),
+            )
+            if target_provider is not None
+            else torch.stack(
+                [train_video[view, frame] for view, frame in sample_pairs]
+            )
+        )
         optimizer.zero_grad(set_to_none=True)
         paper_forward_started_at = paper_phase_timer.start("forward")
         images = []
-        target_rows = []
         for view, frame in sample_pairs:
             lens_model, distortion = select_lens(
                 bundle.train_lens_models,
@@ -3218,9 +3483,8 @@ def train_free_splats(
                     camera_projection=stage_render_cfg.camera_projection,
                 ).permute(1, 2, 0)
             )
-            target_rows.append(stage_video[view, frame])
         target_batch = (
-            resize_video_frames(torch.stack(target_rows), paper_stage.image_size)
+            resize_video_frames(target_rows, paper_stage.image_size)
             .to(device=device, dtype=torch.float32)
             .permute(0, 2, 3, 1)
         )
@@ -3317,6 +3581,9 @@ def eval_world_tubes(
     frame_metric_splits: dict[str, list[int]] | None = None,
     chunk_frames: int = 4,
     media_max_frames: int = 32,
+    train_target_provider: PaperMulticamTargetProvider | None = None,
+    heldout_target_provider: PaperMulticamTargetProvider | None = None,
+    collect_media: bool = True,
 ) -> dict[str, Any]:
     _, frames, _, height, width = bundle.train_frames.shape
     config = render_config
@@ -3407,6 +3674,7 @@ def eval_world_tubes(
         w2c_all: Tensor,
         lens_models: list[str] | None,
         distortions: Tensor | None,
+        target_provider: PaperMulticamTargetProvider | None,
         split_metrics: dict[str, list[int]] | None = None,
     ) -> tuple[
         list,
@@ -3425,7 +3693,15 @@ def eval_world_tubes(
         split_rows: dict[str, list[dict[str, float]]] = {
             name: [] for name, indices in (split_metrics or {}).items() if indices
         }
-        for view in range(int(frames_tensor.shape[0])):
+        split_view_count = int(frames_tensor.shape[0])
+        if target_provider is not None and (
+            target_provider.view_count != split_view_count
+            or target_provider.frame_count != frames
+        ):
+            raise ValueError(f"bounded {split} target provider dimensions drifted")
+        if frames_tensor.device.type == "meta" and target_provider is None:
+            raise RuntimeError(f"deferred {split} targets require a bounded provider")
+        for view in range(split_view_count):
             lens_model, distortion = select_lens(
                 lens_models,
                 distortions,
@@ -3456,7 +3732,19 @@ def eval_world_tubes(
                     ),
                 )
                 view_render_elapsed += render_elapsed
-                target = frames_tensor[view, start:stop].permute(0, 2, 3, 1).contiguous().cpu()
+                target_frames = (
+                    target_provider.select_view_frames(
+                        (view,) * (stop - start),
+                        tuple(range(start, stop)),
+                    )
+                    if target_provider is not None
+                    else frames_tensor[view, start:stop]
+                )
+                target = (
+                    target_frames.permute(0, 2, 3, 1)
+                    .contiguous()
+                    .cpu()
+                )
                 rendered = RenderedSequence(
                     rgb=rendered.rgb.detach().cpu(),
                     alpha=rendered.alpha.detach().cpu(),
@@ -3479,17 +3767,18 @@ def eval_world_tubes(
                     lpips_count += count
                     global_lpips_sum += chunk_lpips * count
                     global_lpips_count += count
-                append_chunk_media(
-                    start=start,
-                    stop=stop,
-                    selected=selected,
-                    target=target,
-                    rendered=rendered.rgb,
-                    alpha=rendered.alpha,
-                    targets_out=media_targets,
-                    rendered_out=media_renders,
-                    alpha_out=media_alphas,
-                )
+                if collect_media and view == 0:
+                    append_chunk_media(
+                        start=start,
+                        stop=stop,
+                        selected=selected,
+                        target=target,
+                        rendered=rendered.rgb,
+                        alpha=rendered.alpha,
+                        targets_out=media_targets,
+                        rendered_out=media_renders,
+                        alpha_out=media_alphas,
+                    )
                 del rendered, target
             row_metrics = accumulator.metrics()
             if split == "heldout":
@@ -3498,15 +3787,16 @@ def eval_world_tubes(
             render_times.append(view_render_elapsed)
             for name, frame_accumulator in frame_accumulators.items():
                 split_rows[name].append(frame_accumulator.metrics())
-            rows.append(
-                (
-                    torch.cat(media_targets, dim=0),
-                    RenderedSequence(
-                        rgb=torch.cat(media_renders, dim=0),
-                        alpha=torch.cat(media_alphas, dim=0),
-                    ),
+            if collect_media and view == 0:
+                rows.append(
+                    (
+                        torch.cat(media_targets, dim=0),
+                        RenderedSequence(
+                            rgb=torch.cat(media_renders, dim=0),
+                            alpha=torch.cat(media_alphas, dim=0),
+                        ),
+                    )
                 )
-            )
         global_metrics = global_accumulator.metrics()
         if split == "heldout":
             global_metrics["eval_lpips"] = (
@@ -3527,6 +3817,7 @@ def eval_world_tubes(
         w2c_all=bundle.train_w2c,
         lens_models=bundle.train_lens_models,
         distortions=bundle.train_distortions,
+        target_provider=train_target_provider,
         split_metrics=frame_metric_splits,
     )
     heldout_rows: list = []
@@ -3546,6 +3837,7 @@ def eval_world_tubes(
             w2c_all=bundle.heldout_w2c,
             lens_models=bundle.heldout_lens_models,
             distortions=bundle.heldout_distortions,
+            target_provider=heldout_target_provider,
         )
     metrics = train_global_metrics
     for name, metrics_rows in train_frame_split_metrics.items():
@@ -3569,6 +3861,71 @@ def _tensor_payload_bytes(values: tuple[Tensor | None, ...]) -> int:
         for value in values
         if value is not None
     )
+
+
+def _projective_atlas_logical_interaction_bytes(
+    atlas,
+    times: Tensor,
+    config: UVTRenderConfig,
+) -> dict[str, Any]:
+    """Count the exact tensor ABI presented to the interval renderer."""
+
+    bins = pack_projective_trace_tile_time_bins(
+        atlas.cells,
+        image_width=int(config.width),
+        image_height=int(config.height),
+        frames=int(config.frames),
+        tile_x=int(config.tile_x),
+        tile_y=int(config.tile_y),
+        tile_t=int(config.frames),
+        tile_capacity=int(config.tile_capacity),
+        device=atlas.coeffs.device,
+        allow_fallback_cells=True,
+    )
+    value_tensor_bytes = _tensor_payload_bytes(
+        (
+            atlas.coeffs,
+            atlas.opacity,
+            atlas.opacity_time_coeffs,
+            atlas.spatial_precision_uv,
+            atlas.depth_affine_uv,
+            atlas.depth_reference_uvt,
+            atlas.alpha_cutoff_reference_uvt,
+            atlas.color,
+            times,
+        )
+    )
+    topology_tensor_bytes = _tensor_payload_bytes(
+        (
+            bins.tile_counts,
+            bins.tile_primitive_ids,
+            bins.tile_active_start,
+            bins.tile_active_stop,
+            bins.tile_overflow,
+        )
+    )
+    result = {
+        "definition": (
+            "exact logical bytes of differentiable atlas/time tensors plus "
+            "packed native tile/primitive/active-interval topology tensors"
+        ),
+        "topology_inclusive": True,
+        "outputs_residuals_gradients_and_native_scratch_included": False,
+        "allocator_peak_claim_eligible": False,
+        "interaction_ratio_claim_eligible": True,
+        "value_tensor_bytes": value_tensor_bytes,
+        "topology_tensor_bytes": topology_tensor_bytes,
+        "total_bytes": value_tensor_bytes + topology_tensor_bytes,
+        "packed_topology_shapes": {
+            "tile_counts": list(bins.tile_counts.shape),
+            "tile_primitive_ids": list(bins.tile_primitive_ids.shape),
+            "tile_active_start": list(bins.tile_active_start.shape),
+            "tile_active_stop": list(bins.tile_active_stop.shape),
+            "tile_overflow": list(bins.tile_overflow.shape),
+        },
+    }
+    del bins
+    return result
 
 
 def _tensor_storage_descriptor(
@@ -3836,9 +4193,202 @@ def _tensor_sha256(value: Tensor) -> str:
     return digest.hexdigest()
 
 
+def _tensor_sha256_from_chunks(
+    *,
+    dtype: torch.dtype,
+    shape: tuple[int, ...],
+    chunks: Iterable[Tensor],
+) -> str:
+    """Reproduce ``_tensor_sha256`` without materializing the full tensor."""
+
+    digest = hashlib.sha256()
+    digest.update(str(dtype).encode("utf-8"))
+    digest.update(json.dumps(list(shape)).encode("utf-8"))
+    observed = 0
+    for chunk in chunks:
+        if chunk.dtype != dtype or tuple(chunk.shape[1:]) != shape[1:]:
+            raise ValueError("streamed frozen target chunk shape or dtype drifted")
+        observed += int(chunk.shape[0])
+        digest.update(
+            chunk.detach()
+            .to(device="cpu")
+            .contiguous()
+            .numpy()
+            .tobytes(order="C")
+        )
+    if observed != shape[0]:
+        raise ValueError(
+            f"streamed frozen target hash saw {observed} frames; expected {shape[0]}"
+        )
+    return digest.hexdigest()
+
+
+def _frozen_world_camera_sequence_sha256(
+    K_seq: Tensor,
+    w2c_seq: Tensor,
+) -> str:
+    digest = hashlib.sha256()
+    digest.update(_tensor_sha256(K_seq).encode("ascii"))
+    digest.update(_tensor_sha256(w2c_seq).encode("ascii"))
+    return digest.hexdigest()
+
+
+def _frozen_world_project_replay_sample(
+    model: WorldTubeModel,
+    *,
+    camera_program_mode: str,
+    heldout_K: Tensor,
+    heldout_w2c: Tensor,
+    K_seq: Tensor | None,
+    w2c_seq: Tensor | None,
+    frame: int,
+    frame_config: UVTRenderConfig,
+    camera_projection: str,
+    heldout_lens_model: str,
+    heldout_distortion: Tensor | None,
+    full_frames: int,
+) -> ProjectedTubeSequence:
+    if camera_program_mode == STATIC_CAMERA_PROGRAM_MODE:
+        return project_world_tube_sequence(
+            model,
+            heldout_K,
+            heldout_w2c,
+            frame_config,
+            camera_projection=camera_projection,
+            lens_model=heldout_lens_model,
+            distortion=heldout_distortion,
+            full_frames=full_frames,
+            frame_start=frame,
+        )
+    if camera_program_mode != BOUNDED_YAW_CAMERA_PROGRAM_MODE:
+        raise ValueError(
+            f"unsupported frozen-world camera program: {camera_program_mode}"
+        )
+    if (
+        camera_projection != "legacy_pinhole"
+        or heldout_lens_model != "pinhole"
+        or heldout_distortion is not None
+    ):
+        raise ValueError(
+            "bounded-yaw frozen-world replay requires undistorted legacy pinhole"
+        )
+    if K_seq is None or w2c_seq is None:
+        raise ValueError(
+            "bounded-yaw frozen-world replay requires a camera sequence"
+        )
+    return project_world_tube_sequence(
+        model,
+        K_seq[frame],
+        w2c_seq[frame],
+        frame_config,
+        camera_projection="legacy_pinhole",
+        full_frames=full_frames,
+        frame_start=frame,
+    )
+
+
+def _frozen_world_compile_projected(
+    model: WorldTubeModel,
+    *,
+    camera_program_mode: str,
+    heldout_K: Tensor,
+    heldout_w2c: Tensor,
+    K_seq: Tensor | None,
+    w2c_seq: Tensor | None,
+    projection_config: UVTRenderConfig,
+    camera_projection: str,
+    heldout_lens_model: str,
+    heldout_distortion: Tensor | None,
+    full_frames: int,
+) -> ProjectedTubeSequence:
+    if camera_program_mode == STATIC_CAMERA_PROGRAM_MODE:
+        return project_world_tube_sequence(
+            model,
+            heldout_K,
+            heldout_w2c,
+            projection_config,
+            camera_projection=camera_projection,
+            lens_model=heldout_lens_model,
+            distortion=heldout_distortion,
+            full_frames=full_frames,
+            frame_start=0,
+        )
+    if camera_program_mode != BOUNDED_YAW_CAMERA_PROGRAM_MODE:
+        raise ValueError(
+            f"unsupported frozen-world camera program: {camera_program_mode}"
+        )
+    if (
+        camera_projection != "legacy_pinhole"
+        or heldout_lens_model != "pinhole"
+        or heldout_distortion is not None
+    ):
+        raise ValueError(
+            "bounded-yaw frozen-world compilation requires undistorted legacy pinhole"
+        )
+    if K_seq is None or w2c_seq is None:
+        raise ValueError(
+            "bounded-yaw frozen-world compilation requires a camera sequence"
+        )
+    # This frozen row measures the production single-midpoint first-order
+    # compiler. Multi-chart gauge evidence belongs to its separate theorem row.
+    return project_world_tube_sequence_dynamic_first_order(
+        model=model,
+        K_seq=K_seq,
+        w2c_seq=w2c_seq,
+        config=projection_config,
+        full_frames=full_frames,
+        frame_start=0,
+        projective_gauge=True,
+    )
+
+
+def _upper_tail_topk_size(element_count: int, quantile: float) -> int:
+    if element_count < 1 or not 0.0 <= quantile <= 1.0:
+        raise ValueError("bounded quantile inputs are invalid")
+    lower_rank = math.floor((element_count - 1) * quantile)
+    return element_count - lower_rank
+
+
+def _merge_upper_tail_topk(
+    retained: Tensor | None,
+    values: Tensor,
+    *,
+    keep: int,
+) -> Tensor:
+    candidate = values.detach().to(device="cpu").reshape(-1)
+    if retained is not None:
+        candidate = torch.cat((retained, candidate), dim=0)
+    return torch.topk(
+        candidate,
+        k=min(keep, int(candidate.numel())),
+        largest=True,
+        sorted=True,
+    ).values
+
+
+def _linear_quantile_from_upper_tail(
+    retained_descending: Tensor,
+    *,
+    element_count: int,
+    quantile: float,
+) -> float:
+    rank = (element_count - 1) * quantile
+    lower_rank = math.floor(rank)
+    upper_rank = math.ceil(rank)
+    lower_offset = element_count - 1 - lower_rank
+    upper_offset = element_count - 1 - upper_rank
+    if lower_offset >= retained_descending.numel():
+        raise ValueError("bounded quantile tail is incomplete")
+    lower_value = retained_descending[lower_offset]
+    upper_value = retained_descending[upper_offset]
+    fraction = rank - lower_rank
+    return float((lower_value + (upper_value - lower_value) * fraction).item())
+
+
 def _frozen_evaluation_contract_hashes(
     *,
-    target_frames: Tensor,
+    target_frames: Tensor | None,
+    target_frames_sha256: str | None = None,
     heldout_K: Tensor,
     heldout_w2c: Tensor,
     heldout_distortion: Tensor | None,
@@ -3850,8 +4400,19 @@ def _frozen_evaluation_contract_hashes(
     frame_indices: tuple[int, ...],
     centered_frame_times: tuple[float, ...],
     config: UVTRenderConfig,
+    camera_program_mode: str = STATIC_CAMERA_PROGRAM_MODE,
+    camera_program_sha256: str | None = None,
+    camera_sequence_sha256: str | None = None,
 ) -> dict[str, str]:
-    target_sha = _tensor_sha256(target_frames)
+    if (target_frames is None) == (target_frames_sha256 is None):
+        raise ValueError(
+            "frozen evaluation contract requires exactly one target hash source"
+        )
+    target_sha = (
+        str(target_frames_sha256)
+        if target_frames_sha256 is not None
+        else _tensor_sha256(target_frames)
+    )
     frame_indices_sha = frozen_world_sequence_sha256(frame_indices)
     centered_frame_times_sha = frozen_world_sequence_sha256(
         centered_frame_times
@@ -3877,43 +4438,70 @@ def _frozen_evaluation_contract_hashes(
             separators=(",", ":"),
         ).encode("utf-8")
     )
-    camera_sha = camera_digest.hexdigest()
+    base_camera_sha = camera_digest.hexdigest()
+    camera_sha = (
+        base_camera_sha
+        if camera_program_mode == STATIC_CAMERA_PROGRAM_MODE
+        else str(camera_program_sha256)
+    )
+    if camera_program_mode != STATIC_CAMERA_PROGRAM_MODE:
+        for name, value in (
+            ("camera_program_sha256", camera_program_sha256),
+            ("camera_sequence_sha256", camera_sequence_sha256),
+        ):
+            if value is None or len(value) != 64:
+                raise ValueError(f"moving frozen-world {name} is missing")
     evaluation_digest = hashlib.sha256()
     evaluation_digest.update(target_sha.encode("ascii"))
     evaluation_digest.update(camera_sha.encode("ascii"))
     evaluation_digest.update(frame_indices_sha.encode("ascii"))
     evaluation_digest.update(centered_frame_times_sha.encode("ascii"))
+    evaluation_contract: dict[str, Any] = {
+        "full_frames": int(full_frames),
+        "frame_count": int(frame_count),
+        "temporal_sampling": "ordered_full_interval_integer_lattice_v1",
+        "image_size": [int(config.height), int(config.width)],
+        "alpha_mode": config.alpha_mode,
+        "amplitude_convention": config.amplitude_convention,
+        "alpha_threshold": float(config.alpha_threshold),
+        "tile_x": int(config.tile_x),
+        "tile_y": int(config.tile_y),
+        "tile_t": int(config.tile_t),
+        "loss": "sqrt(error^2 + 1e-6) / global_element_count",
+        "replay_backend": "metal_tile:index_add:direct_atomic",
+        "compiled_backend": "projective_cell_interval:mixed",
+        "dtype": "float32",
+    }
+    if camera_program_mode != STATIC_CAMERA_PROGRAM_MODE:
+        evaluation_contract.update(
+            {
+                "camera_program_mode": camera_program_mode,
+                "camera_program_sha256": camera_sha,
+                "camera_sequence_sha256": camera_sequence_sha256,
+            }
+        )
     evaluation_digest.update(
         json.dumps(
-            {
-                "full_frames": int(full_frames),
-                "frame_count": int(frame_count),
-                "temporal_sampling": (
-                    "ordered_full_interval_integer_lattice_v1"
-                ),
-                "image_size": [int(config.height), int(config.width)],
-                "alpha_mode": config.alpha_mode,
-                "amplitude_convention": config.amplitude_convention,
-                "alpha_threshold": float(config.alpha_threshold),
-                "tile_x": int(config.tile_x),
-                "tile_y": int(config.tile_y),
-                "tile_t": int(config.tile_t),
-                "loss": "sqrt(error^2 + 1e-6) / global_element_count",
-                "replay_backend": "metal_tile:index_add:direct_atomic",
-                "compiled_backend": "projective_cell_interval:mixed",
-                "dtype": "float32",
-            },
+            evaluation_contract,
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
     )
-    return {
+    result = {
         "target_frames_sha256": target_sha,
         "camera_program_sha256": camera_sha,
         "frame_indices_sha256": frame_indices_sha,
         "centered_frame_times_sha256": centered_frame_times_sha,
         "evaluation_contract_sha256": evaluation_digest.hexdigest(),
     }
+    if camera_program_mode != STATIC_CAMERA_PROGRAM_MODE:
+        result.update(
+            {
+                "base_heldout_camera_sha256": base_camera_sha,
+                "camera_sequence_sha256": str(camera_sequence_sha256),
+            }
+        )
+    return result
 
 
 def _save_frozen_world_checkpoint(
@@ -3958,11 +4546,200 @@ def _save_frozen_world_checkpoint(
     }
 
 
+def _load_frozen_world_checkpoint(
+    path: Path,
+    *,
+    device: torch.device,
+    expected_file_sha256: str,
+    expected_world_state_sha256: str,
+    expected_full_frames: int,
+) -> tuple[WorldTubeModel, dict[str, Any]]:
+    """Strictly reconstruct one frozen legacy world without running training."""
+
+    resolved_path = path.expanduser().resolve()
+    if not resolved_path.is_file():
+        raise FileNotFoundError(
+            f"frozen-world checkpoint not found: {resolved_path}"
+        )
+    actual_file_sha256 = file_sha256(resolved_path)
+    if actual_file_sha256 != expected_file_sha256:
+        raise ValueError("frozen-world input checkpoint file SHA-256 mismatch")
+    payload = torch.load(
+        resolved_path,
+        map_location="cpu",
+        weights_only=True,
+    )
+    if not isinstance(payload, dict) or int(payload.get("schema_version", -1)) != 1:
+        raise ValueError("frozen-world input checkpoint schema is invalid")
+    expected_payload_keys = {
+        "schema_version",
+        "representation",
+        "frame_count",
+        "active_tube_count",
+        "tube_count",
+        "alpha_mode",
+        "amplitude_convention",
+        "min_precision_xy",
+        "min_lambda_t",
+        "parameter_names",
+        "world_state_sha256",
+        "state_dict",
+    }
+    if set(payload) != expected_payload_keys:
+        raise ValueError("frozen-world input checkpoint schema keys drifted")
+    if payload.get("representation") != "legacy_tube":
+        raise ValueError("frozen-world input checkpoint must contain legacy_tube")
+    if int(payload.get("frame_count", -1)) != int(expected_full_frames):
+        raise ValueError(
+            "frozen-world input checkpoint frame count does not match the dataset"
+        )
+    if payload.get("alpha_mode") != "peak_splat":
+        raise ValueError("frozen-world input checkpoint must use peak_splat")
+    if payload.get("amplitude_convention") != "fiber_integrated":
+        raise ValueError(
+            "frozen-world input checkpoint must use fiber_integrated amplitude"
+        )
+    if payload.get("world_state_sha256") != expected_world_state_sha256:
+        raise ValueError("frozen-world expected world-state SHA-256 mismatch")
+    state = payload.get("state_dict")
+    parameter_names = payload.get("parameter_names")
+    if not isinstance(state, dict) or not isinstance(parameter_names, list):
+        raise ValueError("frozen-world input checkpoint state metadata is missing")
+    expected_parameter_names = [
+        "x0",
+        "velocity",
+        "raw_precision_xy",
+        "raw_lambda_t",
+        "raw_opacity",
+        "raw_color",
+        "t0",
+    ]
+    if parameter_names != expected_parameter_names or list(state) != parameter_names:
+        raise ValueError(
+            "frozen-world input checkpoint parameter names/order are invalid"
+        )
+    if any(not isinstance(value, Tensor) for value in state.values()):
+        raise ValueError("frozen-world input checkpoint parameters must be tensors")
+    tube_count = int(payload.get("tube_count", -1))
+    active_tube_count = int(payload.get("active_tube_count", -1))
+    expected_shapes = {
+        "x0": (tube_count, 3),
+        "velocity": (tube_count, 3),
+        "raw_precision_xy": (tube_count, 2),
+        "raw_lambda_t": (tube_count,),
+        "raw_opacity": (tube_count,),
+        "raw_color": (tube_count, 3),
+        "t0": (tube_count,),
+    }
+    if tube_count < 1 or not 1 <= active_tube_count <= tube_count:
+        raise ValueError("frozen-world input checkpoint tube counts are invalid")
+    if (
+        not math.isfinite(float(payload.get("min_precision_xy", math.nan)))
+        or not math.isfinite(float(payload.get("min_lambda_t", math.nan)))
+        or float(payload["min_precision_xy"]) <= 0.0
+        or float(payload["min_lambda_t"]) <= 0.0
+    ):
+        raise ValueError(
+            "frozen-world input checkpoint precision floors are invalid"
+        )
+    for name, expected_shape in expected_shapes.items():
+        value = state[name]
+        if (
+            tuple(value.shape) != expected_shape
+            or value.dtype != torch.float32
+            or value.layout != torch.strided
+            or value.device.type != "cpu"
+            or not bool(torch.isfinite(value).all())
+        ):
+            raise ValueError(
+                "frozen-world checkpoint "
+                f"{name} must be finite strided CPU float32 {expected_shape}"
+            )
+    metadata = {
+        key: payload[key]
+        for key in (
+            "representation",
+            "frame_count",
+            "active_tube_count",
+            "tube_count",
+            "alpha_mode",
+            "amplitude_convention",
+            "min_precision_xy",
+            "min_lambda_t",
+            "parameter_names",
+        )
+    }
+    if _world_state_digest(state, metadata=metadata) != expected_world_state_sha256:
+        raise ValueError(
+            "frozen-world checkpoint contents do not reproduce world-state SHA-256"
+        )
+
+    min_precision_xy = float(payload["min_precision_xy"])
+    min_lambda_t = float(payload["min_lambda_t"])
+    init_x0 = state["x0"].to(device=device)
+    model = WorldTubeModel(
+        init_x0=init_x0,
+        init_color=torch.full_like(state["raw_color"], 0.5).to(device=device),
+        init_t0=state["t0"].to(device=device),
+        frames=int(expected_full_frames),
+        init_precision_xy=min_precision_xy + 1.0,
+        init_lambda_t=min_lambda_t + 1.0,
+        init_opacity=0.5,
+        min_precision_xy=min_precision_xy,
+        min_lambda_t=min_lambda_t,
+        velocity_reg_weight=0.0,
+        depth_velocity_reg_weight=0.0,
+        position_reg_weight=0.0,
+        alpha_mode="peak_splat",
+        amplitude_convention="fiber_integrated",
+    ).to(device)
+    model.load_state_dict(
+        {name: value.to(device=device) for name, value in state.items()},
+        strict=True,
+    )
+    model.set_active_tube_count(active_tube_count)
+    live_parameter_names = [name for name, _ in model.named_parameters()]
+    live_parameter_shapes = {
+        name: list(parameter.shape) for name, parameter in model.named_parameters()
+    }
+    if live_parameter_names != parameter_names or live_parameter_shapes != {
+        name: list(expected_shapes[name]) for name in parameter_names
+    }:
+        raise RuntimeError(
+            "reconstructed frozen-world model parameter contract drifted"
+        )
+    live_metadata = _world_state_metadata(
+        model,
+        frame_count=expected_full_frames,
+        representation=model.representation_name,
+    )
+    live_world_sha256 = _world_state_digest(
+        snapshot_world_tube_state(model),
+        metadata=live_metadata,
+    )
+    if live_metadata != metadata or live_world_sha256 != expected_world_state_sha256:
+        raise RuntimeError(
+            "reconstructed frozen-world model does not match checkpoint identity"
+        )
+    return model, {
+        "path": str(resolved_path),
+        "sha256": actual_file_sha256,
+        "bytes": int(resolved_path.stat().st_size),
+        "parameter_tensor_count": len(parameter_names),
+        "parameter_shapes": live_parameter_shapes,
+        "world_state_sha256": live_world_sha256,
+        "loaded_from_input_checkpoint": True,
+        **live_metadata,
+    }
+
+
 def _frozen_compiled_full_vs_sliced_parity(
     model: WorldTubeModel,
     *,
     heldout_K: Tensor,
     heldout_w2c: Tensor,
+    K_seq: Tensor | None,
+    w2c_seq: Tensor | None,
     heldout_lens_model: str,
     heldout_distortion: Tensor | None,
     camera_projection: str,
@@ -3971,10 +4748,12 @@ def _frozen_compiled_full_vs_sliced_parity(
     full_frames: int,
     frame_indices: tuple[int, ...],
     centered_frame_times: tuple[float, ...],
-    target_host: Tensor,
+    load_target_chunk: Callable[[int, int], Tensor],
+    resident_chunk_frames: int,
     contract_hashes: dict[str, str],
+    camera_program_mode: str = STATIC_CAMERA_PROGRAM_MODE,
 ) -> dict[str, Any]:
-    """Certify one non-unit atlas against one-frame slices of that same atlas.
+    """Certify bounded atlas chunks against one-frame slices of one parent.
 
     This is intentionally bounded to the one sweep row selected by the caller.
     It is correctness evidence, not a performance measurement.
@@ -3997,6 +4776,8 @@ def _frozen_compiled_full_vs_sliced_parity(
         raise ValueError(
             "selected-time atlas-slice parity requires at least two non-unit-spaced times"
         )
+    if resident_chunk_frames < 1:
+        raise ValueError("selected-time parity chunk size must be positive")
 
     device = next(model.parameters()).device
     world_state_metadata = _world_state_metadata(
@@ -4010,16 +4791,18 @@ def _frozen_compiled_full_vs_sliced_parity(
     )
     model.zero_grad(set_to_none=True)
     projection_config = replace(render_config, frames=full_frames)
-    projected = project_world_tube_sequence(
+    projected = _frozen_world_compile_projected(
         model,
-        heldout_K,
-        heldout_w2c,
-        projection_config,
+        camera_program_mode=camera_program_mode,
+        heldout_K=heldout_K,
+        heldout_w2c=heldout_w2c,
+        K_seq=K_seq,
+        w2c_seq=w2c_seq,
+        projection_config=projection_config,
         camera_projection=camera_projection,
-        lens_model=heldout_lens_model,
-        distortion=heldout_distortion,
+        heldout_lens_model=heldout_lens_model,
+        heldout_distortion=heldout_distortion,
         full_frames=full_frames,
-        frame_start=0,
     )
     times = torch.tensor(
         centered_frame_times,
@@ -4046,66 +4829,136 @@ def _frozen_compiled_full_vs_sliced_parity(
         stratify_visibility=True,
         mark_visibility_fallback=True,
     )
-    full_state = ProjectiveCellIntervalTrainerState(
-        atlas=atlas,
-        times=times,
-        config=config,
-        sigma_px=1.0,
-        image_width=int(config.width),
-        image_height=int(config.height),
-        tile_size=int(config.tile_x),
-        fallback_render_mode="mixed",
+    target_element_count = (
+        frame_count * int(config.height) * int(config.width) * 3
     )
-    target_device = target_host.to(device=device)
-    target_element_count = int(target_host.numel())
-    full_image = full_state.render()
-    full_loss = torch.sqrt(
-        (full_image - target_device).square() + 1.0e-6
-    ).sum() / float(target_element_count)
-    full_loss.backward(retain_graph=True)
-    synchronize_device(device)
-    full_gradients, full_gradient_parameters = _world_parameter_gradients(model)
-    full_loss_value = float(full_loss.detach().cpu())
-    world_state_after_full = _world_state_digest(
-        snapshot_world_tube_state(model),
-        metadata=world_state_metadata,
-    )
-
-    model.zero_grad(set_to_none=True)
-    sliced_images: list[Tensor] = []
-    sliced_loss_value = 0.0
-    cumulative_sliced_trace_count = 0
-    cumulative_sliced_cell_count = 0
-    for sample_index in range(frame_count):
+    full_loss_value = 0.0
+    bounded_chunk_count = 0
+    for chunk_start in range(0, frame_count, resident_chunk_frames):
+        chunk_stop = min(frame_count, chunk_start + resident_chunk_frames)
         chunk_atlas = slice_projective_trace_cell_atlas_frames(
             atlas,
-            start=sample_index,
-            stop=sample_index + 1,
+            start=chunk_start,
+            stop=chunk_stop,
         )
-        cumulative_sliced_trace_count += int(chunk_atlas.coeffs.shape[0])
-        cumulative_sliced_cell_count += len(chunk_atlas.cells)
         chunk_state = ProjectiveCellIntervalTrainerState(
             atlas=chunk_atlas,
-            times=times[sample_index : sample_index + 1].contiguous(),
-            config=replace(config, frames=1),
+            times=times[chunk_start:chunk_stop].contiguous(),
+            config=replace(config, frames=chunk_stop - chunk_start),
             sigma_px=1.0,
             image_width=int(config.width),
             image_height=int(config.height),
             tile_size=int(config.tile_x),
             fallback_render_mode="mixed",
         )
-        sliced_image = chunk_state.render()
-        sliced_loss = torch.sqrt(
-            (
-                sliced_image
-                - target_device[sample_index : sample_index + 1]
-            ).square()
-            + 1.0e-6
+        target_device = load_target_chunk(chunk_start, chunk_stop).to(
+            device=device
+        )
+        full_image = chunk_state.render()
+        full_loss = torch.sqrt(
+            (full_image - target_device).square() + 1.0e-6
         ).sum() / float(target_element_count)
-        sliced_loss.backward(retain_graph=sample_index + 1 < frame_count)
-        sliced_loss_value += float(sliced_loss.detach().cpu())
-        sliced_images.append(sliced_image.detach())
-        del chunk_atlas, chunk_state, sliced_image, sliced_loss
+        # The same parent atlas graph is reused by the one-frame route below.
+        full_loss.backward(retain_graph=True)
+        full_loss_value += float(full_loss.detach().cpu())
+        bounded_chunk_count += 1
+        del (
+            chunk_atlas,
+            chunk_state,
+            target_device,
+            full_image,
+            full_loss,
+        )
+    synchronize_device(device)
+    full_gradients, full_gradient_parameters = _world_parameter_gradients(model)
+    world_state_after_full = _world_state_digest(
+        snapshot_world_tube_state(model),
+        metadata=world_state_metadata,
+    )
+
+    model.zero_grad(set_to_none=True)
+    sliced_loss_value = 0.0
+    cumulative_sliced_trace_count = 0
+    cumulative_sliced_cell_count = 0
+    image_max_abs_error = 0.0
+    image_absolute_error_sum = 0.0
+    for chunk_start in range(0, frame_count, resident_chunk_frames):
+        chunk_stop = min(frame_count, chunk_start + resident_chunk_frames)
+        reference_atlas = slice_projective_trace_cell_atlas_frames(
+            atlas,
+            start=chunk_start,
+            stop=chunk_stop,
+        )
+        reference_state = ProjectiveCellIntervalTrainerState(
+            atlas=reference_atlas,
+            times=times[chunk_start:chunk_stop].contiguous(),
+            config=replace(config, frames=chunk_stop - chunk_start),
+            sigma_px=1.0,
+            image_width=int(config.width),
+            image_height=int(config.height),
+            tile_size=int(config.tile_x),
+            fallback_render_mode="mixed",
+        )
+        with torch.no_grad():
+            reference_image = reference_state.render()
+        target_device = load_target_chunk(chunk_start, chunk_stop).to(
+            device=device
+        )
+        sliced_images: list[Tensor] = []
+        for sample_index in range(chunk_start, chunk_stop):
+            one_frame_atlas = slice_projective_trace_cell_atlas_frames(
+                atlas,
+                start=sample_index,
+                stop=sample_index + 1,
+            )
+            cumulative_sliced_trace_count += int(
+                one_frame_atlas.coeffs.shape[0]
+            )
+            cumulative_sliced_cell_count += len(one_frame_atlas.cells)
+            one_frame_state = ProjectiveCellIntervalTrainerState(
+                atlas=one_frame_atlas,
+                times=times[sample_index : sample_index + 1].contiguous(),
+                config=replace(config, frames=1),
+                sigma_px=1.0,
+                image_width=int(config.width),
+                image_height=int(config.height),
+                tile_size=int(config.tile_x),
+                fallback_render_mode="mixed",
+            )
+            sliced_image = one_frame_state.render()
+            local_index = sample_index - chunk_start
+            sliced_loss = torch.sqrt(
+                (
+                    sliced_image
+                    - target_device[local_index : local_index + 1]
+                ).square()
+                + 1.0e-6
+            ).sum() / float(target_element_count)
+            sliced_loss.backward(retain_graph=sample_index + 1 < frame_count)
+            sliced_loss_value += float(sliced_loss.detach().cpu())
+            sliced_images.append(sliced_image.detach())
+            del (
+                one_frame_atlas,
+                one_frame_state,
+                sliced_image,
+                sliced_loss,
+            )
+        sliced_chunk_image = torch.cat(sliced_images, dim=0)
+        image_difference = (reference_image - sliced_chunk_image).abs()
+        image_max_abs_error = max(
+            image_max_abs_error,
+            float(image_difference.max().cpu()),
+        )
+        image_absolute_error_sum += float(image_difference.sum().cpu())
+        del (
+            reference_atlas,
+            reference_state,
+            reference_image,
+            target_device,
+            sliced_images,
+            sliced_chunk_image,
+            image_difference,
+        )
     synchronize_device(device)
     sliced_gradients, sliced_gradient_parameters = _world_parameter_gradients(
         model
@@ -4116,10 +4969,9 @@ def _frozen_compiled_full_vs_sliced_parity(
     )
     model.zero_grad(set_to_none=True)
 
-    sliced_image_all = torch.cat(sliced_images, dim=0)
-    image_difference = (full_image.detach() - sliced_image_all).abs()
-    image_max_abs_error = float(image_difference.max().cpu())
-    image_mean_abs_error = float(image_difference.mean().cpu())
+    image_mean_abs_error = image_absolute_error_sum / float(
+        target_element_count
+    )
     loss_absolute_delta = abs(full_loss_value - sliced_loss_value)
     gradient = _gradient_comparison(
         full_gradients,
@@ -4181,8 +5033,8 @@ def _frozen_compiled_full_vs_sliced_parity(
         "status": "complete",
         "accepted": all(checks.values()),
         "scope": (
-            "one bounded non-unit selected-time atlas rendered whole versus "
-            "one-frame compact slices of the same parent atlas"
+            "one bounded non-unit selected-time atlas rendered in resident "
+            "chunks versus one-frame compact slices of the same parent atlas"
         ),
         "timing_claim_eligible": False,
         "frame_count": frame_count,
@@ -4190,6 +5042,8 @@ def _frozen_compiled_full_vs_sliced_parity(
         "frame_indices": list(frame_indices),
         "centered_frame_times": list(centered_frame_times),
         "time_steps": list(time_steps),
+        "resident_chunk_frames": resident_chunk_frames,
+        "bounded_chunk_count": bounded_chunk_count,
         "slice_chunk_frames": 1,
         "slice_count": frame_count,
         "parent_atlas_trace_count": int(atlas.coeffs.shape[0]),
@@ -4249,13 +5103,6 @@ def _frozen_compiled_full_vs_sliced_parity(
         projected,
         times,
         atlas,
-        full_state,
-        target_device,
-        full_image,
-        full_loss,
-        sliced_images,
-        sliced_image_all,
-        image_difference,
     )
     gc.collect()
     torch.mps.empty_cache()
@@ -4270,10 +5117,14 @@ def frozen_world_replay_compiled_report(
     camera_projection: str,
     out_dir: Path,
     max_frames: int = 0,
+    resident_chunk_frames: int | None = None,
     checkpoint: dict[str, Any] | None = None,
     verify_selected_time_slice_parity: bool = False,
     timing_warmups: int = 0,
     timing_repeats: int = 1,
+    heldout_target_provider: PaperMulticamTargetProvider | None = None,
+    camera_program_mode: str = STATIC_CAMERA_PROGRAM_MODE,
+    camera_program: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Compare per-frame replay and one interval atlas from one frozen world.
 
@@ -4309,6 +5160,54 @@ def frozen_world_replay_compiled_report(
     frame_count = full_frames if max_frames <= 0 else min(int(max_frames), full_frames)
     if frame_count < 1:
         raise ValueError("frozen replay/compiled frame count must be positive")
+    moving_camera = camera_program_mode == BOUNDED_YAW_CAMERA_PROGRAM_MODE
+    if camera_program_mode not in {
+        STATIC_CAMERA_PROGRAM_MODE,
+        BOUNDED_YAW_CAMERA_PROGRAM_MODE,
+    }:
+        raise ValueError(
+            f"unsupported frozen-world camera program: {camera_program_mode}"
+        )
+    decoded_image_size = (
+        (
+            heldout_target_provider.height,
+            heldout_target_provider.width,
+        )
+        if heldout_target_provider is not None
+        else tuple(int(value) for value in bundle.heldout_frames.shape[-2:])
+    )
+    if moving_camera:
+        if camera_program != bounded_yaw_camera_program_contract():
+            raise ValueError("bounded-yaw frozen-world camera program drifted")
+        if camera_projection != "legacy_pinhole":
+            raise ValueError(
+                "bounded-yaw frozen-world comparison requires legacy_pinhole"
+            )
+        if (int(render_config.height), int(render_config.width)) != (
+            BOUNDED_YAW_IMAGE_SIZE
+        ):
+            raise ValueError(
+                "bounded-yaw frozen-world comparison must actually render 256x256"
+            )
+        if decoded_image_size != BOUNDED_YAW_IMAGE_SIZE:
+            raise ValueError(
+                "bounded-yaw heldout targets must be decoded directly at 256x256"
+            )
+        if frame_count not in BOUNDED_YAW_FRAME_COUNTS:
+            raise ValueError(
+                "bounded-yaw frozen-world rows require frame counts 8,16,32,64"
+            )
+        if (
+            checkpoint is None
+            or checkpoint.get("loaded_from_input_checkpoint") is not True
+        ):
+            raise ValueError(
+                "bounded-yaw frozen-world rows require the accepted input checkpoint"
+            )
+    elif camera_program is not None:
+        raise ValueError(
+            "static frozen-world comparison does not accept a camera program"
+        )
     frame_indices = frozen_world_full_interval_frame_indices(
         full_frames,
         frame_count,
@@ -4318,21 +5217,59 @@ def frozen_world_replay_compiled_report(
         for frame in frame_indices
     )
     config = replace(render_config, frames=frame_count)
-    target_indices = torch.tensor(
-        frame_indices,
-        dtype=torch.long,
-        device=bundle.heldout_frames.device,
+    if resident_chunk_frames is None:
+        resident_chunk_frames = max(1, int(render_config.tile_t))
+    if (
+        isinstance(resident_chunk_frames, bool)
+        or not isinstance(resident_chunk_frames, int)
+        or resident_chunk_frames < 1
+    ):
+        raise ValueError("frozen-world device chunk size must be a positive integer")
+    # Keep configured tile size unchanged; native interval bins still span the chunk.
+    resident_chunk_frames = min(resident_chunk_frames, frame_count)
+
+    def load_target_chunk(chunk_start: int, chunk_stop: int) -> Tensor:
+        selected_indices = frame_indices[chunk_start:chunk_stop]
+        if heldout_target_provider is not None:
+            target_frames = load_grouped_frozen_target_frames(
+                heldout_target_provider, frame_indices,
+                start=chunk_start, stop=chunk_stop, chunk_frames=resident_chunk_frames,
+            )
+        else:
+            if bundle.heldout_frames.device.type == "meta":
+                raise RuntimeError(
+                    "deferred frozen-world targets require a bounded provider"
+                )
+            target_indices = torch.tensor(
+                selected_indices,
+                dtype=torch.long,
+                device=bundle.heldout_frames.device,
+            )
+            target_frames = bundle.heldout_frames[0].index_select(
+                0,
+                target_indices,
+            )
+        return (
+            target_frames.permute(0, 2, 3, 1)
+            .to(device="cpu", dtype=torch.float32)
+            .contiguous()
+        )
+
+    target_shape = (
+        frame_count,
+        int(config.height),
+        int(config.width),
+        3,
     )
-    target_host = (
-        bundle.heldout_frames[0].index_select(0, target_indices)
-        .permute(0, 2, 3, 1)
-        .to(device="cpu", dtype=torch.float32)
+    target_element_count = math.prod(target_shape)
+    target_frames_sha256 = _tensor_sha256_from_chunks(
+        dtype=torch.float32,
+        shape=target_shape,
+        chunks=(
+            load_target_chunk(start, min(start + resident_chunk_frames, frame_count))
+            for start in range(0, frame_count, resident_chunk_frames)
+        ),
     )
-    resident_chunk_frames = max(
-        1,
-        min(int(render_config.tile_t), frame_count),
-    )
-    target_element_count = int(target_host.numel())
     heldout_K = select_view_K(bundle.heldout_K, 0)
     heldout_w2c = select_view_w2c(bundle.heldout_w2c, 0)
     heldout_lens_model, heldout_distortion = select_lens(
@@ -4341,8 +5278,71 @@ def frozen_world_replay_compiled_report(
         0,
         camera_projection=camera_projection,
     )
+    if moving_camera:
+        K_seq, w2c_seq = camera_sequences_for_view(
+            bundle.heldout_K,
+            bundle.heldout_w2c,
+            view=0,
+            frames=full_frames,
+            view_count=bundle.heldout_view_count,
+            synthetic_pan_x=0.0,
+            synthetic_pan_y=0.0,
+            synthetic_dolly_z=0.0,
+            synthetic_zoom=0.0,
+            synthetic_principal_x=0.0,
+            synthetic_principal_y=0.0,
+            camera_program=camera_program,
+        )
+        camera_program_sha256 = canonical_json_sha256(camera_program)
+        camera_sequence_sha256 = _frozen_world_camera_sequence_sha256(
+            K_seq,
+            w2c_seq,
+        )
+    else:
+        K_seq = None
+        w2c_seq = None
+        camera_program_sha256 = None
+        camera_sequence_sha256 = None
+
+    def replay_projection(
+        frame: int,
+        frame_config: UVTRenderConfig,
+    ) -> ProjectedTubeSequence:
+        return _frozen_world_project_replay_sample(
+            model,
+            camera_program_mode=camera_program_mode,
+            heldout_K=heldout_K,
+            heldout_w2c=heldout_w2c,
+            K_seq=K_seq,
+            w2c_seq=w2c_seq,
+            frame=frame,
+            frame_config=frame_config,
+            camera_projection=camera_projection,
+            heldout_lens_model=heldout_lens_model,
+            heldout_distortion=heldout_distortion,
+            full_frames=full_frames,
+        )
+
+    def compiled_projection(
+        projection_config: UVTRenderConfig,
+    ) -> ProjectedTubeSequence:
+        return _frozen_world_compile_projected(
+            model,
+            camera_program_mode=camera_program_mode,
+            heldout_K=heldout_K,
+            heldout_w2c=heldout_w2c,
+            K_seq=K_seq,
+            w2c_seq=w2c_seq,
+            projection_config=projection_config,
+            camera_projection=camera_projection,
+            heldout_lens_model=heldout_lens_model,
+            heldout_distortion=heldout_distortion,
+            full_frames=full_frames,
+        )
+
     contract_hashes = _frozen_evaluation_contract_hashes(
-        target_frames=target_host,
+        target_frames=None,
+        target_frames_sha256=target_frames_sha256,
         heldout_K=heldout_K,
         heldout_w2c=heldout_w2c,
         heldout_distortion=heldout_distortion,
@@ -4354,6 +5354,9 @@ def frozen_world_replay_compiled_report(
         frame_indices=frame_indices,
         centered_frame_times=centered_frame_times,
         config=config,
+        camera_program_mode=camera_program_mode,
+        camera_program_sha256=camera_program_sha256,
+        camera_sequence_sha256=camera_sequence_sha256,
     )
     if checkpoint is None:
         checkpoint = _save_frozen_world_checkpoint(
@@ -4379,6 +5382,8 @@ def frozen_world_replay_compiled_report(
             model,
             heldout_K=heldout_K,
             heldout_w2c=heldout_w2c,
+            K_seq=K_seq,
+            w2c_seq=w2c_seq,
             heldout_lens_model=heldout_lens_model,
             heldout_distortion=heldout_distortion,
             camera_projection=camera_projection,
@@ -4387,8 +5392,10 @@ def frozen_world_replay_compiled_report(
             full_frames=full_frames,
             frame_indices=frame_indices,
             centered_frame_times=centered_frame_times,
-            target_host=target_host,
+            load_target_chunk=load_target_chunk,
+            resident_chunk_frames=resident_chunk_frames,
             contract_hashes=contract_hashes,
+            camera_program_mode=camera_program_mode,
         )
         if (
             selected_time_slice_parity["world_state"]["before_sha256"]
@@ -4429,17 +5436,7 @@ def frozen_world_replay_compiled_report(
         for sample_index in range(chunk_start, chunk_stop):
             frame = frame_indices[sample_index]
             frame_config = replace(config, frames=1)
-            projected_frame = project_world_tube_sequence(
-                model,
-                heldout_K,
-                heldout_w2c,
-                frame_config,
-                camera_projection=camera_projection,
-                lens_model=heldout_lens_model,
-                distortion=heldout_distortion,
-                full_frames=full_frames,
-                frame_start=frame,
-            )
+            projected_frame = replay_projection(frame, frame_config)
             replay_payload_bytes += _tensor_payload_bytes(
                 (
                     projected_frame.ma,
@@ -4460,7 +5457,7 @@ def frozen_world_replay_compiled_report(
                 ).rgb
             )
         replay_image = torch.cat(replay_frames, dim=0)
-        target_chunk = target_host[chunk_start:chunk_stop].to(device=device)
+        target_chunk = load_target_chunk(chunk_start, chunk_stop).to(device=device)
         replay_loss = torch.sqrt(
             (replay_image - target_chunk).square() + 1.0e-6
         ).sum() / float(target_element_count)
@@ -4509,17 +5506,7 @@ def frozen_world_replay_compiled_report(
     synchronize_device(device)
     compiled_compile_started = time.perf_counter()
     projection_config = replace(render_config, frames=full_frames)
-    projected = project_world_tube_sequence(
-        model,
-        heldout_K,
-        heldout_w2c,
-        projection_config,
-        camera_projection=camera_projection,
-        lens_model=heldout_lens_model,
-        distortion=heldout_distortion,
-        full_frames=full_frames,
-        frame_start=0,
-    )
+    projected = compiled_projection(projection_config)
     times = torch.tensor(
         centered_frame_times,
         dtype=torch.float32,
@@ -4579,6 +5566,7 @@ def frozen_world_replay_compiled_report(
         )
     )
     compiled_trace_count = int(atlas.coeffs.shape[0])
+    compiled_coefficient_count = int(atlas.coeffs.numel())
     compiled_cell_count = len(atlas.cells)
 
     compiled_forward_s = 0.0
@@ -4587,6 +5575,16 @@ def frozen_world_replay_compiled_report(
     compiled_loss_value = 0.0
     image_max_abs_error = 0.0
     image_absolute_error_sum = 0.0
+    image_squared_error_sum = 0.0
+    p999_quantile = 0.999
+    p999_keep = _upper_tail_topk_size(
+        target_element_count,
+        p999_quantile,
+    )
+    image_absolute_error_upper_tail: Tensor | None = None
+    replay_target_lpips_sum = 0.0
+    compiled_target_lpips_sum = 0.0
+    route_lpips_sum = 0.0
     compiled_slices = iter_projective_trace_cell_atlas_frame_slices(
         atlas, frame_count=frame_count, chunk_frames=resident_chunk_frames,
     )
@@ -4609,7 +5607,7 @@ def frozen_world_replay_compiled_report(
             tile_size=int(config.tile_x),
             fallback_render_mode="mixed",
         )
-        target_chunk = target_host[chunk_start:chunk_stop].to(device=device)
+        target_chunk = load_target_chunk(chunk_start, chunk_stop).to(device=device)
         compiled_image = chunk_state.render()
         compiled_loss = torch.sqrt(
             (compiled_image - target_chunk).square() + 1.0e-6
@@ -4631,17 +5629,7 @@ def frozen_world_replay_compiled_report(
             for sample_index in range(chunk_start, chunk_stop):
                 frame = frame_indices[sample_index]
                 frame_config = replace(config, frames=1)
-                parity_projected = project_world_tube_sequence(
-                    model,
-                    heldout_K,
-                    heldout_w2c,
-                    frame_config,
-                    camera_projection=camera_projection,
-                    lens_model=heldout_lens_model,
-                    distortion=heldout_distortion,
-                    full_frames=full_frames,
-                    frame_start=frame,
-                )
+                parity_projected = replay_projection(frame, frame_config)
                 parity_frames.append(
                     render_projected_sequence(
                         parity_projected,
@@ -4658,6 +5646,25 @@ def frozen_world_replay_compiled_report(
                 float(image_difference.max().cpu()),
             )
             image_absolute_error_sum += float(image_difference.sum().cpu())
+            image_squared_error_sum += float(image_difference.square().sum().cpu())
+            image_absolute_error_upper_tail = _merge_upper_tail_topk(
+                image_absolute_error_upper_tail,
+                image_difference,
+                keep=p999_keep,
+            )
+            chunk_frame_count = chunk_stop - chunk_start
+            replay_target_lpips_sum += video_lpips(
+                parity_image,
+                target_chunk,
+            ) * float(chunk_frame_count)
+            compiled_target_lpips_sum += video_lpips(
+                compiled_image.detach(),
+                target_chunk,
+            ) * float(chunk_frame_count)
+            route_lpips_sum += video_lpips(
+                compiled_image.detach(),
+                parity_image,
+            ) * float(chunk_frame_count)
         synchronize_device(device)
         parity_replay_forward_s += time.perf_counter() - parity_replay_started
         del (
@@ -4720,6 +5727,20 @@ def frozen_world_replay_compiled_report(
         compiled_covered=compiled_gradient_parameters,
     )
     image_mean_abs_error = image_absolute_error_sum / float(target_element_count)
+    image_mse = image_squared_error_sum / float(target_element_count)
+    image_psnr_db = -10.0 * math.log10(max(image_mse, 1.0e-12))
+    if image_absolute_error_upper_tail is None:
+        raise RuntimeError("frozen-world parity produced no image errors")
+    image_p999_abs_error = _linear_quantile_from_upper_tail(
+        image_absolute_error_upper_tail,
+        element_count=target_element_count,
+        quantile=p999_quantile,
+    )
+    replay_target_lpips = replay_target_lpips_sum / float(frame_count)
+    compiled_target_lpips = compiled_target_lpips_sum / float(frame_count)
+    lpips_delta = abs(compiled_target_lpips - replay_target_lpips)
+    route_lpips = route_lpips_sum / float(frame_count)
+    del image_absolute_error_upper_tail
     loss_absolute_delta = abs(compiled_loss_value - replay_loss_value)
     acceptance = dict(FROZEN_WORLD_ACCEPTANCE)
     same_checkpoint = (
@@ -4755,6 +5776,46 @@ def frozen_world_replay_compiled_report(
         "fallback_within_budget": fallback.fallback_fraction
         <= acceptance["fallback_fraction"],
     }
+    if moving_camera:
+        event_partition = projective_trace_cell_sensor_time_event_partition(
+            atlas,
+            times,
+            image_width=int(config.width),
+            image_height=int(config.height),
+            tile_size=int(config.tile_x),
+            include_support=True,
+            include_visibility=True,
+        )
+        logical_interaction_memory = _projective_atlas_logical_interaction_bytes(
+            atlas,
+            times,
+            config,
+        )
+        support_event_count = len(event_partition.support_events)
+        visibility_event_count = len(event_partition.visibility_events)
+        event_count = support_event_count + visibility_event_count
+        event_interval_count = len(event_partition.intervals)
+        stable_trace_samples = (
+            int(fallback.total_trace_samples)
+            - int(fallback.fallback_trace_samples)
+        )
+        certified_stable_or_event_aligned_fraction = (
+            stable_trace_samples
+            / float(max(1, int(fallback.total_trace_samples)))
+        )
+        expensive_unresolved_fallback_fraction = int(
+            fallback.fallback_trace_samples
+        ) / float(max(1, int(fallback.total_trace_samples)))
+        del event_partition
+    else:
+        logical_interaction_memory = None
+        support_event_count = 0
+        visibility_event_count = 0
+        event_count = 0
+        event_interval_count = 0
+        stable_trace_samples = 0
+        certified_stable_or_event_aligned_fraction = 0.0
+        expensive_unresolved_fallback_fraction = 0.0
     retained_storage_artifact = _write_frozen_atlas_storage(
         atlas,
         out_dir=out_dir,
@@ -4831,17 +5892,7 @@ def frozen_world_replay_compiled_report(
             for sample_index in range(chunk_start, chunk_stop):
                 frame = frame_indices[sample_index]
                 frame_config = replace(config, frames=1)
-                trial_projected = project_world_tube_sequence(
-                    model,
-                    heldout_K,
-                    heldout_w2c,
-                    frame_config,
-                    camera_projection=camera_projection,
-                    lens_model=heldout_lens_model,
-                    distortion=heldout_distortion,
-                    full_frames=full_frames,
-                    frame_start=frame,
-                )
+                trial_projected = replay_projection(frame, frame_config)
                 trial_frames.append(
                     render_projected_sequence(
                         trial_projected,
@@ -4853,7 +5904,7 @@ def frozen_world_replay_compiled_report(
                 )
             trial_image = torch.cat(trial_frames, dim=0)
             phase_started = forward_boundary(forward_segments, "evaluator_forward", forward_started)
-            trial_target_host = target_host[chunk_start:chunk_stop]
+            trial_target_host = load_target_chunk(chunk_start, chunk_stop)
             phase_started = forward_boundary(forward_segments, "target_cpu_load", phase_started)
             trial_target = trial_target_host.to(device=device)
             phase_started = forward_boundary(forward_segments, "target_transfer", phase_started)
@@ -4882,17 +5933,7 @@ def frozen_world_replay_compiled_report(
         synchronize_device(device)
         compile_started = time.perf_counter()
         trial_projection_config = replace(render_config, frames=full_frames)
-        trial_projected = project_world_tube_sequence(
-            model,
-            heldout_K,
-            heldout_w2c,
-            trial_projection_config,
-            camera_projection=camera_projection,
-            lens_model=heldout_lens_model,
-            distortion=heldout_distortion,
-            full_frames=full_frames,
-            frame_start=0,
-        )
+        trial_projected = compiled_projection(trial_projection_config)
         trial_times = torch.tensor(
             centered_frame_times,
             dtype=torch.float32,
@@ -4946,7 +5987,7 @@ def frozen_world_replay_compiled_report(
                 fallback_render_mode="mixed",
             )
             phase_started = forward_boundary(forward_segments, "evaluator_forward", forward_started)
-            trial_target_host = target_host[chunk_start:chunk_stop]
+            trial_target_host = load_target_chunk(chunk_start, chunk_stop)
             phase_started = forward_boundary(forward_segments, "target_cpu_load", phase_started)
             trial_target = trial_target_host.to(device=device)
             phase_started = forward_boundary(forward_segments, "target_transfer", phase_started)
@@ -5130,6 +6171,211 @@ def frozen_world_replay_compiled_report(
     if world_state_after_timing != checkpoint["world_state_sha256"]:
         raise RuntimeError("frozen-world timing changed the learned world")
 
+    moving_report_fields: dict[str, Any] = {}
+    if moving_camera:
+        if logical_interaction_memory is None:
+            raise RuntimeError(
+                "bounded-yaw logical interaction evidence was not retained"
+            )
+        parity_checks = {
+            "image_psnr_at_least_50_db": image_psnr_db >= 50.0,
+            "lpips_delta_at_most_0_001": route_lpips <= 0.001,
+            "p999_abs_error_at_most_2_over_255": (
+                image_p999_abs_error <= 2.0 / 255.0
+            ),
+        }
+        parity = {
+            "metric_semantics": "replay_vs_compiled_same_world_same_program",
+            "metrics_excluded_from_timings": True,
+            "metrics_excluded_from_route_memory_sampling": True,
+            "image_mse": image_mse,
+            "image_psnr_db": image_psnr_db,
+            "image_p999_abs_error": image_p999_abs_error,
+            "image_max_abs_error": image_max_abs_error,
+            "lpips_delta": route_lpips,
+            "lpips_delta_definition": (
+                "frame-weighted LPIPS_Alex(compiled_route,replay_route)"
+            ),
+            "checks": parity_checks,
+            "accepted": all(parity_checks.values()),
+        }
+        continuous_reference_count = int(complexity.interval_trace_entries)
+        sliced_reference_count = int(complexity.dense_trace_samples)
+        structural = {
+            "heavy_work_definition": (
+                "event-stratified interval trace entries in the continuous atlas"
+            ),
+            "heavy_work_count": continuous_reference_count,
+            "interaction_memory_definition": logical_interaction_memory[
+                "definition"
+            ],
+            "interaction_memory_bytes_excluding_outputs_residuals": int(
+                logical_interaction_memory["total_bytes"]
+            ),
+            "interaction_memory_claim_eligible": bool(
+                logical_interaction_memory[
+                    "interaction_ratio_claim_eligible"
+                ]
+            ),
+            "continuous_reference_count": continuous_reference_count,
+            "sliced_reference_count": sliced_reference_count,
+            "continuous_to_sliced_reference_ratio": (
+                continuous_reference_count
+                / float(max(1, sliced_reference_count))
+            ),
+            "chart_count": 1,
+            "support_event_count": support_event_count,
+            "visibility_event_count": visibility_event_count,
+            "event_count": event_count,
+            "event_interval_count": event_interval_count,
+            "trace_count": compiled_trace_count,
+            "coefficient_count": compiled_coefficient_count,
+            "cell_count": compiled_cell_count,
+            "interval_trace_entries": int(complexity.interval_trace_entries),
+            "dense_trace_samples": int(complexity.dense_trace_samples),
+            "total_trace_samples": int(fallback.total_trace_samples),
+            "stable_trace_samples": stable_trace_samples,
+            "fallback_trace_samples": int(fallback.fallback_trace_samples),
+            "certified_stable_or_event_aligned_fraction": (
+                certified_stable_or_event_aligned_fraction
+            ),
+            "expensive_unresolved_fallback_fraction": (
+                expensive_unresolved_fallback_fraction
+            ),
+        }
+        memory = {
+            "route_scoped_sampled_peaks_include_outputs_and_residuals": True,
+            "route_scoped": route_memory,
+            "logical_interaction_excluding_outputs_residuals": (
+                logical_interaction_memory
+            ),
+            "retained_storage": retained_storage,
+        }
+        publication_metrics = {
+            "image_psnr_db": image_psnr_db,
+            "lpips_delta": route_lpips,
+            "image_p999_abs_error": image_p999_abs_error,
+            "loss_absolute_delta": loss_absolute_delta,
+            "world_vjp_global_normalized_l2_error": gradient[
+                "global_normalized_l2_error"
+            ],
+            "world_vjp_max_parameter_normalized_l2_error": gradient[
+                "max_parameter_normalized_l2_error"
+            ],
+            "chart_count": 1,
+            "structural_atlas_record_count": compiled_trace_count,
+            "continuous_candidate_reference_count": (
+                continuous_reference_count
+            ),
+            "summed_sliced_candidate_reference_count": (
+                sliced_reference_count
+            ),
+            "event_count": event_count,
+            "coefficient_count": compiled_coefficient_count,
+            "interaction_memory_bytes_excluding_outputs_residuals": int(
+                logical_interaction_memory["total_bytes"]
+            ),
+            "certified_stable_or_event_aligned_fraction": (
+                certified_stable_or_event_aligned_fraction
+            ),
+            "expensive_unresolved_fallback_fraction": (
+                expensive_unresolved_fallback_fraction
+            ),
+        }
+        publication_metrics_finite = all(
+            not isinstance(value, bool)
+            and isinstance(value, (int, float))
+            and math.isfinite(float(value))
+            and float(value) >= 0.0
+            for value in publication_metrics.values()
+        )
+        timing_evidence_finite = (
+            timing_benchmark["status"] == "complete"
+            and timing_benchmark["publication_ready"] is True
+            and timing_benchmark["warmups"] == timing_warmups
+            and timing_benchmark["repeats"] == timing_repeats
+            and all(
+                len(values) == timing_repeats
+                and all(
+                    math.isfinite(float(value)) and float(value) >= 0.0
+                    for value in values
+                )
+                for values in timing_benchmark["samples_s"].values()
+            )
+        )
+        mechanical_checks = {
+            "checkpoint_identity_verified": (
+                checkpoint.get("loaded_from_input_checkpoint") is True
+                and len(str(checkpoint.get("sha256", ""))) == 64
+                and len(str(checkpoint.get("world_state_sha256", ""))) == 64
+            ),
+            "world_state_unchanged": same_checkpoint,
+            "camera_program_identity_verified": (
+                camera_program == bounded_yaw_camera_program_contract()
+                and camera_program_sha256
+                == canonical_json_sha256(camera_program)
+                and isinstance(camera_sequence_sha256, str)
+                and len(camera_sequence_sha256) == 64
+            ),
+            "direct_256_decode_and_render": (
+                decoded_image_size == BOUNDED_YAW_IMAGE_SIZE
+                and (int(config.height), int(config.width))
+                == BOUNDED_YAW_IMAGE_SIZE
+            ),
+            "publication_metrics_finite_nonnegative": (
+                publication_metrics_finite
+            ),
+            "gradient_coverage_complete": bool(
+                checks["world_vjp_coverage_matches"]
+            ),
+            "gradient_nonzero": bool(checks["world_vjp_nonzero"]),
+            "selected_time_slice_parity_accepted": (
+                selected_time_slice_parity["status"] == "complete"
+                and selected_time_slice_parity["accepted"] is True
+            ),
+            "timing_evidence_complete_finite": timing_evidence_finite,
+            "logical_interaction_memory_exact": bool(
+                logical_interaction_memory[
+                    "interaction_ratio_claim_eligible"
+                ]
+            ),
+            "single_midpoint_first_order_boundary_explicit": (
+                camera_program["compiler_chart_policy"]
+                == "single_midpoint_first_order"
+                and camera_program["multi_chart_gauge_compiler"] is False
+            ),
+        }
+        mechanically_valid = all(mechanical_checks.values())
+        moving_report_fields = {
+            "camera_program_mode": camera_program_mode,
+            "camera_program": camera_program,
+            "camera_program_sha256": camera_program_sha256,
+            "camera_sequence_sha256": camera_sequence_sha256,
+            "compiler_chart_policy": "single_midpoint_first_order",
+            "multi_chart_gauge_compiler": False,
+            "decoded_image_size": list(decoded_image_size),
+            "render_image_size": [int(config.height), int(config.width)],
+            "target_resize_mode": "direct_decode_256",
+            "target_semantics": (
+                "deterministic_residual_target_not_ground_truth_moving_camera_quality"
+            ),
+            "parity_metric_semantics": (
+                "replay_vs_compiled_same_world_same_program"
+            ),
+            "camera_inputs": {
+                "scaled_heldout_K_sha256": _tensor_sha256(heldout_K),
+                "base_heldout_w2c_sha256": _tensor_sha256(heldout_w2c),
+                "full_K_sequence_sha256": _tensor_sha256(K_seq),
+                "full_w2c_sequence_sha256": _tensor_sha256(w2c_seq),
+            },
+            "parity": parity,
+            "structural": structural,
+            "memory": memory,
+            "publication_metrics": publication_metrics,
+            "mechanical_checks": mechanical_checks,
+            "mechanically_valid": mechanically_valid,
+        }
+
     return {
         "schema_version": 2,
         "status": "complete",
@@ -5162,6 +6408,12 @@ def frozen_world_replay_compiled_report(
         "image": {
             "max_abs_error": image_max_abs_error,
             "mean_abs_error": image_mean_abs_error,
+            "p999_abs_error": image_p999_abs_error,
+            "mse": image_mse,
+            "psnr_db": image_psnr_db,
+            "replay_target_lpips": replay_target_lpips,
+            "compiled_target_lpips": compiled_target_lpips,
+            "lpips_delta": lpips_delta,
         },
         "gradient": gradient,
         "selected_time_slice_parity": selected_time_slice_parity,
@@ -5212,7 +6464,11 @@ def frozen_world_replay_compiled_report(
             "same_precision": True,
             "same_alpha_mode": True,
             "bounded_device_frame_residency": True,
-            "host_target_storage": "eager_cpu_selected_frames",
+            "host_target_storage": (
+                "bounded_video_seek_chunks"
+                if heldout_target_provider is not None
+                else "eager_cpu_selected_frames"
+            ),
             "resident_chunk_frames": resident_chunk_frames,
             "timing_excludes_parity_replay": True,
             "camera_projection": camera_projection,
@@ -5230,6 +6486,7 @@ def frozen_world_replay_compiled_report(
         "contract_hashes": contract_hashes,
         "acceptance": acceptance,
         "checks": checks,
+        **moving_report_fields,
     }
 
 
@@ -5244,6 +6501,10 @@ def frozen_world_replay_compiled_sweep_report(
     requested_frame_counts: tuple[int, ...] | None = None,
     timing_warmups: int = 0,
     timing_repeats: int = 1,
+    heldout_target_provider: PaperMulticamTargetProvider | None = None,
+    checkpoint: dict[str, Any] | None = None,
+    camera_program_mode: str = STATIC_CAMERA_PROGRAM_MODE,
+    camera_program: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Evaluate full-interval temporal sample densities from one frozen world."""
 
@@ -5257,11 +6518,59 @@ def frozen_world_replay_compiled_sweep_report(
         primary_max_frames=primary_max_frames,
         requested_frame_counts=requested_frame_counts,
     )
-    progress_path = out_dir / "frozen_world_sweep_progress.json"
+    moving_camera = camera_program_mode == BOUNDED_YAW_CAMERA_PROGRAM_MODE
+    if moving_camera:
+        if camera_program != bounded_yaw_camera_program_contract():
+            raise ValueError("bounded-yaw sweep camera program drifted")
+        if resolved_frame_counts != BOUNDED_YAW_FRAME_COUNTS:
+            raise ValueError(
+                "bounded-yaw frozen-world sweep requires exactly 8,16,32,64"
+            )
+        if (
+            checkpoint is None
+            or checkpoint.get("loaded_from_input_checkpoint") is not True
+        ):
+            raise ValueError(
+                "bounded-yaw frozen-world sweep requires an input checkpoint"
+            )
+        progress_path = out_dir / "frozen_world_moving_camera_progress.json"
+    elif camera_program_mode == STATIC_CAMERA_PROGRAM_MODE:
+        if camera_program is not None:
+            raise ValueError(
+                "static frozen-world sweep does not accept a camera program"
+            )
+        progress_path = out_dir / "frozen_world_sweep_progress.json"
+    else:
+        raise ValueError(
+            f"unsupported frozen-world camera program: {camera_program_mode}"
+        )
+    camera_program_sha256 = (
+        canonical_json_sha256(camera_program) if moving_camera else None
+    )
+    decoded_image_size = (
+        [heldout_target_provider.height, heldout_target_provider.width]
+        if heldout_target_provider is not None
+        else [int(value) for value in bundle.heldout_frames.shape[-2:]]
+    )
     progress: dict[str, Any] = {
         "schema_version": 1,
         "status": "initializing",
+        "camera_program_mode": camera_program_mode,
+        "camera_program": camera_program,
+        "camera_program_sha256": camera_program_sha256,
+        "compiler_chart_policy": (
+            "single_midpoint_first_order" if moving_camera else None
+        ),
+        "multi_chart_gauge_compiler": False if moving_camera else None,
         "full_dataset_frame_count": full_frames,
+        "decoded_image_size": decoded_image_size,
+        "render_image_size": [
+            int(render_config.height),
+            int(render_config.width),
+        ],
+        "target_resize_mode": (
+            "direct_decode_256" if moving_camera else "none"
+        ),
         "requested_frame_counts": list(requested_frame_counts or ()),
         "primary_requested_frame_count": int(primary_max_frames),
         "resolved_frame_counts": list(resolved_frame_counts),
@@ -5269,9 +6578,10 @@ def frozen_world_replay_compiled_sweep_report(
         "timing_repeats": timing_repeats,
         "completed_frame_counts": [],
         "row_artifacts": [],
+        "rows": [],
         "cross_process_resume_supported": False,
     }
-    write_json(progress_path, progress)
+    write_json_atomic(progress_path, progress)
     slice_parity_frame_count = next(
         (
             frame_count
@@ -5295,19 +6605,24 @@ def frozen_world_replay_compiled_sweep_report(
     )
     rows: list[dict[str, Any]] = []
     try:
-        checkpoint = _save_frozen_world_checkpoint(
-            model,
-            out_dir / "world_tubes_frozen_final_state.pt",
-            frame_count=full_frames,
-            representation=model.representation_name,
-        )
-        progress["status"] = "checkpoint_saved"
+        if checkpoint is None:
+            checkpoint = _save_frozen_world_checkpoint(
+                model,
+                out_dir / "world_tubes_frozen_final_state.pt",
+                frame_count=full_frames,
+                representation=model.representation_name,
+            )
+            progress["status"] = "checkpoint_saved"
+        else:
+            progress["status"] = "input_checkpoint_verified"
         progress["checkpoint"] = checkpoint
-        write_json(progress_path, progress)
+        progress["checkpoint_file_sha256"] = checkpoint["sha256"]
+        progress["world_state_sha256"] = checkpoint["world_state_sha256"]
+        write_json_atomic(progress_path, progress)
         for frame_count in resolved_frame_counts:
             progress["status"] = "running"
             progress["current_frame_count"] = frame_count
-            write_json(progress_path, progress)
+            write_json_atomic(progress_path, progress)
             row = frozen_world_replay_compiled_report(
                 model,
                 bundle,
@@ -5317,10 +6632,14 @@ def frozen_world_replay_compiled_sweep_report(
                 max_frames=frame_count,
                 checkpoint=checkpoint,
                 verify_selected_time_slice_parity=(
-                    frame_count == slice_parity_frame_count
+                    moving_camera
+                    or frame_count == slice_parity_frame_count
                 ),
                 timing_warmups=timing_warmups,
                 timing_repeats=timing_repeats,
+                heldout_target_provider=heldout_target_provider,
+                camera_program_mode=camera_program_mode,
+                camera_program=camera_program,
             )
             if row["checkpoint"] != checkpoint:
                 raise RuntimeError(
@@ -5333,6 +6652,13 @@ def frozen_world_replay_compiled_sweep_report(
                 raise RuntimeError(
                     "frozen-world sweep world-state identity drifted"
                 )
+            if moving_camera and (
+                row.get("camera_program_sha256") != camera_program_sha256
+                or not isinstance(row.get("camera_sequence_sha256"), str)
+            ):
+                raise RuntimeError(
+                    "bounded-yaw sweep camera-program identity drifted"
+                )
             checkpoint_path = Path(checkpoint["path"])
             if (
                 int(checkpoint_path.stat().st_size) != int(checkpoint["bytes"])
@@ -5343,10 +6669,14 @@ def frozen_world_replay_compiled_sweep_report(
                 )
             row_path = (
                 out_dir
-                / "frozen_world_sweep_rows"
+                / (
+                    "frozen_world_moving_camera_rows"
+                    if moving_camera
+                    else "frozen_world_sweep_rows"
+                )
                 / f"frame_{frame_count:04d}.json"
             )
-            write_json(row_path, row)
+            write_json_atomic(row_path, row)
             progress["completed_frame_counts"].append(frame_count)
             progress["row_artifacts"].append(
                 {
@@ -5355,8 +6685,31 @@ def frozen_world_replay_compiled_sweep_report(
                     "sha256": file_sha256(row_path),
                 }
             )
+            progress["rows"].append(
+                {
+                    "frame_count": frame_count,
+                    "accepted": bool(row["accepted"]),
+                    "mechanically_valid": row.get("mechanically_valid"),
+                    "compiler_chart_policy": row.get(
+                        "compiler_chart_policy"
+                    ),
+                    "multi_chart_gauge_compiler": row.get(
+                        "multi_chart_gauge_compiler"
+                    ),
+                    "camera_program_sha256": row.get(
+                        "camera_program_sha256"
+                    ),
+                    "camera_sequence_sha256": row.get(
+                        "camera_sequence_sha256"
+                    ),
+                    "world_state_sha256": row["world_state"][
+                        "checkpoint_sha256"
+                    ],
+                    "artifact_sha256": file_sha256(row_path),
+                }
+            )
             progress["current_frame_count"] = None
-            write_json(progress_path, progress)
+            write_json_atomic(progress_path, progress)
             rows.append(row)
             gc.collect()
             torch.mps.empty_cache()
@@ -5369,7 +6722,7 @@ def frozen_world_replay_compiled_sweep_report(
         progress["failed_frame_count"] = progress.get(
             "current_frame_count"
         )
-        write_json(progress_path, progress)
+        write_json_atomic(progress_path, progress)
         raise
 
     primary_frame_count = (
@@ -5393,6 +6746,16 @@ def frozen_world_replay_compiled_sweep_report(
         parity_row is not None
         and parity_row["selected_time_slice_parity"]["accepted"] is True
     )
+    all_rows_selected_time_slice_parity_accepted = all(
+        row["selected_time_slice_parity"]["accepted"] is True
+        for row in rows
+    )
+    all_rows_mechanically_valid = all(
+        int(row["schema_version"]) == 2
+        and row["status"] == "complete"
+        and row.get("mechanically_valid") is True
+        for row in rows
+    )
     all_rows_timing_publication_ready = all(
         row["timing_benchmark"]["publication_ready"] is True
         for row in rows
@@ -5405,6 +6768,24 @@ def frozen_world_replay_compiled_sweep_report(
         row["route_memory"]["publication_claim_eligible"] is True
         for row in rows
     )
+    shared_camera_sequence_sha256 = None
+    if moving_camera:
+        camera_sequence_hashes = {
+            row["camera_sequence_sha256"] for row in rows
+        }
+        if len(camera_sequence_hashes) != 1:
+            raise RuntimeError(
+                "bounded-yaw sweep camera-sequence identity drifted"
+            )
+        shared_camera_sequence_sha256 = camera_sequence_hashes.pop()
+        all_rows_accepted = all(
+            int(row["schema_version"]) == 2
+            and row["status"] == "complete"
+            and row["accepted"] is True
+            and all(row["checks"].values())
+            and row["selected_time_slice_parity"]["accepted"] is True
+            for row in rows
+        )
     sweep = {
         "schema_version": 1,
         "status": "complete",
@@ -5468,11 +6849,68 @@ def frozen_world_replay_compiled_sweep_report(
         ),
         "rows": rows,
     }
+    if moving_camera:
+        sweep.update(
+            {
+                "camera_program_mode": camera_program_mode,
+                "camera_program": camera_program,
+                "camera_program_sha256": camera_program_sha256,
+                "camera_sequence_sha256": shared_camera_sequence_sha256,
+                "compiler_chart_policy": "single_midpoint_first_order",
+                "multi_chart_gauge_compiler": False,
+                "image_size": list(BOUNDED_YAW_IMAGE_SIZE),
+                "decoded_image_size": list(BOUNDED_YAW_IMAGE_SIZE),
+                "render_image_size": list(BOUNDED_YAW_IMAGE_SIZE),
+                "target_resize_mode": "direct_decode_256",
+                "target_semantics": (
+                    "deterministic_residual_target_not_ground_truth_moving_camera_quality"
+                ),
+                "parity_metric_semantics": (
+                    "replay_vs_compiled_same_world_same_program"
+                ),
+                "checkpoint_loaded_not_trained": True,
+                "all_rows_selected_time_slice_parity_accepted": (
+                    all_rows_selected_time_slice_parity_accepted
+                ),
+                "all_rows_mechanically_valid": (
+                    all_rows_mechanically_valid
+                ),
+                "evidence_complete": (
+                    len(rows) == len(BOUNDED_YAW_FRAME_COUNTS)
+                    and tuple(int(row["frame_count"]) for row in rows)
+                    == BOUNDED_YAW_FRAME_COUNTS
+                    and all_rows_timing_publication_ready
+                    and all_rows_storage_publication_ready
+                    and all_rows_route_memory_publication_ready
+                    and all_rows_mechanically_valid
+                ),
+                "publication_eligible": (
+                    all_rows_accepted
+                    and all_rows_selected_time_slice_parity_accepted
+                    and all_rows_timing_publication_ready
+                    and all_rows_storage_publication_ready
+                    and all_rows_route_memory_publication_ready
+                    and all(
+                        row["parity"]["accepted"] is True for row in rows
+                    )
+                ),
+            }
+        )
     progress["status"] = "complete"
     progress["current_frame_count"] = None
     progress["all_rows_accepted"] = all_rows_accepted
+    if moving_camera:
+        progress["camera_sequence_sha256"] = (
+            shared_camera_sequence_sha256
+        )
+        progress["all_rows_selected_time_slice_parity_accepted"] = (
+            all_rows_selected_time_slice_parity_accepted
+        )
+        progress["all_rows_mechanically_valid"] = (
+            all_rows_mechanically_valid
+        )
     progress["publication_eligible"] = sweep["publication_eligible"]
-    write_json(progress_path, progress)
+    write_json_atomic(progress_path, progress)
     return primary, sweep
 
 
@@ -5494,6 +6932,9 @@ def eval_world_tube_checkpoints(
     synthetic_principal_y: float,
     render_config: UVTRenderConfig,
     frame_metric_splits: dict[str, list[int]] | None = None,
+    chunk_frames: int = 4,
+    train_target_provider: PaperMulticamTargetProvider | None = None,
+    heldout_target_provider: PaperMulticamTargetProvider | None = None,
 ) -> dict[str, Any] | None:
     if not checkpoints:
         return None
@@ -5516,6 +6957,10 @@ def eval_world_tube_checkpoints(
             synthetic_principal_y=synthetic_principal_y,
             render_config=render_config,
             frame_metric_splits=frame_metric_splits,
+            chunk_frames=chunk_frames,
+            train_target_provider=train_target_provider,
+            heldout_target_provider=heldout_target_provider,
+            collect_media=False,
         )
         metrics = eval_result["metrics"]
         train_view_eval_psnr = [view_metrics.get("eval_psnr") for view_metrics in eval_result["train_view_metrics"]]
@@ -5808,6 +7253,7 @@ def world_tube_metal_stats(
     camera_sequence_mode: str,
     segment_frames: int,
     render_config: UVTRenderConfig,
+    chunk_frames: int = 4,
 ) -> dict[str, Any]:
     if next(model.parameters()).device.type != "mps":
         return {"skipped": "Metal stats require MPS tensors."}
@@ -5815,6 +7261,12 @@ def world_tube_metal_stats(
     config = render_config
     if config.height != height or config.width != width or config.frames != frames:
         raise ValueError("render_config dimensions must match bundle train frames")
+    if chunk_frames < 1:
+        raise ValueError("Metal stats chunk_frames must be positive")
+    stats_chunk_frames = max(
+        config.tile_t,
+        math.ceil(chunk_frames / config.tile_t) * config.tile_t,
+    )
 
     def row(
         split: str,
@@ -5826,17 +7278,9 @@ def world_tube_metal_stats(
         lens_model: str,
         distortion: Tensor | None,
     ) -> dict[str, Any]:
-        if camera_sequence_mode == "static_view":
-            projected = project_world_tube_sequence(
-                model,
-                select_view_K(K_all, view),
-                select_view_w2c(w2c_all, view),
-                config,
-                camera_projection=camera_projection,
-                lens_model=lens_model,
-                distortion=distortion,
-            )
-        else:
+        K_seq: Tensor | None = None
+        w2c_seq: Tensor | None = None
+        if camera_sequence_mode != "static_view":
             K_seq, w2c_seq = camera_sequences_for_view(
                 K_all,
                 w2c_all,
@@ -5850,34 +7294,130 @@ def world_tube_metal_stats(
                 synthetic_principal_x=0.0,
                 synthetic_principal_y=0.0,
             )
-            projected = project_world_tube_sequence_camera_mode(
-                model=model,
-                K_seq=K_seq,
-                w2c_seq=w2c_seq,
-                config=config,
-                full_frames=frames,
-                frame_start=0,
-                camera_sequence_mode=camera_sequence_mode,
-                segment_frames=segment_frames,
+        chunk_stats = []
+        projected_trace_counts = []
+        active_tile_count = 0
+        unstable_active_tile_count = 0
+        tile_slot_count = 0
+        tile_count_sum = 0.0
+        for start in range(0, frames, stats_chunk_frames):
+            stop = min(start + stats_chunk_frames, frames)
+            chunk_config = replace(config, frames=stop - start)
+            if camera_sequence_mode == "static_view":
+                projected = project_world_tube_sequence(
+                    model,
+                    select_view_K(K_all, view),
+                    select_view_w2c(w2c_all, view),
+                    chunk_config,
+                    camera_projection=camera_projection,
+                    lens_model=lens_model,
+                    distortion=distortion,
+                    full_frames=frames,
+                    frame_start=start,
+                )
+            else:
+                if K_seq is None or w2c_seq is None:
+                    raise AssertionError("camera sequences were not initialized")
+                projected = project_world_tube_sequence_camera_mode(
+                    model=model,
+                    K_seq=K_seq,
+                    w2c_seq=w2c_seq,
+                    config=chunk_config,
+                    full_frames=frames,
+                    frame_start=start,
+                    camera_sequence_mode=camera_sequence_mode,
+                    segment_frames=segment_frames,
+                )
+            result = render_uvt_tubes(
+                projected.ma,
+                projected.q_uvt,
+                projected.depth0,
+                projected.depth_beta,
+                projected.opacity,
+                projected.color,
+                chunk_config,
+                return_aux=True,
             )
-        result = render_uvt_tubes(
-            projected.ma,
-            projected.q_uvt,
-            projected.depth0,
-            projected.depth_beta,
-            projected.opacity,
-            projected.color,
-            config,
-            return_aux=True,
+            if result.stats is None:
+                raise AssertionError("Metal render did not return stats")
+            counts = result.tile_counts.detach().to(device="cpu", dtype=torch.int64)
+            unstable = result.tile_unstable.detach().to(
+                device="cpu",
+                dtype=torch.int64,
+            )
+            active = counts > 0
+            active_tile_count += int(active.sum().item())
+            unstable_active_tile_count += int(
+                ((unstable > 0) & active).sum().item()
+            )
+            tile_slot_count += int(counts.numel())
+            tile_count_sum += float(counts.sum().item())
+            chunk_stats.append(result.stats)
+            projected_trace_counts.append(int(projected.ma.shape[0]))
+            del result, projected, counts, unstable, active
+        if camera_sequence_mode == "segmented":
+            projected_trace_count = sum(projected_trace_counts)
+            projected_trace_count_semantics = (
+                "sum_of_segmented_chunk_projection_records"
+            )
+        else:
+            if len(set(projected_trace_counts)) != 1:
+                raise AssertionError(
+                    "non-segmented chunked Metal statistics changed the shared "
+                    f"projected trace count: {projected_trace_counts}"
+                )
+            projected_trace_count = projected_trace_counts[0]
+            projected_trace_count_semantics = (
+                "one_shared_projection_record_count"
+            )
+        uvt_pairs = sum(stats.uvt_tile_tube_pairs for stats in chunk_stats)
+        per_frame_pairs = sum(
+            stats.summed_per_frame_tile_splat_pairs for stats in chunk_stats
         )
-        if result.stats is None:
-            raise AssertionError("Metal render did not return stats")
+        overflow_tiles = sum(stats.overflow_tile_count for stats in chunk_stats)
+        forward_times = [
+            stats.forward_wall_clock_ms
+            for stats in chunk_stats
+            if stats.forward_wall_clock_ms is not None
+        ]
+        unstable_fraction = unstable_active_tile_count / max(active_tile_count, 1)
         return {
             "split": split,
             "camera": camera_name,
             "stats": {
-                **result.stats.__dict__,
-                "projected_trace_count": int(projected.ma.shape[0]),
+                "mean_rgb_error": None,
+                "max_rgb_error": None,
+                "forward_wall_clock_ms": (
+                    sum(forward_times) if forward_times else None
+                ),
+                "uvt_tile_tube_pairs": uvt_pairs,
+                "summed_per_frame_tile_splat_pairs": per_frame_pairs,
+                "pair_ratio": float(uvt_pairs / max(per_frame_pairs, 1)),
+                "effective_pair_ratio_after_unstable_fallback": float(
+                    uvt_pairs / max(per_frame_pairs, 1)
+                ),
+                "stable_tile_fraction": 1.0 - unstable_fraction,
+                "unstable_tile_fraction": unstable_fraction,
+                "overflow_tile_count": overflow_tiles,
+                "max_tile_count": max(
+                    stats.max_tile_count for stats in chunk_stats
+                ),
+                "mean_tile_count": tile_count_sum / max(tile_slot_count, 1),
+                # Sum preserves the historical full-temporal logical buffer
+                # meaning; max records the actual bounded resident chunk.
+                "metal_buffer_memory": sum(
+                    stats.metal_buffer_memory for stats in chunk_stats
+                ),
+                "peak_chunk_metal_buffer_memory": max(
+                    stats.metal_buffer_memory for stats in chunk_stats
+                ),
+                "projected_trace_count": projected_trace_count,
+                "projected_trace_count_semantics": (
+                    projected_trace_count_semantics
+                ),
+                "chunk_frames": stats_chunk_frames,
+                "chunk_count": len(chunk_stats),
+                "full_frame_count": frames,
             },
         }
 
@@ -5928,6 +7468,8 @@ def eval_free_splats(
     camera_projection: str,
     chunk_frames: int = 4,
     media_max_frames: int = 32,
+    train_target_provider: PaperMulticamTargetProvider | None = None,
+    heldout_target_provider: PaperMulticamTargetProvider | None = None,
 ) -> dict[str, Any]:
     if chunk_frames < 1:
         raise ValueError("eval chunk_frames must be positive")
@@ -5939,6 +7481,7 @@ def eval_free_splats(
     def eval_split(
         split: str,
         frames_tensor: Tensor,
+        target_provider: PaperMulticamTargetProvider | None,
     ) -> tuple[list, list, list, dict[str, float]]:
         rows = []
         metrics_rows = []
@@ -5947,7 +7490,15 @@ def eval_free_splats(
         global_lpips_sum = 0.0
         global_lpips_count = 0
         selected = media_frame_positions(bundle.frame_count, media_max_frames)
-        for view in range(int(frames_tensor.shape[0])):
+        split_view_count = int(frames_tensor.shape[0])
+        if target_provider is not None and (
+            target_provider.view_count != split_view_count
+            or target_provider.frame_count != bundle.frame_count
+        ):
+            raise ValueError(f"bounded {split} target provider dimensions drifted")
+        if frames_tensor.device.type == "meta" and target_provider is None:
+            raise RuntimeError(f"deferred {split} targets require a bounded provider")
+        for view in range(split_view_count):
             accumulator = VideoMetricAccumulator()
             lpips_sum = 0.0
             lpips_count = 0
@@ -5972,7 +7523,19 @@ def eval_free_splats(
                     lambda cameras=cameras: render_splat_sequence(model, cameras, render_cfg),
                 )
                 view_render_elapsed += render_elapsed
-                target = frames_tensor[view, start:stop].permute(0, 2, 3, 1).contiguous().cpu()
+                target_frames = (
+                    target_provider.select_view_frames(
+                        (view,) * (stop - start),
+                        tuple(range(start, stop)),
+                    )
+                    if target_provider is not None
+                    else frames_tensor[view, start:stop]
+                )
+                target = (
+                    target_frames.permute(0, 2, 3, 1)
+                    .contiguous()
+                    .cpu()
+                )
                 rendered = {
                     "rgb": rendered["rgb"].detach().cpu(),
                     "alpha": rendered["alpha"].detach().cpu(),
@@ -5986,32 +7549,34 @@ def eval_free_splats(
                     lpips_count += count
                     global_lpips_sum += chunk_lpips * count
                     global_lpips_count += count
-                append_chunk_media(
-                    start=start,
-                    stop=stop,
-                    selected=selected,
-                    target=target,
-                    rendered=rendered["rgb"],
-                    alpha=rendered["alpha"],
-                    targets_out=media_targets,
-                    rendered_out=media_renders,
-                    alpha_out=media_alphas,
-                )
+                if view == 0:
+                    append_chunk_media(
+                        start=start,
+                        stop=stop,
+                        selected=selected,
+                        target=target,
+                        rendered=rendered["rgb"],
+                        alpha=rendered["alpha"],
+                        targets_out=media_targets,
+                        rendered_out=media_renders,
+                        alpha_out=media_alphas,
+                    )
                 del rendered, target
             row_metrics = accumulator.metrics()
             if split == "heldout":
                 row_metrics["eval_lpips"] = lpips_sum / float(lpips_count)
             metrics_rows.append(row_metrics)
             render_times.append(view_render_elapsed)
-            rows.append(
-                (
-                    torch.cat(media_targets, dim=0),
-                    RenderedSequence(
-                        rgb=torch.cat(media_renders, dim=0),
-                        alpha=torch.cat(media_alphas, dim=0),
-                    ),
+            if view == 0:
+                rows.append(
+                    (
+                        torch.cat(media_targets, dim=0),
+                        RenderedSequence(
+                            rgb=torch.cat(media_renders, dim=0),
+                            alpha=torch.cat(media_alphas, dim=0),
+                        ),
+                    )
                 )
-            )
         global_metrics = global_accumulator.metrics()
         if split == "heldout":
             global_metrics["eval_lpips"] = (
@@ -6024,7 +7589,7 @@ def eval_free_splats(
         train_metrics,
         train_render_times,
         train_global_metrics,
-    ) = eval_split("train", bundle.train_frames)
+    ) = eval_split("train", bundle.train_frames, train_target_provider)
     heldout_rows: list = []
     heldout_metrics: list = []
     heldout_render_times: list = []
@@ -6034,13 +7599,49 @@ def eval_free_splats(
             heldout_metrics,
             heldout_render_times,
             heldout_global_metrics,
-        ) = eval_split("heldout", bundle.heldout_frames)
+        ) = eval_split(
+            "heldout",
+            bundle.heldout_frames,
+            heldout_target_provider,
+        )
     metrics = train_global_metrics
     if heldout_metrics:
         metrics.update(prefix_metrics("heldout", heldout_global_metrics))
     metrics["eval_render_elapsed_s"] = time.perf_counter() - render_started
     metrics.update(render_time_metrics(train_render_times, heldout_render_times))
     return {"metrics": metrics, "train_rows": train_rows, "heldout_rows": heldout_rows}
+
+
+def target_streaming_accounting(
+    bundle,
+    *,
+    train_target_provider: PaperMulticamTargetProvider | None,
+    heldout_target_provider: PaperMulticamTargetProvider | None,
+) -> dict[str, Any]:
+    enabled = bool(bundle.deferred_target_frames)
+    if enabled and (
+        train_target_provider is None or heldout_target_provider is None
+    ):
+        raise RuntimeError("deferred paper targets are missing a provider")
+    return {
+        "schema_version": 1,
+        "enabled": enabled,
+        "train": (
+            None
+            if train_target_provider is None
+            else train_target_provider.accounting()
+        ),
+        "heldout": (
+            None
+            if heldout_target_provider is None
+            else heldout_target_provider.accounting()
+        ),
+        "dense_fallback_reason": (
+            None
+            if enabled
+            else "dataset_adapter_does_not_support_deferred_video_targets"
+        ),
+    }
 
 
 def run_dynamic_splats_lane(
@@ -6051,6 +7652,8 @@ def run_dynamic_splats_lane(
     out_dir: Path,
     eval_chunk_frames: int,
     eval_media_max_frames: int,
+    train_target_provider: PaperMulticamTargetProvider | None = None,
+    heldout_target_provider: PaperMulticamTargetProvider | None = None,
 ) -> dict[str, Any]:
     splat_model, splat_render_cfg, splat_train = train_free_splats(
         bundle=bundle,
@@ -6064,6 +7667,7 @@ def run_dynamic_splats_lane(
         renderer=args.splat_renderer,
         camera_projection=args.splat_camera_projection,
         paper_protocol=paper_protocol,
+        target_provider=train_target_provider,
     )
     splat_eval = eval_free_splats(
         splat_model,
@@ -6072,6 +7676,8 @@ def run_dynamic_splats_lane(
         camera_projection=args.splat_camera_projection,
         chunk_frames=eval_chunk_frames,
         media_max_frames=eval_media_max_frames,
+        train_target_provider=train_target_provider,
+        heldout_target_provider=heldout_target_provider,
     )
     save_first_row_media(
         out_dir,
@@ -6093,6 +7699,11 @@ def run_dynamic_splats_lane(
         "fast_mac_options": splat_render_cfg.fast_mac_options,
         **splat_train,
         "metrics": splat_eval["metrics"],
+        "target_streaming": target_streaming_accounting(
+            bundle,
+            train_target_provider=train_target_provider,
+            heldout_target_provider=heldout_target_provider,
+        ),
     }
 
 
@@ -6346,6 +7957,18 @@ def main() -> None:
     parser.add_argument("--eval-chunk-frames", type=int, default=4)
     parser.add_argument("--eval-media-max-frames", type=int, default=32)
     parser.add_argument(
+        "--paper-target-cache-frames",
+        type=int,
+        default=8,
+        help="Maximum decoded MP4 targets retained by each paper split.",
+    )
+    parser.add_argument(
+        "--paper-target-identity-chunk-frames",
+        type=int,
+        default=16,
+        help="Bounded per-view decode chunk used for exact dataset identities.",
+    )
+    parser.add_argument(
         "--frozen-world-replay-compiled",
         action="store_true",
         help=(
@@ -6390,6 +8013,43 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--frozen-world-camera-program-mode",
+        choices=(
+            STATIC_CAMERA_PROGRAM_MODE,
+            BOUNDED_YAW_CAMERA_PROGRAM_MODE,
+        ),
+        default=STATIC_CAMERA_PROGRAM_MODE,
+        help=(
+            "Keep the historical static-view route or run the frozen "
+            "checkpoint through the bounded 45-degree projective yaw program."
+        ),
+    )
+    parser.add_argument(
+        "--frozen-world-yaw-total-degrees",
+        type=float,
+        default=BOUNDED_YAW_TOTAL_DEGREES,
+        help="Frozen bounded-yaw contract; the paper route requires exactly 45.",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        help=(
+            "Accepted static frozen-world checkpoint. Only the bounded-yaw "
+            "checkpoint-only route accepts this input."
+        ),
+    )
+    parser.add_argument(
+        "--expected-checkpoint-sha256",
+        default=None,
+        help="Required exact file SHA-256 for --checkpoint.",
+    )
+    parser.add_argument(
+        "--expected-world-state-sha256",
+        default=None,
+        help="Required exact learned-world SHA-256 for --checkpoint.",
+    )
+    parser.add_argument(
         "--allow-paper-local-mps-execution",
         action="store_true",
         help="Required for paper-protocol MPS execution; the unified runner owns the safety preflight.",
@@ -6409,6 +8069,46 @@ def main() -> None:
     args = parser.parse_args()
     frozen_world_frame_counts = parse_frozen_world_frame_counts(
         args.frozen_world_frame_counts
+    )
+    requested_image_size = normalize_image_size(args.target_size)
+    moving_camera_checkpoint_mode = (
+        args.frozen_world_camera_program_mode
+        == BOUNDED_YAW_CAMERA_PROGRAM_MODE
+    )
+    checkpoint_flags_supplied = any(
+        value is not None
+        for value in (
+            args.checkpoint,
+            args.expected_checkpoint_sha256,
+            args.expected_world_state_sha256,
+        )
+    )
+    frozen_world_camera_program = validate_frozen_world_camera_program_request(
+        mode=args.frozen_world_camera_program_mode,
+        frame_counts=frozen_world_frame_counts or (),
+        image_size=requested_image_size.as_list(),
+        yaw_total_degrees=args.frozen_world_yaw_total_degrees,
+        checkpoint_supplied=args.checkpoint is not None,
+    )
+    if not moving_camera_checkpoint_mode and checkpoint_flags_supplied:
+        raise ValueError(
+            "static frozen-world execution does not accept checkpoint identity flags"
+        )
+    expected_checkpoint_sha256 = (
+        validate_expected_sha256(
+            args.expected_checkpoint_sha256,
+            name="--expected-checkpoint-sha256",
+        )
+        if moving_camera_checkpoint_mode
+        else None
+    )
+    expected_world_state_sha256 = (
+        validate_expected_sha256(
+            args.expected_world_state_sha256,
+            name="--expected-world-state-sha256",
+        )
+        if moving_camera_checkpoint_mode
+        else None
     )
 
     if args.only_lane == "world_tubes":
@@ -6444,6 +8144,40 @@ def main() -> None:
             "frozen-world timing controls require "
             "--frozen-world-replay-compiled"
         )
+    if moving_camera_checkpoint_mode:
+        if not args.frozen_world_replay_compiled:
+            raise ValueError(
+                "bounded-yaw checkpoint-only execution requires "
+                "--frozen-world-replay-compiled"
+            )
+        if args.only_lane != "world_tubes":
+            raise ValueError(
+                "bounded-yaw checkpoint-only execution requires "
+                "--only-lane=world_tubes"
+            )
+        if args.frozen_world_max_frames != max(BOUNDED_YAW_FRAME_COUNTS):
+            raise ValueError(
+                "bounded-yaw checkpoint-only execution requires "
+                "--frozen-world-max-frames=64"
+            )
+        if frozen_world_frame_counts != BOUNDED_YAW_FRAME_COUNTS:
+            raise ValueError(
+                "bounded-yaw checkpoint-only execution requires frame counts "
+                "8,16,32,64"
+            )
+        if requested_image_size.as_list() != list(BOUNDED_YAW_IMAGE_SIZE):
+            raise ValueError(
+                "bounded-yaw checkpoint-only execution requires direct "
+                "--target-size=256 decoding"
+            )
+        if (
+            args.frozen_world_timing_warmups != 1
+            or args.frozen_world_timing_repeats != 5
+        ):
+            raise ValueError(
+                "bounded-yaw checkpoint-only paper timing requires one warmup "
+                "and five repeats"
+            )
     if args.frozen_world_replay_compiled:
         if args.only_lane == "dynamic_3dgs":
             raise ValueError("frozen replay/compiled comparison requires the World Tubes lane")
@@ -6455,8 +8189,23 @@ def main() -> None:
             raise ValueError("frozen replay/compiled comparison requires peak_splat")
         if args.uvt_render_backend != "metal_tile":
             raise ValueError("frozen replay/compiled comparison requires metal_tile")
-        if args.uvt_camera_sequence_mode != "static_view":
-            raise ValueError("frozen replay/compiled comparison requires static_view")
+        required_camera_sequence_mode = (
+            "projective_first_order"
+            if moving_camera_checkpoint_mode
+            else "static_view"
+        )
+        if args.uvt_camera_sequence_mode != required_camera_sequence_mode:
+            raise ValueError(
+                "frozen replay/compiled comparison requires "
+                f"{required_camera_sequence_mode}"
+            )
+        if (
+            moving_camera_checkpoint_mode
+            and args.uvt_camera_projection != "legacy_pinhole"
+        ):
+            raise ValueError(
+                "bounded-yaw checkpoint-only execution requires legacy_pinhole"
+            )
         if any(
             (
                 args.uvt_synthetic_pan_x,
@@ -6481,8 +8230,10 @@ def main() -> None:
         raise ValueError("--paper-protocol requires enabled=true")
     if paper_protocol is not None and args.uvt_loss_scope != "paper_batch":
         raise ValueError("--paper-protocol requires --uvt-loss-scope=paper_batch")
-    load_image_size = normalize_image_size(args.target_size)
+    load_image_size = requested_image_size
     if paper_protocol is not None:
+        from paper_local_resources import configure_local_mps
+        configure_local_mps(paper_protocol, str(device))
         protocol_stages = normalize_paper_stages(
             paper_protocol.get("stages"),
             total_steps=args.max_steps,
@@ -6490,7 +8241,11 @@ def main() -> None:
             default_primitive_count=args.uvt_tubes,
             default_frames_per_step=int(paper_protocol.get("frames_per_step", 1)),
         )
-        load_image_size = protocol_stages[-1].image_size
+        load_image_size = (
+            normalize_image_size(BOUNDED_YAW_IMAGE_SIZE)
+            if moving_camera_checkpoint_mode
+            else protocol_stages[-1].image_size
+        )
     data_cfg = apply_paper_dataset_contract(
         config_data_for_run(config, target_size=args.target_size, max_frames=args.max_frames),
         paper_protocol,
@@ -6504,6 +8259,54 @@ def main() -> None:
         target_size=(load_image_size.height, load_image_size.width),
         device=device,
         frame_device=torch.device("cpu") if paper_protocol is not None else device,
+        defer_video_frames=paper_protocol is not None,
+    )
+    train_target_provider = (
+        PaperMulticamTargetProvider(
+            bundle.train_frame_sources,
+            cache_capacity_frames=args.paper_target_cache_frames,
+        )
+        if bundle.deferred_target_frames
+        else None
+    )
+    heldout_target_provider = (
+        PaperMulticamTargetProvider(
+            bundle.heldout_frame_sources,
+            cache_capacity_frames=args.paper_target_cache_frames,
+        )
+        if bundle.deferred_target_frames
+        else None
+    )
+    if moving_camera_checkpoint_mode:
+        if paper_protocol is None or int(bundle.frame_count) != 300:
+            raise ValueError(
+                "bounded-yaw checkpoint-only execution requires the frozen "
+                "300-frame paper dataset contract"
+            )
+        if (
+            train_target_provider is None
+            or heldout_target_provider is None
+            or (train_target_provider.height, train_target_provider.width)
+            != BOUNDED_YAW_IMAGE_SIZE
+            or (heldout_target_provider.height, heldout_target_provider.width)
+            != BOUNDED_YAW_IMAGE_SIZE
+        ):
+            raise ValueError(
+                "bounded-yaw targets were not configured for bounded direct "
+                "256x256 decoding"
+            )
+    decoded_frame_identities = (
+        {
+            "train_frames": train_target_provider.tensor_content_identity(
+                chunk_frames=args.paper_target_identity_chunk_frames,
+            ),
+            "heldout_frames": heldout_target_provider.tensor_content_identity(
+                chunk_frames=args.paper_target_identity_chunk_frames,
+            ),
+        }
+        if train_target_provider is not None
+        and heldout_target_provider is not None
+        else None
     )
     backward_policy = None
     if args.uvt_backward_policy != "manual":
@@ -6668,7 +8471,33 @@ def main() -> None:
         "paper_dataset_bundle": paper_dataset_bundle_identity(
             bundle,
             image_size=load_image_size,
+            decoded_frame_identities=decoded_frame_identities,
         ),
+        "paper_target_streaming": {
+            "schema_version": 1,
+            "enabled": bool(bundle.deferred_target_frames),
+            "source_kind": (
+                "paper_video_seek_bounded_lru"
+                if bundle.deferred_target_frames
+                else "eager_dataset_adapter"
+            ),
+            "cache_capacity_frames_per_split": args.paper_target_cache_frames,
+            "identity_chunk_frames": args.paper_target_identity_chunk_frames,
+            "canonical_decode_size": load_image_size.as_list(),
+            "stage_resize_after_decode": True,
+            "full_video_tensor_materialization_allowed": not bool(
+                bundle.deferred_target_frames
+            ),
+            "dense_fallback_reason": (
+                None
+                if bundle.deferred_target_frames
+                else (
+                    "dnerf_image_sequence_adapter"
+                    if paper_protocol is not None
+                    else "paper_protocol_disabled"
+                )
+            ),
+        },
         "paper_evaluator": paper_evaluator_contract(),
         "paper_runtime": paper_runtime_identity(),
         "route_native_extension": (
@@ -6742,6 +8571,46 @@ def main() -> None:
         "frozen_world_timing_repeats": (
             args.frozen_world_timing_repeats
         ),
+        "frozen_world_camera_program_mode": (
+            args.frozen_world_camera_program_mode
+        ),
+        "frozen_world_camera_program": frozen_world_camera_program,
+        "compiler_chart_policy": (
+            "single_midpoint_first_order"
+            if moving_camera_checkpoint_mode
+            else None
+        ),
+        "multi_chart_gauge_compiler": (
+            False if moving_camera_checkpoint_mode else None
+        ),
+        "frozen_world_compiler_chart_policy": (
+            "single_midpoint_first_order"
+            if moving_camera_checkpoint_mode
+            else None
+        ),
+        "frozen_world_multi_chart_gauge_compiler": (
+            False if moving_camera_checkpoint_mode else None
+        ),
+        "frozen_world_yaw_total_degrees": (
+            args.frozen_world_yaw_total_degrees
+        ),
+        "frozen_world_checkpoint_only": moving_camera_checkpoint_mode,
+        "frozen_world_input_checkpoint": (
+            None
+            if args.checkpoint is None
+            else str(args.checkpoint.expanduser().resolve())
+        ),
+        "frozen_world_expected_checkpoint_sha256": (
+            expected_checkpoint_sha256
+        ),
+        "frozen_world_expected_world_state_sha256": (
+            expected_world_state_sha256
+        ),
+        "frozen_world_target_resize_mode": (
+            "direct_decode_256"
+            if moving_camera_checkpoint_mode
+            else None
+        ),
         "star_uvt_native_extension": star_uvt_native_extension_identity(),
         "train_lens_models": bundle.train_lens_models,
         "heldout_lens_models": bundle.heldout_lens_models,
@@ -6766,11 +8635,78 @@ def main() -> None:
                 out_dir=out_dir,
                 eval_chunk_frames=args.eval_chunk_frames,
                 eval_media_max_frames=args.eval_media_max_frames,
+                train_target_provider=train_target_provider,
+                heldout_target_provider=heldout_target_provider,
             ),
         }
         write_json(out_dir / "comparison_report.json", report)
         print(json.dumps(report, indent=2, sort_keys=True))
         print(f"Wrote dynamic-3DGS-only multicam comparison to {out_dir}")
+        return
+    if moving_camera_checkpoint_mode:
+        if (
+            args.checkpoint is None
+            or expected_checkpoint_sha256 is None
+            or expected_world_state_sha256 is None
+            or frozen_world_camera_program is None
+        ):
+            raise RuntimeError(
+                "bounded-yaw checkpoint identity was not normalized"
+            )
+        uvt_model, loaded_checkpoint = _load_frozen_world_checkpoint(
+            args.checkpoint,
+            device=device,
+            expected_file_sha256=expected_checkpoint_sha256,
+            expected_world_state_sha256=expected_world_state_sha256,
+            expected_full_frames=int(bundle.frame_count),
+        )
+        frozen_world_report, frozen_world_sweep = (
+            frozen_world_replay_compiled_sweep_report(
+                uvt_model,
+                bundle,
+                render_config=render_config,
+                camera_projection=args.uvt_camera_projection,
+                out_dir=out_dir,
+                primary_max_frames=args.frozen_world_max_frames,
+                requested_frame_counts=frozen_world_frame_counts,
+                timing_warmups=args.frozen_world_timing_warmups,
+                timing_repeats=args.frozen_world_timing_repeats,
+                heldout_target_provider=heldout_target_provider,
+                checkpoint=loaded_checkpoint,
+                camera_program_mode=args.frozen_world_camera_program_mode,
+                camera_program=frozen_world_camera_program,
+            )
+        )
+        report = {
+            "meta": run_meta,
+            "star_uvt": {
+                "tube_count": int(uvt_model.tube_count),
+                "active_tube_count": int(uvt_model.active_tube_count),
+                "world_representation": uvt_model.representation_name,
+                "alpha_mode": render_config.alpha_mode,
+                "opacity_semantics": render_config.opacity_semantics,
+                "render_backend": args.uvt_render_backend,
+                "camera_projection": args.uvt_camera_projection,
+                "camera_sequence_mode": args.uvt_camera_sequence_mode,
+                "training_skipped": True,
+                "checkpoint_loaded_not_trained": loaded_checkpoint,
+                "target_streaming": target_streaming_accounting(
+                    bundle,
+                    train_target_provider=train_target_provider,
+                    heldout_target_provider=heldout_target_provider,
+                ),
+                "frozen_world_replay_compiled": frozen_world_report,
+                "frozen_world_replay_compiled_sweep": frozen_world_sweep,
+            },
+            "star_uvt_selected": None,
+            "free_dynamic_splats": None,
+        }
+        write_json_atomic(out_dir / "comparison_report.json", report)
+        print(json.dumps(report, indent=2, sort_keys=True))
+        print(
+            "Wrote checkpoint-only bounded-yaw frozen-world comparison "
+            f"to {out_dir}"
+        )
         return
     uvt_model, uvt_train, uvt_checkpoints = train_world_tubes(
         bundle=bundle,
@@ -6829,6 +8765,7 @@ def main() -> None:
         reduction_mode=args.uvt_reduction_mode,
         sample_emission_mode=args.uvt_sample_emission_mode,
         paper_protocol=paper_protocol,
+        target_provider=train_target_provider,
         world_representation=args.uvt_world_representation,
         spd4_min_spatial_scale=args.uvt_spd4_min_spatial_scale,
         spd4_init_precision_z=args.uvt_spd4_init_precision_z,
@@ -6876,6 +8813,8 @@ def main() -> None:
         frame_metric_splits=uvt_frame_metric_splits,
         chunk_frames=args.eval_chunk_frames,
         media_max_frames=args.eval_media_max_frames,
+        train_target_provider=train_target_provider,
+        heldout_target_provider=heldout_target_provider,
     )
     uvt_checkpoint_curve = eval_world_tube_checkpoints(
         uvt_model,
@@ -6893,6 +8832,9 @@ def main() -> None:
         synthetic_principal_y=args.uvt_synthetic_principal_y,
         render_config=render_config,
         frame_metric_splits=uvt_frame_metric_splits,
+        chunk_frames=args.eval_chunk_frames,
+        train_target_provider=train_target_provider,
+        heldout_target_provider=heldout_target_provider,
     )
     selected_report: dict[str, Any] | None = None
     if args.uvt_select_checkpoint != "none":
@@ -6927,6 +8869,8 @@ def main() -> None:
             frame_metric_splits=uvt_frame_metric_splits,
             chunk_frames=args.eval_chunk_frames,
             media_max_frames=args.eval_media_max_frames,
+            train_target_provider=train_target_provider,
+            heldout_target_provider=heldout_target_provider,
         )
         save_first_row_media(
             out_dir,
@@ -6955,6 +8899,7 @@ def main() -> None:
                 camera_sequence_mode=args.uvt_camera_sequence_mode,
                 segment_frames=args.uvt_segment_frames,
                 render_config=render_config,
+                chunk_frames=args.eval_chunk_frames,
             )
             if (
                 args.uvt_render_backend == "metal_tile"
@@ -6975,6 +8920,7 @@ def main() -> None:
             camera_sequence_mode=args.uvt_camera_sequence_mode,
             segment_frames=args.uvt_segment_frames,
             render_config=render_config,
+            chunk_frames=args.eval_chunk_frames,
         )
         if (
             args.uvt_render_backend == "metal_tile"
@@ -7002,6 +8948,7 @@ def main() -> None:
                 requested_frame_counts=frozen_world_frame_counts,
                 timing_warmups=args.frozen_world_timing_warmups,
                 timing_repeats=args.frozen_world_timing_repeats,
+                heldout_target_provider=heldout_target_provider,
             )
         )
     else:
@@ -7017,6 +8964,8 @@ def main() -> None:
             out_dir=out_dir,
             eval_chunk_frames=args.eval_chunk_frames,
             eval_media_max_frames=args.eval_media_max_frames,
+            train_target_provider=train_target_provider,
+            heldout_target_provider=heldout_target_provider,
         )
 
     report = {
@@ -7103,6 +9052,11 @@ def main() -> None:
             "metal_stats": uvt_metal_stats,
             "frozen_world_replay_compiled": frozen_world_report,
             "frozen_world_replay_compiled_sweep": frozen_world_sweep,
+            "target_streaming": target_streaming_accounting(
+                bundle,
+                train_target_provider=train_target_provider,
+                heldout_target_provider=heldout_target_provider,
+            ),
         },
         "star_uvt_selected": selected_report,
         "free_dynamic_splats": splat_report,
